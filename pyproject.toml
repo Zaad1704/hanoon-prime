@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hanoon-prime"
+version = "1.0.0"
+description = "HANOON Prime: a minimal, profit-first trading system. IB → JULI → Entry/Hold/Exit + Learning"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0",
+]
+ib = [
+    "ib_insync>=0.9.0",
+]
+live = [
+    "ib_insync>=0.9.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --strict-markers --tb=short"
+markers = [
+    "contract: architectural contract tests (always run)",
+    "backtest: backtest/profitability tests (slow)",
+    "unit: unit tests",
+    "live: tests requiring IB connection",
+]
+
+[tool.coverage.run]
+source = ["src/hanoon_prime"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E501", "C901", "PLR0912", "PLR0913"]
+ignore = ["E501", "E701"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["C901", "E701"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

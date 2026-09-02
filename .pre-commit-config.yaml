@@ -1,0 +1,41 @@
+# Pre-commit config — enforces architectural rules locally before any commit.
+# If you can't commit, you can't break the main branch.
+
+repos:
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        args: [--line-length=88]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.13
+    hooks:
+      - id: ruff
+        args: [--select=E501,C901]
+
+  - repo: local
+    hooks:
+      # R3: complexity + line limits
+      - id: complexity-check
+        name: Complexity check (40 lines max, 3 nest max)
+        entry: python scripts/check_complexity.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R3b: file length (200 lines max for source)
+      - id: file-length-check
+        name: File length check (200 lines max)
+        entry: bash scripts/check_file_length.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R1: single decision path
+      - id: contract-tests
+        name: Architectural contract tests
+        entry: pytest tests/test_contract.py -v
+        language: system
+        pass_filenames: false
+        always_run: true
