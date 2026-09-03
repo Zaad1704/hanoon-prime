@@ -140,8 +140,7 @@ class IBStreamingBot:
         if time.monotonic() - started < poll_interval:
             time.sleep(poll_interval - (time.monotonic() - started))
         self._heartbeat()
-        if bars:
-            log.info("CYCLE bars=%d open=%d", bars, len(self.brain._open_positions))
+        log.info("CYCLE bars=%d open=%d", bars, len(self.brain._open_positions))
     def _heartbeat(self) -> None:
         now = time.monotonic()
         if now - self._last_beat < 60.0:
