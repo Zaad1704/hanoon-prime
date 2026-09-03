@@ -105,7 +105,7 @@ class IBStreamingBot:
         tk = self.streamer.ticker_subs.get(sym)
         if tk is None or not tk.hasBidAsk():
             return None
-        base = {"bid": float(tk.bid), "ask": float(tk.ask),
+        base: dict[str, Any] = {"bid": float(tk.bid), "ask": float(tk.ask),
                 "last": float(tk.last or tk.close or 0),
                 "volume": float(tk.volume or 0),
                 "daily_volume": float(tk.volume or 0)}

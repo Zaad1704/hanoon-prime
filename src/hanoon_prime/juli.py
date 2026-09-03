@@ -42,6 +42,7 @@ class JuliBrain:
         self._candidates: list[ScanResult] = []
         self._eligible: list[ThalamusVerdict] = []
         self._last_scan: float = 0.0
+        self._last_alloc: float = 0.0
 
     def tick(self, positions: set[str], get_snapshot: Any) -> list[dict[str, Any]]:
         """One brain cycle. Returns list of decisions."""
@@ -61,7 +62,6 @@ class JuliBrain:
             log.warning("Scan start failed: %s", e)
 
     def _collect_scan(self) -> None:
-        """Poll scanner for results each cycle."""
         try:
             self._candidates = self.scanner.collect()
         except Exception as e:
@@ -95,7 +95,10 @@ class JuliBrain:
         )
 
     def _maybe_allocate(self, positions: set[str]) -> None:
-        """Allocate data budget."""
+        now = time.time()
+        if now - self._last_alloc < 5.0:
+            return
+        self._last_alloc = now
         candidates = [s.ticker for s in self._eligible[:MAX_CANDIDATES]]
         to_sub, to_unsub = self.budget.allocate(positions, candidates)
         if to_sub or to_unsub:
