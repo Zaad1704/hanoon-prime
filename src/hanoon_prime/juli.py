@@ -100,9 +100,10 @@ class JuliBrain:
             )
 
     def _evaluate(self, positions: set[str], get_snapshot: Any) -> list[dict[str, Any]]:
-        """Evaluate all tracked tickers."""
+        """Evaluate all tracked tickers + open positions."""
         decisions: list[dict[str, Any]] = []
-        for ticker in self.budget.get_all_tracked():
+        all_tickers = self.budget.get_all_tracked() | positions
+        for ticker in all_tickers:
             snap = get_snapshot(ticker)
             if snap is None:
                 continue

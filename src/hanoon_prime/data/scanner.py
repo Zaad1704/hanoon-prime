@@ -14,30 +14,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..ib_compat import ib
-from ..immune import IB_HOST, IB_PAPER_PORT
-
 log = logging.getLogger(__name__)
-
-# Scan configurations for different market conditions
 SCAN_CONFIGS: dict[str, dict[str, Any]] = {
     "hot_volume": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
         "scanCode": "HOT_ACTIVE_US",
-        "aboveVolume": 1_000_000,
     },
     "top_gainers": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
         "scanCode": "TOP_VOLUME_GAIN",
-        "aboveVolume": 500_000,
-    },
-    "high_volatility": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "HOT_ACTIVE_US",
-        "aboveVolume": 2_000_000,
     },
 }
 
@@ -49,9 +36,6 @@ class ScanResult:
     symbol: str
     contract: Any = None
     rank: int = 0
-    distance: str = ""
-    benchmark: str = ""
-    projection: str = ""
     scan_name: str = ""
     discovered_at: float = field(default_factory=time.time)
 
@@ -63,8 +47,8 @@ class IBScanner:
         self.ib = ib_client
         self._results: dict[str, ScanResult] = {}
         self._last_scan: float = 0.0
-        self._scan_interval: float = 300.0  # 5 minutes
-        self._active_subs: dict[int, str] = {}
+        self._scan_interval: float = 300.0
+        self._scan_list: Any = None
 
     def scan(self, config_name: str = "hot_volume") -> list[ScanResult]:
         """Run a scanner subscription and collect results."""
@@ -76,16 +60,10 @@ class IBScanner:
             sub.instrument = config["instrument"]
             sub.locationCode = config["locationCode"]
             sub.scanCode = config["scanCode"]
-            sub.aboveVolume = config.get("aboveVolume", 1_000_000)
             sub.numberOfRows = 50
-            filters = []
-            if "aboveVolume" in config:
-                filters.append(TagValue("volumeAbove", str(config["aboveVolume"])))
-            req_id = int(time.time() * 1000) % 100000
-            self.ib.reqScannerSubscription(req_id, sub, [], filters)
-            self._active_subs[req_id] = config_name
+            self._scan_list = self.ib.reqScannerSubscription(sub, [], [])
             self._last_scan = time.time()
-            log.info("Scanner started: %s (reqId=%d)", config_name, req_id)
+            log.info("Scanner started: %s", config_name)
             return []
         except Exception as e:
             log.warning("Scanner failed: %s", e)
@@ -105,24 +83,18 @@ class IBScanner:
         try:
             contract = contract_details.contract
             sym = contract.symbol
-            result = ScanResult(
+            self._results[sym] = ScanResult(
                 symbol=sym,
                 contract=contract,
                 rank=rank,
-                distance=distance,
-                benchmark=benchmark,
-                projection=projection,
-                scan_name=self._active_subs.get(req_id, ""),
             )
-            self._results[sym] = result
         except Exception as e:
             log.debug("Scan data parse error: %s", e)
 
     def on_scan_end(self, req_id: int) -> None:
         """Handle scan completion callback."""
-        scan_name = self._active_subs.pop(req_id, "unknown")
         count = len(self._results)
-        log.info("Scanner '%s' complete: %d candidates", scan_name, count)
+        log.info("Scanner complete: %d candidates", count)
 
     def get_candidates(self) -> list[ScanResult]:
         """Return current scan results sorted by rank."""
@@ -132,12 +104,12 @@ class IBScanner:
 
     def cancel_all(self) -> None:
         """Cancel all active scanner subscriptions."""
-        for req_id in list(self._active_subs):
+        if self._scan_list:
             try:
-                self.ib.cancelScannerSubscription(req_id)
+                self.ib.cancelScannerSubscription(self._scan_list)
             except Exception as e:
                 log.debug("cancel scan skip: %s", e)
-        self._active_subs.clear()
+            self._scan_list = None
         self._results.clear()
 
     def should_scan(self) -> bool:

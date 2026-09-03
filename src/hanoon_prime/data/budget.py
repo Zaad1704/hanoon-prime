@@ -73,23 +73,17 @@ class DataBudget:
         return to_sub, to_unsub
 
     def _diff(self, target: dict[str, str]) -> tuple[dict[str, str], set[str]]:
-        """Compare current slots with target. Returns changes."""
+        """Compare current slots with target. Returns only actual changes."""
         to_sub: dict[str, str] = {}
         to_unsub: set[str] = set()
-
         for sym, slot in list(self.slots.items()):
             if sym not in target:
                 to_unsub.add(sym)
             elif slot.tier != target[sym]:
-                to_unsub.add(sym)
                 to_sub[sym] = target[sym]
-            else:
-                to_sub[sym] = slot.tier
-
         for sym, tier in target.items():
             if sym not in self.slots:
                 to_sub[sym] = tier
-
         return to_sub, to_unsub
 
     def _apply(self, target: dict[str, str]) -> None:
