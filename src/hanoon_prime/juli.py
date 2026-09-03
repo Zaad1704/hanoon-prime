@@ -46,22 +46,26 @@ class JuliBrain:
     def tick(self, positions: set[str], get_snapshot: Any) -> list[dict[str, Any]]:
         """One brain cycle. Returns list of decisions."""
         self._maybe_scan()
+        self._collect_scan()
         self._maybe_screen(get_snapshot)
         self._maybe_allocate(positions)
         return self._evaluate(positions, get_snapshot)
 
     def _maybe_scan(self) -> None:
-        """Run scanner every 5 minutes."""
-        now = time.time()
-        if now - self._last_scan < SCANNER_INTERVAL:
+        """Start scanner every 5 minutes."""
+        if not self.scanner.should_scan():
             return
-        self._last_scan = now
         try:
             self.scanner.scan("most_active")
-            self._candidates = self.scanner.get_candidates()
-            log.info("SCAN: %d raw candidates", len(self._candidates))
         except Exception as e:
-            log.warning("Scan failed: %s", e)
+            log.warning("Scan start failed: %s", e)
+
+    def _collect_scan(self) -> None:
+        """Poll scanner for results each cycle."""
+        try:
+            self._candidates = self.scanner.collect()
+        except Exception as e:
+            log.debug("Scan collect error: %s", e)
 
     def _maybe_screen(self, get_snapshot: Any) -> None:
         """Screen candidates through thalamus."""
@@ -84,7 +88,10 @@ class JuliBrain:
         self._eligible = self.thalamus.rank(screened)
         syms = [s.ticker for s in self._eligible[:10]]
         log.info(
-            "THALAMUS: %d/%d — %s", len(self._eligible), len(self._candidates), syms
+            "THALAMUS: %d/%d — %s",
+            len(self._eligible),
+            len(self._candidates),
+            syms,
         )
 
     def _maybe_allocate(self, positions: set[str]) -> None:

@@ -3,10 +3,10 @@
 Discovers trading candidates using IB's built-in scanner.
 Replaces hardcoded ticker lists with dynamic discovery.
 
-Scanner returns contracts only — no market data.
-Must call reqMktData separately for bid/ask/last.
-Max 50 results per scan, 10 active scans.
+Scanner returns ScanDataList that auto-populates via events.
+We poll the list to extract results. Max 50 results per scan.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,7 +41,6 @@ class ScanResult:
     symbol: str
     contract: Any = None
     rank: int = 0
-    scan_name: str = ""
     discovered_at: float = field(default_factory=time.time)
 
 
@@ -54,52 +53,52 @@ class IBScanner:
         self._last_scan: float = 0.0
         self._scan_interval: float = 300.0
         self._scan_list: Any = None
+        self._scan_started: float = 0.0
 
-    def scan(self, config_name: str = "most_active") -> list[ScanResult]:
-        """Run a scanner subscription and collect results."""
+    def scan(self, config_name: str = "most_active") -> int:
+        """Start a scanner subscription. Returns count (0=started async)."""
         config = SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])
         try:
-            from ib_insync import ScannerSubscription, TagValue
+            from ib_insync import ScannerSubscription
 
+            self.cancel_all()
             sub = ScannerSubscription()
             sub.instrument = config["instrument"]
             sub.locationCode = config["locationCode"]
             sub.scanCode = config["scanCode"]
             sub.numberOfRows = 50
             self._scan_list = self.ib.reqScannerSubscription(sub, [], [])
+            self._scan_started = time.time()
             self._last_scan = time.time()
             log.info("Scanner started: %s", config_name)
-            return []
+            return 0
         except Exception as e:
-            log.warning("Scanner failed: %s", e)
-            return []
+            log.warning("Scanner start failed: %s", e)
+            self._last_scan = time.time()
+            return 0
 
-    def on_scan_data(
-        self,
-        req_id: int,
-        rank: int,
-        contract_details: Any,
-        distance: str,
-        benchmark: str,
-        projection: str,
-        legs: str,
-    ) -> None:
-        """Handle scanner data callback from IB."""
+    def collect(self) -> list[ScanResult]:
+        """Poll the live ScanDataList for new results. Call each cycle."""
+        if self._scan_list is None:
+            return []
         try:
-            contract = contract_details.contract
-            sym = contract.symbol
-            self._results[sym] = ScanResult(
-                symbol=sym,
-                contract=contract,
-                rank=rank,
-            )
+            for item in self._scan_list:
+                sym = item.contractDetails.contract.symbol
+                if sym not in self._results:
+                    self._results[sym] = ScanResult(
+                        symbol=sym,
+                        contract=item.contractDetails.contract,
+                        rank=item.rank,
+                    )
         except Exception as e:
-            log.debug("Scan data parse error: %s", e)
-
-    def on_scan_end(self, req_id: int) -> None:
-        """Handle scan completion callback."""
-        count = len(self._results)
-        log.info("Scanner complete: %d candidates", count)
+            log.debug("Scan collect error: %s", e)
+        elapsed = time.time() - self._scan_started
+        if elapsed > 10.0 and self._scan_list is not None:
+            count = len(self._results)
+            if count > 0:
+                log.info("Scanner collected: %d candidates", count)
+            self._scan_list = None
+        return self.get_candidates()
 
     def get_candidates(self) -> list[ScanResult]:
         """Return current scan results sorted by rank."""
@@ -109,7 +108,7 @@ class IBScanner:
 
     def cancel_all(self) -> None:
         """Cancel all active scanner subscriptions."""
-        if self._scan_list:
+        if self._scan_list is not None:
             try:
                 self.ib.cancelScannerSubscription(self._scan_list)
             except Exception as e:
