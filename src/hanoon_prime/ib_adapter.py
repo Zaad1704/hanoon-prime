@@ -27,10 +27,8 @@ log = logging.getLogger(__name__)
 MAX_RECONNECT = 5
 RECONNECT_DELAY = 5
 
-
 class SafetyNetStopped(Exception):
     """Raised when a hard safety net triggers."""
-
 
 def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
     """Count actual positions in IB for tracked tickers."""
@@ -38,7 +36,6 @@ def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
         return len([p for p in ib_client.positions() if p.contract.symbol in tracked])
     except Exception:
         return 0
-
 
 def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
     """Try to connect once. Returns True on success."""
@@ -48,7 +45,6 @@ def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
     except Exception as e:
         log.warning("Connection failed: %s", e)
         return False
-
 
 class IBStreamingBot:
     """Live bot: IB Gateway stream → brain → bracket orders."""
@@ -73,20 +69,25 @@ class IBStreamingBot:
         signal.signal(signal.SIGINT, _handler)
         signal.signal(signal.SIGTERM, _handler)
 
-    def connect(
-        self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
-        client_id: int = IB_CLIENT_ID,
-    ) -> None:
+    def connect(self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
+                client_id: int = IB_CLIENT_ID) -> None:
         """Connect to IB Gateway with retry logic."""
         for attempt in range(1, MAX_RECONNECT + 1):
             log.info("Connecting to %s:%s (client=%s, attempt %d)",
                      host, port, client_id, attempt)
             if _try_connect(self.ib, host, port, client_id):
+                self._subscribe_ib_events()
                 log.info("Connected. Account: %s", self.account)
                 return
             if attempt < MAX_RECONNECT:
                 time.sleep(RECONNECT_DELAY)
         raise ConnectionError(f"Failed to connect after {MAX_RECONNECT} attempts")
+
+    def _subscribe_ib_events(self) -> None:
+        """Subscribe to IB events for executions and commissions."""
+        self.ib.execDetailsEvent += self.streamer.record_execution
+        self.ib.commissionReportEvent += self.streamer.record_commission
+        log.info("Subscribed to IB events (executions, commissions)")
 
     def _evaluate(self, ticker: str) -> Optional[Thought]:
         """Run Cortex on the latest StreamBuffer data."""
@@ -132,9 +133,7 @@ class IBStreamingBot:
             log.error("PnL subscription failed: %s", e)
             return None
 
-    def _process_cycle(
-        self, tickers: list[str], poll_interval: float, pnl: Any
-    ) -> None:
+    def _process_cycle(self, tickers: list[str], poll_interval: float, pnl: Any) -> None:
         """One iteration — IB is source of truth for everything."""
         self.executor.sync_from_ib(self.streamer)
         self._check_safety_nets(pnl)
@@ -195,6 +194,5 @@ class IBStreamingBot:
         """Connect to IB Gateway live port (4001) and run."""
         self.connect(port=IB_LIVE_PORT)
         self.run(tickers)
-
 
 __all__ = ["IBStreamingBot", "SafetyNetStopped"]

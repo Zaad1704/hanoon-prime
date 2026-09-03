@@ -1,9 +1,8 @@
-"""IB Gateway streaming data layer.
+"""hanoon_prime.ib_streamer — IB Gateway streaming data layer.
 
-Manages live market data: reqMktData (bid/ask/last/volume),
-reqMktDepth (DOM), reqHistoricalData (lookback seeding).
+Manages live market data: reqMktData, reqMktDepth, reqHistoricalData.
+Tracks executions and commissions for journal carbon copy.
 """
-
 from __future__ import annotations
 
 import logging
@@ -19,7 +18,6 @@ from .immune import DEPTH_ROWS, EDGE_LOOKBACK, LOOKBACK_BARS
 
 log = logging.getLogger(__name__)
 
-
 @dataclass
 class StreamBuffer:
     """Circular buffer holding recent bars for one ticker."""
@@ -33,16 +31,8 @@ class StreamBuffer:
     bid_sizes: list[float] = field(default_factory=list)
     ask_sizes: list[float] = field(default_factory=list)
 
-    def append(
-        self,
-        close: float,
-        high: float,
-        low: float,
-        volume: float,
-        buy_vol: float,
-        bid_size: float,
-        ask_size: float,
-    ) -> None:
+    def append(self, close: float, high: float, low: float,
+               volume: float, buy_vol: float, bid_size: float, ask_size: float) -> None:
         """Append one bar, trimming to LOOKBACK_BARS."""
         vals = (close, high, low, volume, buy_vol, bid_size, ask_size)
         attrs = [self.close, self.high, self.low, self.volume,
@@ -66,7 +56,6 @@ class StreamBuffer:
         result["ask_sizes"] = np.array(self.ask_sizes)
         return result
 
-
 class IBStreamer:
     """Manages all IB Gateway streaming subscriptions for one bot."""
 
@@ -77,9 +66,11 @@ class IBStreamer:
         self.ticker_subs: dict[str, Any] = {}
         self.depth_subs: dict[str, Any] = {}
         self._minutely: dict[str, list[Any]] = {}
+        self.executions: list[dict[str, Any]] = []
+        self.commissions: dict[str, float] = {}
 
     def subscribe(self, ticker: str) -> None:
-        """Subscribe to live market data + order book depth for one ticker."""
+        """Subscribe to live market data + order book depth."""
         contract = ib.Stock(ticker, "SMART", "USD")
         self.ib.qualifyContracts(contract)
         self.contracts[ticker] = contract
@@ -93,22 +84,16 @@ class IBStreamer:
         log.info("Subscribed to %s (mkt data + DOM)", ticker)
 
     def seed_history(self, ticker: str) -> None:
-        """Fetch 1-min historical bars (not daily - prevents ATR collapse)."""
+        """Fetch 1-min historical bars for lookback seeding."""
         contract = self.contracts[ticker]
-        bars = self.ib.reqHistoricalData(
-            contract,
-            endDateTime="",
-            durationStr="2 D",
-            barSizeSetting="1 min",
-            whatToShow="TRADES",
-            useRTH=True,
-            formatDate=1,
-        )
+        bars = self.ib.reqHistoricalData(contract, endDateTime="", durationStr="2 D",
+                                          barSizeSetting="1 min", whatToShow="TRADES",
+                                          useRTH=True, formatDate=1)
         self.ib.sleep(1)
         buf = self.buffers[ticker]
         for bar in reversed(bars):
             bv = self._est_buy_vol(bar.close, bar.high, bar.low, bar.volume)
-            buf.append(bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume)  # fmt: skip
+            buf.append(bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume)
 
     @staticmethod
     def _est_buy_vol(close: float, high: float, low: float, vol: float) -> float:
@@ -180,6 +165,24 @@ class IBStreamer:
             return 1.0
         atr = rolling_atr(np.array(buf.high), np.array(buf.low), np.array(buf.close))
         return max(atr, 1e-8) if not np.isnan(atr) else 1.0
+
+    def record_execution(self, trade: Any, fill: Any) -> None:
+        """Record an IB execution (fill) for journal carbon copy."""
+        try:
+            e = fill.execution
+            self.executions.append({"ticker": fill.contract.symbol, "action": e.side,
+                                    "shares": e.shares, "price": e.price,
+                                    "timestamp": e.time.timestamp() if e.time else time.time()})
+        except Exception:
+            pass
+
+    def record_commission(self, trade: Any, fill: Any, report: Any) -> None:
+        """Record IB commission report for journal carbon copy."""
+        try:
+            sym = fill.contract.symbol if fill.contract else ""
+            self.commissions[sym] = self.commissions.get(sym, 0.0) + float(report.commission)
+        except Exception:
+            pass
 
     def cancel_all(self) -> None:
         """Cancel all MD + depth subscriptions."""

@@ -2,11 +2,11 @@
 # ═══════════════════════════════════════════════════════════════════════
 #  monitor.command — HANOON PRIME 3.0 — Live Monitor
 #
-#  Shows running process status + tails the primary bot log in
-#  a split pane. Uses tmux if available; falls back to plain tail.
+#  Shows running process status + tails the primary bot log.
+#  Uses tmux if available; falls back to plain tail.
 #
 #  Usage:  bash monitor.command
-#  Stop:   Ctrl+C (tmuxp session left intact for re-attaching)
+#  Stop:   Ctrl+C
 # ═══════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
@@ -39,7 +39,6 @@ show_status() {
       warn "Prime bot  ✗ PID file stale"
     fi
   else
-    # Check by process name
     _pid=$(pgrep -f "hanoon_prime.cli" 2>/dev/null | head -1)
     if [[ -n "$_pid" ]]; then
       ok "Prime bot  ✓ PID $_pid  (running but no PID file)"
@@ -85,15 +84,6 @@ show_status() {
     warn "Telegram     ✗ Not running"
   fi
 
-  # Overnight monitor
-  _om_pid=$(pgrep -f "overnight_monitor" | head -1)
-  if [[ -n "$_om_pid" ]]; then
-    ok "Overnight    ✓ PID $_om_pid"
-    found=true
-  else
-    warn "Overnight    ✗ Not running"
-  fi
-
   # TelemetryAPI
   if curl -sf --max-time 2 "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
     ok "Telemetry    ✓ http://127.0.0.1:8080"
@@ -125,32 +115,44 @@ hdr "═════════════════════════
 echo ""
 
 # Use tmux if available for a nicer split-pane experience
-# Filter out verbose ib_insync Error 10147 spam (already-cancelled orders)
-# so the live tail stays readable.
-_tail_filter='grep -v "Error 10147.*OrderId 0.*not found" || true'
-
 if command -v tmux >/dev/null 2>&1 && [[ -z "${TMUX:-}" ]]; then
   if [[ ! -f "$LOG_DIR/hanoon_prime.log" ]]; then
     warn "No log file at $LOG_DIR/hanoon_prime.log"
     log "Waiting for bot to start... (run: bash start.command)"
-    tail -f /dev/null
-  else
-    _session="hanoon_monitor"
-    tmux kill-session -t "$_session" 2>/dev/null || true
-    tmux new-session -d -s "$_session" "tail -f $LOG_DIR/hanoon_prime.log | grep -v 'Error 10147.*OrderId 0.*not found'" 2>/dev/null
-    if [[ -f "$LOG_DIR/overnight_monitor.log" ]]; then
-      tmux split-window -t "$_session" -h "tail -f $LOG_DIR/overnight_monitor.log | grep -v 'Error 10147.*OrderId 0.*not found'" 2>/dev/null
-      tmux select-layout -t "$_session" tiled 2>/dev/null
-    fi
-    tmux attach-session -t "$_session"
+    # Create the log file if it doesn't exist so tail can follow it
+    touch "$LOG_DIR/hanoon_prime.log"
   fi
+
+  _session="hanoon_monitor"
+  tmux kill-session -t "$_session" 2>/dev/null || true
+
+  # Main bot log (left pane)
+  tmux new-session -d -s "$_session" \
+    "tail -f '$LOG_DIR/hanoon_prime.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+
+  # HALIM log (right pane, if exists)
+  if [[ -f "$LOG_DIR/halim_serve.log" ]]; then
+    tmux split-window -t "$_session" -h \
+      "tail -f '$LOG_DIR/halim_serve.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+  fi
+
+  # Health check bottom pane (if overnight monitor exists)
+  if [[ -f "$LOG_DIR/overnight_monitor.log" ]]; then
+    tmux split-window -t "$_session" -v \
+      "tail -f '$LOG_DIR/overnight_monitor.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+  fi
+
+  tmux select-layout -t "$_session" tiled 2>/dev/null
+  tmux attach-session -t "$_session"
 else
-  # Fallback: plain tail
+  # Fallback: plain tail with color highlighting
   if [[ -f "$LOG_DIR/hanoon_prime.log" ]]; then
-    tail -f "$LOG_DIR/hanoon_prime.log" | grep -v "Error 10147.*OrderId 0.*not found"
+    tail -f "$LOG_DIR/hanoon_prime.log" 2>/dev/null | grep --line-buffered -v "Error 10147.*OrderId 0.*not found"
   else
     warn "No log file at $LOG_DIR/hanoon_prime.log"
     log "Waiting for bot to start... (run: bash start.command)"
-    tail -f /dev/null
+    # Create and follow the log file
+    touch "$LOG_DIR/hanoon_prime.log"
+    tail -f "$LOG_DIR/hanoon_prime.log" 2>/dev/null
   fi
 fi
