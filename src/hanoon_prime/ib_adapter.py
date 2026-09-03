@@ -31,7 +31,6 @@ def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
         return len([p for p in ib_client.positions() if p.contract.symbol in tracked])
     except Exception:
         return 0
-
 def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
     """Try to connect once. Returns True on success."""
     try:
@@ -40,10 +39,8 @@ def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
     except Exception as e:
         log.warning("Connection failed: %s", e)
         return False
-
 class IBStreamingBot:
     """Live bot: IB Gateway stream → brain → bracket orders."""
-
     def __init__(self, account: str = "PAPER") -> None:
         if not _ib_available:
             raise ImportError("ib_insync required: pip install ib_insync")
@@ -55,8 +52,8 @@ class IBStreamingBot:
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.brain, self.journal)
         self._running = False
+        self._last_beat: float = 0.0
         self._setup_signals()
-
     def _setup_signals(self) -> None:
         """Register SIGINT/SIGTERM for safe shutdown."""
         def _handler(signum: int, frame: Any) -> None:
@@ -64,7 +61,6 @@ class IBStreamingBot:
             self._running = False
         signal.signal(signal.SIGINT, _handler)
         signal.signal(signal.SIGTERM, _handler)
-
     def connect(self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
                 client_id: int = IB_CLIENT_ID) -> None:
         """Connect to IB Gateway with retry logic."""
@@ -78,12 +74,10 @@ class IBStreamingBot:
             if attempt < MAX_RECONNECT:
                 time.sleep(RECONNECT_DELAY)
         raise ConnectionError(f"Failed to connect after {MAX_RECONNECT} attempts")
-
     def _subscribe_ib_events(self) -> None:
         """Subscribe to IB events (executions, commissions)."""
         self.ib.execDetailsEvent += self.streamer.record_execution
         self.ib.commissionReportEvent += self.streamer.record_commission
-
     def _evaluate(self, ticker: str) -> Optional[Thought]:
         """Run Cortex on the latest StreamBuffer data."""
         if not self.streamer.ready(ticker):
@@ -93,7 +87,6 @@ class IBStreamingBot:
                               buy_volume=a["buy_volume"],
                               bid_sizes=a["bid_sizes"], ask_sizes=a["ask_sizes"])
         return self.brain.cortex.evaluate(alpha) if alpha else None
-
     def _on_entry(self, ticker: str, thought: Thought, tk: Any) -> None:
         """Handle BUY/SELL verdict: safety nets, then bracket entry."""
         if not self.brain.check_entry_allowed():
@@ -103,7 +96,6 @@ class IBStreamingBot:
         price = float((tk.bid + tk.ask) * 0.5)
         self.executor.place_bracket(ticker, thought, price, self.streamer)
         self.executor.last_thoughts[ticker] = thought
-
     def run(self, tickers: list[str], poll_interval: float = 1.0) -> None:
         """Subscribe to IB streams, evaluate verdicts, place bracket orders."""
         self._running = True
@@ -144,6 +136,16 @@ class IBStreamingBot:
         elapsed = time.monotonic() - started
         if elapsed < poll_interval:
             time.sleep(poll_interval - elapsed)
+        self._heartbeat()
+
+    def _heartbeat(self) -> None:
+        """Periodic liveness line so the log never looks frozen."""
+        now = time.monotonic()
+        if now - self._last_beat < 60.0:
+            return
+        self._last_beat = now
+        log.info("HEARTBEAT open=%d journal=%d",
+                 len(self.brain._open_positions), self.journal.count())
 
     def _check_safety_nets(self, pnl: Any) -> None:
         """Check safety nets against IB's actual state."""
