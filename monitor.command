@@ -1,38 +1,61 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-#  monitor.command — HANOON PRIME 3.0 — Live Log Viewer
+#  monitor.command — HANOON PRIME 3.0 — Status + Live Log Viewer
 #
-#  One double-click tails the running JULI bot log, colorized.
-#  READ-ONLY — never starts/stops the bot. Just follows the running bot.
-#
-#  Equivalent of: tail -f logs/hanoon_prime.log
+#  Shows bot status, then tails the running log with color coding.
+#  READ-ONLY — never starts/stops the bot.
 # ═══════════════════════════════════════════════════════════════════════
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOG="$ROOT/logs/hanoon_prime.log"
 
-echo "  📋 LIVE LOG — HANOON PRIME 3.0 (logs/hanoon_prime.log)"
-echo "  ────────────────────────────────────────────────────────"
+echo "═══════════════════════════════════════════════════════════════"
+echo "  HANOON PRIME 3.0 — STATUS"
+echo "═══════════════════════════════════════════════════════════════"
+
+# Check bot process
+BOT_PID=$(pgrep -f "hanoon_prime.cli" 2>/dev/null | head -1)
+if [ -n "$BOT_PID" ]; then
+    ELAPSED=$(ps -o etime= -p "$BOT_PID" 2>/dev/null | xargs)
+    echo "[$(date +%H:%M:%S)] ✅ Prime bot  ✓ PID $BOT_PID  (uptime: $ELAPSED)"
+else
+    echo "[$(date +%H:%M:%S)] ❌ Prime bot  ✗ Not running"
+fi
+
+# Check telemetry
+HEALTH=$(curl -s --max-time 2 http://127.0.0.1:8080/health 2>/dev/null)
+if [ -n "$HEALTH" ]; then
+    POSITIONS=$(echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('positions',[])))" 2>/dev/null)
+    STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','?'))" 2>/dev/null)
+    echo "[$(date +%H:%M:%S)] ✅ Telemetry    ✓ http://127.0.0.1:8080  ($STATUS, $POSITIONS positions)"
+else
+    echo "[$(date +%H:%M:%S)] ❌ Telemetry    ✗ Not responding"
+fi
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Tail: $LOG  (Ctrl+C to exit)"
+echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-tail -f "$LOG" | while IFS= read -r line; do
-    # Color code based on content
-    if echo "$line" | grep -qE "BRACKET|ENTRY|Entry payload approved|EXECUTE"; then
-        echo -e "\033[32m$line\033[0m"          # green for entries
+# Tail with color coding
+tail -f "$LOG" 2>/dev/null | while IFS= read -r line; do
+    if echo "$line" | grep -qE "BRACKET|ENTRY|EXECUTE|ADOPT"; then
+        echo -e "\033[32m$line\033[0m"
     elif echo "$line" | grep -qE "EXIT|TRAIL STOP|TRAIL TARGET|Position closed"; then
-        echo -e "\033[31m$line\033[0m"          # red for exits
-    elif echo "$line" | grep -qE "SPIKE|⚡"; then
-        echo -e "\033[33m$line\033[0m"          # yellow for spikes
-    elif echo "$line" | grep -qE "JULI|🧠|Cortex|Cerebellum|Hippocampus"; then
-        echo -e "\033[36m$line\033[0m"          # cyan for brain
+        echo -e "\033[31m$line\033[0m"
+    elif echo "$line" | grep -qE "HEARTBEAT|open="; then
+        echo -e "\033[35m$line\033[0m"
+    elif echo "$line" | grep -qE "THINK|SKIP|verdict"; then
+        echo -e "\033[36m$line\033[0m"
     elif echo "$line" | grep -qE "ERROR|FATAL|Traceback|CRITICAL"; then
-        echo -e "\033[1;31m$line\033[0m"        # bold red for errors
+        echo -e "\033[1;31m$line\033[0m"
     elif echo "$line" | grep -qE "WARNING|warn|SAFETY NET"; then
-        echo -e "\033[33m$line\033[0m"          # yellow for warnings
-    elif echo "$line" | grep -qE "✅|✓|connected|ready|healthy|Subscribed"; then
-        echo -e "\033[32m$line\033[0m"          # green for success
-    elif echo "$line" | grep -qE "EXEC|commissionReport|orderStatus"; then
-        echo -e "\033[90m$line\033[0m"          # dim for ib_insync noise
+        echo -e "\033[33m$line\033[0m"
+    elif echo "$line" | grep -qE "connected|ready|Subscribed|streams active"; then
+        echo -e "\033[32m$line\033[0m"
+    elif echo "$line" | grep -qE "commissionReport|orderStatus|execDetails"; then
+        echo -e "\033[90m$line\033[0m"
     else
         echo "$line"
     fi

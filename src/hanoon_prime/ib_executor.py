@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
-from ._protect import protect_position
+from ._protect import protect_position, sweep_zombies
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_compat import ib
@@ -80,11 +80,11 @@ class IBExecutor:
         self._pending_parent.add(ticker)
         log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
                  action, ticker, round(price, 2), stop, target, shares)
-
     def sync_from_ib(self, streamer: Any) -> None:
         """JULI syncs everything from IB — IB is source of truth."""
         if not self._ping_ib():
             return
+        sweep_zombies(self.ib)
         protect_position(self.ib, self.tracked_tickers,
                          self._brackets, self._pending_parent, streamer)
         ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
