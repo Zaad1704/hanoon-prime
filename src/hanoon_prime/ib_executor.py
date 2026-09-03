@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
+
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
@@ -152,12 +154,12 @@ class IBExecutor:
         """Modify a child order (stop or target) in IB."""
         price = round(new_price, 2)
         for child in (trade.order.children or []):
-            if kind == "stop" and getattr(child, "auxPrice", 0):
+            if kind == "stop" and getattr(child, "auxPrice", None):
                 child.auxPrice = price
                 self.ib.placeOrder(trade.contract, trade.order)
                 log.info("TRAIL STOP %s → %.2f", trade.contract.symbol, price)
                 return
-            if kind == "target" and getattr(child, "lmtPrice", 0):
+            if kind == "target" and getattr(child, "lmtPrice", None):
                 child.lmtPrice = price
                 self.ib.placeOrder(trade.contract, trade.order)
                 log.info("TRAIL TARGET %s → %.2f", trade.contract.symbol, price)

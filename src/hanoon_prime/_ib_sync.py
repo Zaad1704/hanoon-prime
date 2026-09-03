@@ -1,8 +1,6 @@
 """hanoon_prime._ib_sync — IB state reading helpers.
-
 Pure functions that read state from IB. Used by ib_executor.py
 to keep that file under the 200-line R3 limit.
-
 IB is the single source of truth — these functions only READ from IB.
 """
 from __future__ import annotations
@@ -110,6 +108,35 @@ def read_ib_positions(
     return result
 
 
+def read_portfolio(ib_client: Any) -> dict[str, Any]:
+    """Read portfolio from IB — market value, unrealized P&L, % change."""
+    result: dict[str, Any] = {}
+    try:
+        for item in ib_client.portfolio():
+            sym = item.contract.symbol
+            mv = item.marketValue
+            result[sym] = {
+                "shares": item.position,
+                "value": mv,
+                "pnl": item.unrealizedPNL,
+                "pct": (item.unrealizedPNL / abs(mv) * 100) if mv else 0.0,
+            }
+    except Exception:
+        pass
+    return result
+
+
+def read_account_summary(ib_client: Any) -> dict[str, str]:
+    """Read account summary — NetLiq, BuyingPower, CashBalance, etc."""
+    result: dict[str, str] = {}
+    try:
+        for item in ib_client.accountSummary():
+            result[item.tag] = item.value
+    except Exception:
+        pass
+    return result
+
+
 def journal_snapshot(
     journal: Journal,
     ib_client: Any,
@@ -118,6 +145,8 @@ def journal_snapshot(
 ) -> None:
     """Carbon-copy journal: snapshot IB state every cycle."""
     ib_orders = read_ib_orders(ib_client)
+    portfolio = read_portfolio(ib_client)
+    account = read_account_summary(ib_client)
     journal.append(
         {
             "event": "ib_state_snapshot",
@@ -128,6 +157,12 @@ def journal_snapshot(
             },
             "open_orders": ib_orders,
             "brackets": {s: list(v) for s, v in brackets.items()},
+            "portfolio": portfolio,
+            "account_summary": {
+                "net_liq": account.get("NetLiquidation", "?"),
+                "buying_power": account.get("BuyingPower", "?"),
+                "cash": account.get("CashBalance", "?"),
+            },
             "timestamp": time.time(),
         }
     )

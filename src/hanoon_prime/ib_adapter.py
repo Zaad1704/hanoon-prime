@@ -84,10 +84,9 @@ class IBStreamingBot:
         raise ConnectionError(f"Failed to connect after {MAX_RECONNECT} attempts")
 
     def _subscribe_ib_events(self) -> None:
-        """Subscribe to IB events for executions and commissions."""
+        """Subscribe to IB events (executions, commissions)."""
         self.ib.execDetailsEvent += self.streamer.record_execution
         self.ib.commissionReportEvent += self.streamer.record_commission
-        log.info("Subscribed to IB events (executions, commissions)")
 
     def _evaluate(self, ticker: str) -> Optional[Thought]:
         """Run Cortex on the latest StreamBuffer data."""
