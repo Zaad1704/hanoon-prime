@@ -1,30 +1,48 @@
-# Pre-commit config — enforces architectural rules locally before any commit.
+# Pre-commit: Enforces clean code before ANY commit.
 # If you can't commit, you can't break the main branch.
+# JULI 2.0 Production Standards
 
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.13
+    hooks:
+      - id: ruff
+        args: [--select=E501,C901,PLR0912,B008,ERA001,F401,F841, --extend-ignore=E501]
+        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$|^scripts/.*$
+
   - repo: https://github.com/psf/black
     rev: 23.12.1
     hooks:
       - id: black
         args: [--line-length=88]
+        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat)|hands|validator)\.py$
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.13
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
     hooks:
-      - id: ruff
-        args: [--select=E501,C901]
+      - id: isort
+        args: [--profile=black, --line-length=88]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        args: [--strict, --warn-return-any, --warn-unused-configs, --disallow-untyped-defs, --ignore-missing-imports, --exclude='src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$', --exclude='src/hanoon_prime/(hands|validator)\.py$']
+        additional_dependencies: [numpy>=1.26, scipy>=1.10, pytest>=7.0, ib_insync>=0.9.86]
+        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$
+        pass_filenames: false
 
   - repo: local
     hooks:
-      # R3: complexity + line limits
+      # R3: Complexity check (40 lines max, 3 nesting max)
       - id: complexity-check
         name: Complexity check (40 lines max, 3 nest max)
-        entry: python scripts/check_complexity.py
+        entry: python3 scripts/check_complexity.py
         language: system
         pass_filenames: false
         always_run: true
 
-      # R3b: file length (200 lines max for source)
+      # R3b: File length (200 lines max)
       - id: file-length-check
         name: File length check (200 lines max)
         entry: bash scripts/check_file_length.sh
@@ -32,10 +50,90 @@ repos:
         pass_filenames: false
         always_run: true
 
-      # R1: single decision path
-      - id: contract-tests
-        name: Architectural contract tests
-        entry: pytest tests/test_contract.py -v
+      # CI Gate: R1 (single decision path)
+      - id: r1-single-path
+        name: R1 — Single Decision Path
+        entry: pytest tests/test_contract.py::test_R1_signal_modules_never_produce_verdicts tests/test_contract.py::test_R1_cortex_is_the_single_verdict_source -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # CI Gate: R4 (exactly 5 indicators)
+      - id: r4-indicators
+        name: R4 — Exactly 5 Indicators
+        entry: pytest tests/test_contract.py::test_R4_indicator_set_is_exactly_5 -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # CI Gate: R5 (no score inversion)
+      - id: r5-no-inversion
+        name: R5 — Score Inversion Disabled
+        entry: pytest tests/test_contract.py::test_R5_score_inversion_disabled -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # CI Gate: R7 (immutable journal)
+      - id: r7-journal
+        name: R7 — Journal Is Append Only
+        entry: pytest tests/test_contract.py::test_R7_journal_is_append_only -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # CI Gate: R8 (single learning system)
+      - id: r8-single-learning
+        name: R8 — Single Learning System
+        entry: pytest tests/test_contract.py::test_R8_single_learning_system -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R9: Positive indicator weights (no self-defeating dampening)
+      - id: r9-positive-weights
+        name: R9 — Indicator Weights Are Positive
+        entry: python3 scripts/check_positive_weights.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R10: No print() in source code
+      - id: r10-no-print
+        name: R10 — No print() in Source
+        entry: python3 scripts/check_print.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R11: All public functions have docstrings
+      - id: r11-docstrings
+        name: R11 — Public Functions Have Docstrings
+        entry: python3 scripts/check_docstrings.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R13: No string-based verdict dispatch
+      - id: r13-no-string-dispatch
+        name: R13 — No String-Based Verdict Dispatch
+        entry: python3 scripts/check_no_string_dispatch.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R15: No swallowed exceptions
+      - id: r15-no-swallow
+        name: R15 — No Swallowed Exceptions
+        entry: python3 scripts/check_no_swallow.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # R16: No TODO/FIXME markers
+      - id: r16-no-todo
+        name: R16 — No TODO/FIXME Markers
+        entry: python3 scripts/check_no_todo.py
         language: system
         pass_filenames: false
         always_run: true

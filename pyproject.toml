@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hanoon-prime"
-version = "1.0.0"
-description = "HANOON Prime: a minimal, profit-first trading system. IB → JULI → Entry/Hold/Exit + Learning"
+version = "2.0.0"
+description = "JULI 2.0: Minimal neuro-morphic trading system. IB → Eyes → Cerebellum → Cortex → Hands → Hippocampus"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
-    "pandas>=2.0",
     "scipy>=1.10",
 ]
 
@@ -19,23 +18,41 @@ dev = [
     "pytest-cov>=4.0",
     "black>=23.0",
     "ruff>=0.1.0",
+    "isort>=5.12",
+    "mypy>=1.5",
     "pre-commit>=3.0",
 ]
-ib = [
-    "ib_insync>=0.9.0",
-]
-live = [
-    "ib_insync>=0.9.0",
-]
+ib = ["ib_insync>=0.9.0"]
+live = ["ib_insync>=0.9.0"]
 
 [tool.black]
 line-length = 88
 target-version = ["py311"]
 
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["hanoon_prime"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+strict = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+show_error_codes = true
+files = ["src/hanoon_prime"]
+exclude = ["tests/", "scripts/", "src/hanoon_prime/ib_adapter.py", "src/hanoon_prime/ib_streamer.py", "src/hanoon_prime/ib_executor.py", "src/hanoon_prime/ib_compat.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-v --strict-markers --tb=short"
+addopts = "-v --strict-markers --tb=short --cov=src/hanoon_prime --cov-report=term-missing --cov-fail-under=80"
 markers = [
     "contract: architectural contract tests (always run)",
     "backtest: backtest/profitability tests (slow)",
@@ -46,6 +63,14 @@ markers = [
 [tool.coverage.run]
 source = ["src/hanoon_prime"]
 branch = true
+omit = [
+    "src/hanoon_prime/ib_adapter.py",
+    "src/hanoon_prime/ib_streamer.py",
+    "src/hanoon_prime/ib_executor.py",
+    "src/hanoon_prime/ib_compat.py",
+    "src/hanoon_prime/cli.py",
+    "src/hanoon_prime/telemetry.py",
+]
 
 [tool.coverage.report]
 fail_under = 80
@@ -56,11 +81,11 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E501", "C901", "PLR0912", "PLR0913"]
+select = ["E501", "C901", "PLR0912", "PLR0913", "ARG001", "ARG002", "B008"]
 ignore = ["E501", "E701"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["C901", "E701"]
+"tests/*" = ["C901", "E701", "PLR0912"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,13 @@
+tools:
+    shell:
+        allow:
+            - git stash *
+            - mv *
+            - cd *
+            - echo *
+            - grep *
+            - head *
+            - git add *
+            - pre-commit run *
+            - git diff *
+            - wc *

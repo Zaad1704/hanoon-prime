@@ -1,7 +1,6 @@
 """tests/conftest.py — shared pytest fixtures."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -33,6 +32,7 @@ def sample_tickers() -> list[str]:
 @pytest.fixture
 def sample_data(sample_tickers):
     """Load data for the first available ticker."""
-    from hanoon_prime.data import load_ohlcv
+    from hanoon_prime.eyes import load_ohlcv
+
     ticker = sample_tickers[0]
     return ticker, load_ohlcv(DATA_DIR / f"{ticker}_1min.csv")

@@ -1,9 +1,12 @@
-"""hanoon_prime.journal — immutable append-only trade log.
+"""hanoon_prime.memory — immutable hash-chained trade journal.
 
 R7: Entries are appended and can NEVER be deleted, updated, or overwritten.
-Every entry is JSON + SHA256 hash of the previous entry — a lightweight
-Merkle chain so tampering is detectable.
+Every entry includes the SHA-256 hash of the previous entry — a
+lightweight hash chain so tampering is detectable.
+
+Renamed from journal.py to complete the neuro-morphic naming.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -29,7 +32,6 @@ class Journal:
             **entry,
         }
         stamped["hash"] = self._hash_entry(stamped)
-
         with open(self.path, "a") as f:
             f.write(json.dumps(stamped, sort_keys=True) + "\n")
 
@@ -37,8 +39,7 @@ class Journal:
         if not self.path.exists():
             return 0
         with open(self.path) as f:
-            lines = f.readlines()
-        return len(lines)
+            return len(f.readlines())
 
     def _last_hash(self) -> str | None:
         if not self.path.exists():
@@ -48,12 +49,12 @@ class Journal:
         if not lines:
             return None
         try:
-            return json.loads(lines[-1])["hash"]
+            return str(json.loads(lines[-1])["hash"])
         except (json.JSONDecodeError, KeyError):
             return None
 
     @staticmethod
-    def _hash_entry(entry: dict) -> str:
+    def _hash_entry(entry: dict[str, Any]) -> str:
         """Hash everything except the hash field itself."""
         to_hash = {k: v for k, v in entry.items() if k != "hash"}
         raw = json.dumps(to_hash, sort_keys=True, default=str)
@@ -63,7 +64,7 @@ class Journal:
         """Read all entries. Returns empty list if file doesn't exist."""
         if not self.path.exists():
             return []
-        result = []
+        result: list[dict[str, Any]] = []
         with open(self.path) as f:
             for line in f:
                 line = line.strip()
@@ -74,11 +75,14 @@ class Journal:
     def verify_chain(self) -> bool:
         """Verify hash chain integrity. Returns True if intact."""
         entries = self.entries()
-        prev_hash = None
-        for i, entry in enumerate(entries):
+        prev_hash: str | None = None
+        for entry in entries:
             if entry.get("prev_hash") != prev_hash:
                 return False
-            expected = self._hash_entry({k: v for k, v in entry.items() if k != "hash"} | {"prev_hash": prev_hash})
+            expected = self._hash_entry(
+                {k: v for k, v in entry.items() if k != "hash"}
+                | {"prev_hash": prev_hash}
+            )
             if entry.get("hash") != expected:
                 return False
             prev_hash = entry["hash"]

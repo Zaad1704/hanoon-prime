@@ -8,20 +8,21 @@ historical CSV data.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from hanoon_prime.alpha import compute_alpha
 from hanoon_prime.backtest import backtest_ticker, run_backtest
-from hanoon_prime.data import load_ohlcv, compute_buy_volume, estimate_bid_ask
+from hanoon_prime.cerebellum import compute_alpha
+from hanoon_prime.cortex import Cortex
+from hanoon_prime.edge import compute_ev, kelly_fraction, score_to_win_prob
+from hanoon_prime.eyes import compute_buy_volume, estimate_bid_ask, load_ohlcv
+from hanoon_prime.immune import EDGE_LOOKBACK
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "market_data"
 
 # Fast subset for unit testing
-FAST_TICKERS = ["AAPL", "MSFT", "SPY"]
+FAST_TICKERS = ["AAPL", "MSFT", "SPY", "TSLA", "NVDA"]
 
 
 def _check_data_available(ticker: str) -> bool:
@@ -42,25 +43,27 @@ def test_single_ticker_backtest(ticker):
         pytest.skip(f"No data for {ticker}")
 
     data = load_ohlcv(path)
-    assert len(data["close"]) >= 60, f"Insufficient bars for {ticker}"
+    assert len(data["close"]) >= EDGE_LOOKBACK + 10
 
     metrics = backtest_ticker(
-        ticker, data["close"], data["high"], data["low"], data["volume"],
-        window=30,
+        ticker,
+        data["close"],
+        data["high"],
+        data["low"],
+        data["volume"],
+        window=EDGE_LOOKBACK,
     )
 
-    # Must not crash
     assert "ev_per_trade" in metrics
     assert "status" in metrics
 
     if metrics["total_trades"] > 0:
-        # If trades were made, expectancy must be positive
         assert metrics["ev_per_trade"] > 0, (
             f"R2 VIOLATION: {ticker} has NEGATIVE expectancy: "
             f"{metrics['ev_per_trade']}R per trade "
-            f"(WR={metrics['win_rate']:.1%}, R:R={metrics['realized_rr']:.2f})"
+            f"(WR={metrics['win_rate']:.1%}, "
+            f"R:R={metrics['realized_rr']:.2f})"
         )
-        # Win rate must be above breakeven for 3:1 R:R (25%)
         if metrics["realized_rr"] >= 1.0:
             min_wr = 1.0 / (1.0 + metrics["realized_rr"])
             assert metrics["win_rate"] > min_wr, (
@@ -72,7 +75,7 @@ def test_single_ticker_backtest(ticker):
 @pytest.mark.backtest
 @pytest.mark.parametrize("ticker", FAST_TICKERS)
 def test_brain_pipeline_runs(ticker):
-    """Verify the full alpha → score → EV → think pipeline runs without errors."""
+    """Verify the full alpha → cortex → EV pipeline runs without errors."""
     path = DATA_DIR / f"{ticker}_1min.csv"
     if not path.exists():
         pytest.skip(f"No data for {ticker}")
@@ -83,8 +86,7 @@ def test_brain_pipeline_runs(ticker):
     low = data["low"]
     volume = data["volume"]
 
-    # Run a single evaluation
-    window = 30
+    window = EDGE_LOOKBACK
     if len(close) < window + 5:
         pytest.skip(f"Insufficient bars for {ticker}")
 
@@ -97,37 +99,30 @@ def test_brain_pipeline_runs(ticker):
     bids, asks = estimate_bid_ask(v_slice, bv)
 
     alpha = compute_alpha(
-        close=c_slice, volume=v_slice,
-        buy_volume=bv, bid_sizes=bids, ask_sizes=asks,
+        close=c_slice,
+        volume=v_slice,
+        buy_volume=bv,
+        bid_sizes=bids,
+        ask_sizes=asks,
     )
 
-    # Verify alpha produces valid output
-    from hanoon_prime.scoring import compute_score
-    from hanoon_prime.edge import score_to_win_prob, compute_ev
-    from hanoon_prime.thinker import deliberate
+    cortex = Cortex()
+    thought = cortex.evaluate(alpha)
 
-    score = compute_score(alpha)
-    assert 0.10 <= score <= 0.70, f"Score out of range: {score}"
+    assert thought.verdict in ("BUY", "SELL", "HOLD")
+    assert -1.0 <= thought.score <= 1.0, f"Score out of range: {thought.score}"
+    assert 0.50 <= thought.confidence <= 0.95
 
-    win_prob = score_to_win_prob(score)
-    assert 0.25 <= win_prob <= 0.55, f"Win prob out of range: {win_prob}"
+    win_prob = score_to_win_prob(thought.score)
+    assert 0.25 <= win_prob <= 0.60, f"Win prob out of range: {win_prob}"
 
     ev = compute_ev(win_prob)
     assert "gross_ev" in ev
     assert "net_ev" in ev
 
-    kelly = compute_ev(win_prob)  # placeholder
-    from hanoon_prime.edge import kelly_fraction
     kelly_val = kelly_fraction(win_prob)
+    assert 0.0 <= kelly_val <= 0.5
 
-    thought = deliberate(
-        score=score, alpha=alpha,
-        win_prob=win_prob, gross_ev=ev["gross_ev"],
-        kelly=kelly_val,
-    )
-
-    assert thought.verdict in ("ENTER", "HOLD")
-    assert 0.50 <= thought.confidence <= 0.95
     assert thought.direction in (-1, 0, 1)
 
 
@@ -138,7 +133,9 @@ def test_full_universe_backtest(sample_tickers):
         pytest.skip("Not enough data files available")
 
     results, _ = run_backtest(
-        available[:5], DATA_DIR, output_dir=None,
+        available[:5],
+        DATA_DIR,
+        output_dir=None,
     )
 
     profitable = sum(1 for m in results.values() if m["ev_per_trade"] > 0)
@@ -148,11 +145,11 @@ def test_full_universe_backtest(sample_tickers):
     print(f"  Total trades: {trades_total}")
 
     if trades_total > 0:
-        # At least 60% of tickers with trades must be profitable
         tickers_with_trades = [t for t, m in results.items() if m["total_trades"] > 0]
         if tickers_with_trades:
-            profitable_traded = sum(1 for t in tickers_with_trades
-                                   if results[t]["ev_per_trade"] > 0)
+            profitable_traded = sum(
+                1 for t in tickers_with_trades if results[t]["ev_per_trade"] > 0
+            )
             ratio = profitable_traded / len(tickers_with_trades)
             assert ratio >= 0.60, (
                 f"Only {profitable_traded}/{len(tickers_with_trades)} "

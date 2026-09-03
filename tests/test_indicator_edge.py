@@ -15,14 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from hanoon_prime._edge_eval import evaluate_indicator_pooled
-from hanoon_prime.constants import EDGE_LOOKBACK
+from hanoon_prime.validator import evaluate_indicator_pooled
 
 # Auto-discover all tickers in the data directory for maximum statistical power
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "market_data"
-EDGE_TICKERS = sorted(
-    [f.stem.replace("_1min", "") for f in DATA_DIR.glob("*_1min.csv")]
-) if DATA_DIR.exists() else ["AAPL", "MSFT", "SPY", "TSLA", "NVDA"]
+EDGE_TICKERS = (
+    sorted([f.stem.replace("_1min", "") for f in DATA_DIR.glob("*_1min.csv")])
+    if DATA_DIR.exists()
+    else ["AAPL", "MSFT", "SPY", "TSLA", "NVDA"]
+)
 
 
 class TestIndicatorEdge:
@@ -58,8 +59,10 @@ def _assert_pooled_edge(indicator_name: str):
     results = evaluate_indicator_pooled(EDGE_TICKERS, DATA_DIR, n_perm=500)
     info = results[indicator_name]
     sig_str = "SIGNIFICANT" if info["significant"] else "NOT significant"
-    print(f"\n  {indicator_name}: |corr|={abs(info['corr']):.4f}  "
-          f"p={info['pvalue']:.4f}  n={info['n_samples']}  {sig_str}")
+    print(
+        f"\n  {indicator_name}: |corr|={abs(info['corr']):.4f}  "
+        f"p={info['pvalue']:.4f}  n={info['n_samples']}  {sig_str}"
+    )
     assert info["significant"], (
         f"R4 VIOLATION: {indicator_name} shows NO statistically significant "
         f"edge (p={info['pvalue']:.4f} ≥ 0.05, |corr|={info['corr']:.4f}). "

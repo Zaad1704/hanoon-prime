@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""scripts/check_profit_gate.py — Enforce R2: fail if any ticker shows negative expectancy.
+"""scripts/check_profit_gate.py — Enforce R2: fail if any ticker shows negative EV.
 
 Usage: python scripts/check_profit_gate.py <metrics_dir>/
 """
 from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

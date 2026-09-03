@@ -1,4 +1,4 @@
-# Python
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -12,7 +12,7 @@ build/
 venv/
 .venv/
 
-# Test / coverage
+# Test / coverage artifacts
 .pytest_cache/
 .coverage
 .coverage.*
@@ -27,14 +27,18 @@ logs/
 *.lock
 data/market_data/
 
-# Environment
+# Environment secrets (ALWAYS gitignored — contains API keys)
 .env
 .env.local
 *.pem
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
+
+# Static analysis caches
+.mypy_cache/
+.ruff_cache/

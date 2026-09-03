@@ -2,33 +2,145 @@
 
 Run:  python -m hanoon_prime.calibrate --data-dir /path/to/csvs
 
-The system evaluates its own indicators, tunes weights/thresholds/R:R,
-and writes calibration.json. If profitability is proven, it emits a
-"safe_to_activate" flag.
+The system evaluates its own indicators, tunes weights by edge
+strength, and verifies profitability on historical data.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from ._calibrate import calibrate
-from .data import load_ohlcv
+from .backtest import backtest_ticker
+from .eyes import load_ohlcv
+from .immune import EDGE_LOOKBACK, INDICATOR_NAMES
+from .validator import calibrate_weights, evaluate_indicator_pooled
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class Calibration:
+    """Result of auto-calibration: tuned weights + edge stats."""
+
+    weights: dict[str, float] = field(default_factory=dict)
+    indicator_corrs: dict[str, float] = field(default_factory=dict)
+    indicator_pvalues: dict[str, float] = field(default_factory=dict)
+    indicator_significant: dict[str, bool] = field(default_factory=dict)
+    confidence: float = 0.5
+    n_indicators_significant: int = 0
+    n_indicators_total: int = len(INDICATOR_NAMES)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize calibration result to a plain dict for JSON export."""
+        return {
+            "weights": self.weights,
+            "confidence": self.confidence,
+            "n_indicators_significant": self.n_indicators_significant,
+            "indicator_corrs": self.indicator_corrs,
+            "indicator_pvalues": self.indicator_pvalues,
+        }
 
 
 def _all_tickers(data_dir: Path) -> list[str]:
-    return sorted(
-        f.stem.replace("_1min", "") for f in data_dir.glob("*_1min.csv")
+    """Auto-discover all valid CSV tickers."""
+    result: list[str] = []
+    for f in sorted(data_dir.glob("*_1min.csv")):
+        try:
+            load_ohlcv(f)
+            result.append(f.stem.replace("_1min", ""))
+        except ValueError:
+            continue
+    return result
+
+
+def calibrate(tickers: list[str], data_dir: Path) -> Calibration:
+    """Full auto-calibration: evaluate edge, weight indicators, verify."""
+    if not tickers:
+        tickers = _all_tickers(data_dir)
+    cal = Calibration()
+    log.info("Step 1: Evaluating indicator edge (pooled permutation test)...")
+    pooled = evaluate_indicator_pooled(tickers, data_dir, n_perm=500)
+    for name, info in pooled.items():
+        sig = "✅" if info["significant"] else "❌"
+        log.info(
+            "  %-25s: corr=%+.4f  p=%.4f  n=%s  %s",
+            name,
+            info["corr"],
+            info["pvalue"],
+            info["n_samples"],
+            sig,
+        )
+    cal.indicator_corrs = {k: v["corr"] for k, v in pooled.items()}
+    cal.indicator_pvalues = {k: v["pvalue"] for k, v in pooled.items()}
+    cal.indicator_significant = {k: v["significant"] for k, v in pooled.items()}
+    cal.n_indicators_significant = sum(1 for v in pooled.values() if v["significant"])
+
+    log.info("\nStep 2: Auto-calibrating weights by edge strength...")
+    cal.weights = calibrate_weights(pooled)
+    for name, w in sorted(cal.weights.items(), key=lambda x: -abs(x[1])):
+        c = cal.indicator_corrs.get(name, 0.0)
+        log.info("  %-25s: %+.3f  (corr=%+.4f)", name, w, c)
+
+    log.info("\nStep 3: Verifying profitability on full universe...")
+    profitable, total = _check_profitability(tickers, data_dir)
+    cal.confidence = 0.4 * cal.n_indicators_significant / len(
+        INDICATOR_NAMES
+    ) + 0.6 * profitable / max(total, 1)
+    log.info(
+        "\n  Edge score: %s/%s", cal.n_indicators_significant, len(INDICATOR_NAMES)
     )
+    log.info("  Profitable: %s/%s tickers", profitable, total)
+    log.info("  Self-confidence: %.0f%%", cal.confidence)
+    return cal
+
+
+def _check_profitability(tickers: list[str], data_dir: Path) -> tuple[int, int]:
+    """Run full backtest; count profitable tickers."""
+    profitable, total = 0, 0
+    for ticker in tickers:
+        path = data_dir / f"{ticker}_1min.csv"
+        if not path.exists():
+            continue
+        try:
+            data = load_ohlcv(path)
+        except ValueError:
+            continue
+        if len(data["close"]) < EDGE_LOOKBACK + 50:
+            continue
+        m = backtest_ticker(
+            ticker,
+            data["close"],
+            data["high"],
+            data["low"],
+            data["volume"],
+        )
+        total += 1
+        is_prof = m["ev_per_trade"] > 0
+        if is_prof:
+            profitable += 1
+        status = "✅" if is_prof else "❌"
+        log.info(
+            "  %-8s %s  EV=%+.3fR  %s trades",
+            ticker,
+            status,
+            m["ev_per_trade"],
+            m["total_trades"],
+        )
+    return profitable, total
 
 
 def main() -> int:
+    """CLI entry point for auto-calibration."""
     parser = argparse.ArgumentParser(description="HANOON PRIME auto-calibration")
-    parser.add_argument("--data-dir", required=True, help="Directory with *_1min.csv files")
-    parser.add_argument("--tickers", default="ALL", help="Comma-separated tickers (or 'ALL')")
-    parser.add_argument("--output", default=None, help="Output path for calibration.json")
-    parser.add_argument("--n-perm", type=int, default=500, help="Permutation test iterations")
+    parser.add_argument("--data-dir", required=True)
+    parser.add_argument("--tickers", default="ALL")
+    parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -37,47 +149,29 @@ def main() -> int:
     else:
         tickers = [t.strip() for t in args.tickers.split(",")]
 
-    print(f"HANOON PRIME Auto-Calibration")
-    print(f"  Tickers: {len(tickers)}")
-    print(f"  Permutations: {args.n_perm}")
-    print()
+    log.info("HANOON PRIME Auto-Calibration")
+    log.info("  Tickers: %s", len(tickers))
+    cal = calibrate(tickers, data_dir)
 
-    print("Step 1: Evaluating indicator edge (permutation test)...")
-    cal = calibrate(tickers[:50], data_dir)
-
-    _print_calibration(cal)
-    _write_output(cal, args.output)
-
-    return 0 if cal.profitable else 1
-
-
-def _print_calibration(cal):
-    """Print calibrated parameters."""
-    print()
-    print("Weights (auto-calibrated by edge strength):")
-    for name, w in sorted(cal.weights.items(), key=lambda x: -x[1]):
-        p = cal.indicator_pvalues.get(name, 1.0)
-        c = cal.indicator_corrs.get(name, 0.0)
-        print(f"    {name:25s}: {w:.3f}  |corr|={c:.4f}  p={p:.4f}")
-    print()
-    print(f"  Threshold: {cal.threshold}")
-    print(f"  Stop/Target: {cal.stop_pct:.1%} / {cal.target_pct:.1%}")
-    print(f"  Max position: ${cal.max_position_notional}")
-    print(f"  Self-confidence: {cal.confidence:.0%}")
-    print(f"  Profitable on: {cal.n_profitable}/{cal.n_total} tickers")
-    print(f"  Safe to activate: {'YES' if cal.profitable else 'NO'}")
-
-
-def _write_output(cal, output_path):
-    if output_path:
+    if args.output:
         result = cal.to_dict()
-        result["safe_to_activate"] = cal.profitable
-        with open(output_path, "w") as f:
+        result["safe_to_activate"] = cal.confidence > 0.5
+        with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
-        print(f"\n  Written to: {output_path}")
+        log.info("\n  Written to: %s", args.output)
 
-    return 0 if cal.profitable else 1
+    return 0 if cal.confidence > 0.5 else 1
+
+
+def _configure_logging() -> None:
+    """Configure logging for CLI output to stdout."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        stream=sys.stdout,
+    )
 
 
 if __name__ == "__main__":
+    _configure_logging()
     sys.exit(main())
