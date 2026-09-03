@@ -175,13 +175,10 @@ fi
 log "Stopping HALIM serve (M. A. Halim)..."
 _HALIM_PID_FILE="$PID_DIR/halim_serve.pid"
 
-# Prefer prime's own stop script (proper MLX/Metal cleanup)
+# HALIM lives in the prime folder — stop via prime's own script
 if [[ -f "$BOT_ROOT/scripts/halim_stop.sh" ]]; then
   bash "$BOT_ROOT/scripts/halim_stop.sh" >> "$LOG_DIR/halim_stop.log" 2>&1 || true
   ok "HALIM serve stopped"
-elif [[ -f "$REBUILD_ROOT/scripts/halim_stop_rebuild.sh" ]]; then
-  bash "$REBUILD_ROOT/scripts/halim_stop_rebuild.sh" >> "$LOG_DIR/halim_stop.log" 2>&1 || true
-  ok "HALIM serve stopped (legacy rebuild script)"
 fi
 _stop_pid_file "$_HALIM_PID_FILE" "HALIM serve" 5
 _stop_pgrep "halim/halim/serve.py\|halim_serve\|ensure_halim" "HALIM serve (orphan)" 5
