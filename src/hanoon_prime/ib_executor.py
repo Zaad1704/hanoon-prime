@@ -26,20 +26,17 @@ from .types import Position
 
 log = logging.getLogger(__name__)
 
-
 def _find_stop_target(children: Any) -> tuple[float, float]:
     """Extract stop and target prices from bracket children."""
     stop = max((c.auxPrice for c in children if c.auxPrice), default=0.0)
     target = max((c.lmtPrice for c in children if c.lmtPrice), default=0.0)
     return float(stop), float(target)
 
-
 def _should_trail(d: int, cur: float, level: float, atr: float) -> bool:
     """Check if order should be trailed (moved 1 ATR in favor)."""
     if d > 0:
         return cur - level > atr
     return level - cur > atr
-
 
 class IBExecutor:
     """JULI's execution layer — monitors IB and manages all orders."""
@@ -54,6 +51,7 @@ class IBExecutor:
         self.tracked_tickers: set[str] = set(tracked_tickers or [])
         self.last_thoughts: dict[str, Any] = {}
         self._brackets: dict[str, tuple[float, float]] = {}
+        self._pending_parent: set[str] = set()
 
     def place_bracket(
         self, ticker: str, thought: Any, price: float, streamer: Any
@@ -79,6 +77,7 @@ class IBExecutor:
             order.tif = "DAY"
             self.ib.placeOrder(contract, order)
         self._brackets[ticker] = (stop, target)
+        self._pending_parent.add(ticker)
         log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
                  action, ticker, round(price, 2), stop, target, shares)
 
@@ -121,7 +120,12 @@ class IBExecutor:
     ) -> None:
         """Handle one parent order — cancel orphans, trail both."""
         stop, target = _find_stop_target(getattr(order, "children", None) or [])
-        if sym not in ib_positions:
+        if sym in self._pending_parent:
+            if sym in ib_positions:
+                self._pending_parent.discard(sym)
+            else:
+                return  # parent placed, not yet filled — don't cancel
+        elif sym not in ib_positions:
             self._cancel_if_active(trade, order)
             return
         if stop and target:
@@ -157,30 +161,28 @@ class IBExecutor:
             if kind == "stop" and getattr(child, "auxPrice", None):
                 child.auxPrice = price
                 self.ib.placeOrder(trade.contract, trade.order)
-                log.info("TRAIL STOP %s → %.2f", trade.contract.symbol, price)
+                log.info("TRAIL STOP %s -> %.2f", trade.contract.symbol, price)
                 return
             if kind == "target" and getattr(child, "lmtPrice", None):
                 child.lmtPrice = price
                 self.ib.placeOrder(trade.contract, trade.order)
-                log.info("TRAIL TARGET %s → %.2f", trade.contract.symbol, price)
+                log.info("TRAIL TARGET %s -> %.2f", trade.contract.symbol, price)
                 return
 
-    def _record_closed_positions(
-        self, ib_positions: dict[str, Position], streamer: Any
-    ) -> None:
-        """Record exits for positions IB closed."""
+    def _record_closed_positions(self, ib_positions: dict[str, Position], streamer: Any) -> None:
         for t in set(self._brackets) - set(ib_positions):
             self._record_exit(t, streamer)
 
     def _record_exit(self, ticker: str, streamer: Any) -> None:
-        """Record exit when IB confirms position closed."""
         self._brackets.pop(ticker, None)
         pos = self.brain._open_positions.pop(ticker, None)
         if pos is None:
             return
         pnl = get_ib_pnl(self.ib, ticker, pos)
         log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
-        self.brain.record_trade(ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction)
+        self.brain.record_trade(
+            ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
+        )
         journal_exit(self.journal, ticker, pnl, pos)
 
     def cancel_all(self) -> None:
@@ -191,6 +193,6 @@ class IBExecutor:
         except Exception as e:
             log.warning("cancel all failed: %s", e)
         self._brackets.clear()
-
+        self._pending_parent.clear()
 
 __all__ = ["IBExecutor"]
