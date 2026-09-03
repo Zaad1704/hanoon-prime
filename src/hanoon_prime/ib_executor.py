@@ -1,28 +1,18 @@
-"""hanoon_prime.ib_executor — IB-native order placement and exit monitoring.
+"""hanoon_prime.ib_executor — JULI's execution layer.
 
-IB is the SINGLE source of truth for everything:
-  - Positions: read from ib.positions()
-  - P&L: read from reqPnL()
-  - Orders: managed via bracketOrder()
-  - Exits: handled by IB's native bracket (stop/target children)
+JULI is the BRAIN — it does everything:
+  - Places bracket orders (parent + stop + target)
+  - Trails BOTH stop and target as position moves in favor
+  - Monitors all orders and their children
+  - Cancels orphaned orders
+  - Records exits to journal (carbon copy of IB)
 
-This module does NOT maintain local state. Every cycle:
-  1. Query IB for actual positions
-  2. Sync local view to match IB exactly
-  3. Journal is a pure carbon copy of IB state
-
-The system behaves like a human trader:
-  - Views IB TWS for all data
-  - Places orders through IB
-  - Lets IB handle exits via bracket orders
-  - Records IB state to journal (carbon copy)
+IB is just the HANDS — it only executes what JULI tells it.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
-
-import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from .edge import score_to_win_prob
@@ -35,8 +25,22 @@ from .types import Position
 log = logging.getLogger(__name__)
 
 
+def _find_stop_target(children: Any) -> tuple[float, float]:
+    """Extract stop and target prices from bracket children."""
+    stop = max((c.auxPrice for c in children if c.auxPrice), default=0.0)
+    target = max((c.lmtPrice for c in children if c.lmtPrice), default=0.0)
+    return float(stop), float(target)
+
+
+def _should_trail(d: int, cur: float, level: float, atr: float) -> bool:
+    """Check if order should be trailed (moved 1 ATR in favor)."""
+    if d > 0:
+        return cur - level > atr
+    return level - cur > atr
+
+
 class IBExecutor:
-    """Place bracket orders and monitor exits via live IB data."""
+    """JULI's execution layer — monitors IB and manages all orders."""
 
     def __init__(
         self, ib_client: Any, brain: Hippocampus,
@@ -61,7 +65,6 @@ class IBExecutor:
             score_to_win_prob(thought.score), price, atr
         )
         if shares <= 0:
-            log.warning("Sizing returned 0 for %s — skipping", ticker)
             return
         d = thought.direction
         stop = round(price - d * ATR_STOP_MULT * atr, 2)
@@ -69,41 +72,35 @@ class IBExecutor:
         shares = max(1, int(shares))
         action = "BUY" if d > 0 else "SELL"
         contract = streamer.contracts[ticker]
-        bracket = self.ib.bracketOrder(
-            action, shares, round(price, 2), target, stop
-        )
+        bracket = self.ib.bracketOrder(action, shares, round(price, 2), target, stop)
         for order in bracket:
             order.tif = "DAY"
             self.ib.placeOrder(contract, order)
         self._brackets[ticker] = (stop, target)
-        log.info(
-            "BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
-            action, ticker, round(price, 2), stop, target, shares,
-        )
+        log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
+                 action, ticker, round(price, 2), stop, target, shares)
 
     def sync_from_ib(self, streamer: Any) -> None:
-        """Sync everything from IB — the single source of truth."""
+        """JULI syncs everything from IB — IB is source of truth."""
         if not self._ping_ib():
             return
-        ib_positions = read_ib_positions(
-            self.ib, self.tracked_tickers, self._brackets
-        )
-        self._sync_and_cancel_orders(ib_positions, streamer)
+        ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
+        self._monitor_all_orders(ib_positions, streamer)
         self._record_closed_positions(ib_positions, streamer)
         self.brain._open_positions = ib_positions
         journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
 
     def _ping_ib(self) -> bool:
-        """Verify IB connection is alive before syncing."""
+        """Verify IB connection is alive."""
         try:
             return bool(self.ib.isConnected())
         except Exception:
             return False
 
-    def _sync_and_cancel_orders(
+    def _monitor_all_orders(
         self, ib_positions: dict[str, Position], streamer: Any
     ) -> None:
-        """Sync brackets from IB; cancel orphans; trail winning stops."""
+        """JULI monitors ALL parent orders — cancel orphans, trail both."""
         try:
             for trade in self.ib.trades():
                 o = trade.order
@@ -112,24 +109,22 @@ class IBExecutor:
                 sym = trade.contract.symbol if trade.contract else ""
                 if sym not in self.tracked_tickers:
                     continue
-                self._sync_one_bracket(trade, o, sym, ib_positions, streamer)
+                self._handle_parent(trade, o, sym, ib_positions, streamer)
         except Exception as e:
-            log.warning("sync orders from IB failed: %s", e)
+            log.warning("monitor orders failed: %s", e)
 
-    def _sync_one_bracket(
+    def _handle_parent(
         self, trade: Any, order: Any, sym: str,
         ib_positions: dict[str, Position], streamer: Any,
     ) -> None:
-        """Sync one bracket — cancel orphans, trail stops."""
-        children = getattr(order, "children", None) or []
-        stop = max((c.auxPrice for c in children if c.auxPrice), default=0.0)
-        target = max((c.lmtPrice for c in children if c.lmtPrice), default=0.0)
+        """Handle one parent order — cancel orphans, trail both."""
+        stop, target = _find_stop_target(getattr(order, "children", None) or [])
         if sym not in ib_positions:
             self._cancel_if_active(trade, order)
             return
         if stop and target:
-            self._brackets[sym] = (float(stop), float(target))
-            self._trail_stop(sym, ib_positions[sym], streamer, float(stop), trade)
+            self._brackets[sym] = (stop, target)
+            self._trail_both(sym, ib_positions[sym], streamer, stop, target, trade)
 
     def _cancel_if_active(self, trade: Any, order: Any) -> None:
         """Cancel an orphan order only if IB reports it active."""
@@ -139,23 +134,34 @@ class IBExecutor:
         except Exception as e:
             log.debug("cancel skip: %s", e)
 
-    def _trail_stop(
+    def _trail_both(
         self, sym: str, pos: Position, streamer: Any,
-        stop: float, trade: Any,
+        stop: float, target: float, trade: Any,
     ) -> None:
-        """Trail stop loss for in-favor positions."""
+        """JULI trails BOTH stop and target as position moves in favor."""
         cur = streamer.get_last_price(sym)
-        d = pos.direction
-        if not cur or not d:
+        d, atr = pos.direction, streamer.buffer_atr(sym)
+        if not cur or not d or atr <= 0.0:
             return
-        atr = streamer.buffer_atr(sym)
-        if (d > 0 and cur - stop > atr) or (d < 0 and stop - cur > atr):
-            new_stop = round(cur - d * ATR_STOP_MULT * atr, 2)
-            for child in (trade.order.children or []):
-                if getattr(child, "auxPrice", 0):
-                    child.auxPrice = new_stop
-                    self.ib.placeOrder(trade.contract, trade.order)
-                    return
+        if _should_trail(d, cur, stop, atr):
+            self._modify_child(trade, "stop", cur - d * ATR_STOP_MULT * atr)
+        if _should_trail(d, cur, target, atr):
+            self._modify_child(trade, "target", cur + d * ATR_TARGET_MULT * atr)
+
+    def _modify_child(self, trade: Any, kind: str, new_price: float) -> None:
+        """Modify a child order (stop or target) in IB."""
+        price = round(new_price, 2)
+        for child in (trade.order.children or []):
+            if kind == "stop" and getattr(child, "auxPrice", 0):
+                child.auxPrice = price
+                self.ib.placeOrder(trade.contract, trade.order)
+                log.info("TRAIL STOP %s → %.2f", trade.contract.symbol, price)
+                return
+            if kind == "target" and getattr(child, "lmtPrice", 0):
+                child.lmtPrice = price
+                self.ib.placeOrder(trade.contract, trade.order)
+                log.info("TRAIL TARGET %s → %.2f", trade.contract.symbol, price)
+                return
 
     def _record_closed_positions(
         self, ib_positions: dict[str, Position], streamer: Any
@@ -172,15 +178,8 @@ class IBExecutor:
             return
         pnl = get_ib_pnl(self.ib, ticker, pos)
         log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
-        self.brain.record_trade(
-            ticker=ticker, won=pnl > 0, pnl_pct=pnl,
-            direction=pos.direction,
-        )
+        self.brain.record_trade(ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction)
         journal_exit(self.journal, ticker, pnl, pos)
-
-    def check_exits(self, streamer: Any) -> None:
-        """IB handles exits via bracket orders — no local check needed."""
-        pass
 
     def cancel_all(self) -> None:
         """Cancel all open orders in IB."""
@@ -188,7 +187,7 @@ class IBExecutor:
             cancel = getattr(self.ib, "cancelAllOrders", None)
             (cancel or self.ib.reqGlobalCancel)()
         except Exception as e:
-            log.warning("cancel all orders failed: %s", e)
+            log.warning("cancel all failed: %s", e)
         self._brackets.clear()
 
 

@@ -1,7 +1,6 @@
 """hanoon_prime.ib_adapter — IB Gateway streaming adapter.
 
-IB is the SINGLE source of truth for everything:
-market data, positions, orders, P&L, fills.
+IB is the SINGLE source of truth for everything.
 Journal is a carbon copy of IB state — not generated data.
 Excluded from mypy strict — ib_insync is not fully typed.
 """
@@ -25,6 +24,9 @@ from .memory import Journal
 
 log = logging.getLogger(__name__)
 
+MAX_RECONNECT = 5
+RECONNECT_DELAY = 5
+
 
 class SafetyNetStopped(Exception):
     """Raised when a hard safety net triggers."""
@@ -33,12 +35,19 @@ class SafetyNetStopped(Exception):
 def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
     """Count actual positions in IB for tracked tickers."""
     try:
-        return len([
-            p for p in ib_client.positions()
-            if p.contract.symbol in tracked
-        ])
+        return len([p for p in ib_client.positions() if p.contract.symbol in tracked])
     except Exception:
         return 0
+
+
+def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
+    """Try to connect once. Returns True on success."""
+    try:
+        ib_client.connect(host, port, clientId=client_id)
+        return bool(ib_client.isConnected())
+    except Exception as e:
+        log.warning("Connection failed: %s", e)
+        return False
 
 
 class IBStreamingBot:
@@ -68,30 +77,32 @@ class IBStreamingBot:
         self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
         client_id: int = IB_CLIENT_ID,
     ) -> None:
-        """Connect to IB Gateway/TWS and log in."""
-        log.info("Connecting to %s:%s (client=%s)", host, port, client_id)
-        self.ib.connect(host, port, clientId=client_id)
-        log.info("Connected. Account: %s", self.account)
+        """Connect to IB Gateway with retry logic."""
+        for attempt in range(1, MAX_RECONNECT + 1):
+            log.info("Connecting to %s:%s (client=%s, attempt %d)",
+                     host, port, client_id, attempt)
+            if _try_connect(self.ib, host, port, client_id):
+                log.info("Connected. Account: %s", self.account)
+                return
+            if attempt < MAX_RECONNECT:
+                time.sleep(RECONNECT_DELAY)
+        raise ConnectionError(f"Failed to connect after {MAX_RECONNECT} attempts")
 
     def _evaluate(self, ticker: str) -> Optional[Thought]:
         """Run Cortex on the latest StreamBuffer data."""
         if not self.streamer.ready(ticker):
             return None
         a = self.streamer.get_arrays(ticker)
-        alpha = compute_alpha(
-            close=a["close"], volume=a["volume"],
-            buy_volume=a["buy_volume"],
-            bid_sizes=a["bid_sizes"], ask_sizes=a["ask_sizes"],
-        )
+        alpha = compute_alpha(close=a["close"], volume=a["volume"],
+                              buy_volume=a["buy_volume"],
+                              bid_sizes=a["bid_sizes"], ask_sizes=a["ask_sizes"])
         return self.brain.cortex.evaluate(alpha) if alpha else None
 
     def _on_entry(self, ticker: str, thought: Thought, tk: Any) -> None:
         """Handle BUY/SELL verdict: safety nets, then bracket entry."""
         if not self.brain.check_entry_allowed():
             return
-        if ticker in self.brain._open_positions:
-            return
-        if not tk.hasBidAsk():
+        if ticker in self.brain._open_positions or not tk.hasBidAsk():
             return
         price = float((tk.bid + tk.ask) * 0.5)
         self.executor.place_bracket(ticker, thought, price, self.streamer)
@@ -153,19 +164,15 @@ class IBStreamingBot:
 
     def _halt_bot(self, reason: str) -> None:
         """Halt the bot and record to journal."""
-        self.journal.append({
-            "event": "safety_net_triggered", "source": "ib_gateway",
-            "reason": reason, "timestamp": time.time(),
-        })
+        self.journal.append({"event": "safety_net_triggered", "source": "ib_gateway",
+                             "reason": reason, "timestamp": time.time()})
         self._running = False
 
     def _handle_ticker(self, sym: str, tk: Any) -> None:
         """Evaluate ticker update and enter if verdict is non-HOLD."""
         thought = self._evaluate(sym)
-        if not thought:
-            return
-        thought.z_scores = getattr(thought, "z_scores", {})
-        if thought.direction != 0 and thought.verdict != "HOLD":
+        if thought and thought.direction != 0 and thought.verdict != "HOLD":
+            thought.z_scores = getattr(thought, "z_scores", {})
             self._on_entry(sym, thought, tk)
 
     def _cleanup(self, pnl: Any) -> None:

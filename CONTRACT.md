@@ -10,58 +10,85 @@ impossible. If you can't commit, you can't break the main branch.
 
 ---
 
-## Architecture: IB Gateway → JULI Neuromorphic Brain
+## Architecture: JULI Brain → IB Hands
 
 ```
-┌────────────┐        ┌─────────────────────────────────────────────┐
-│  IB Gateway  │ →   │  JULI BRAIN (single consciousness)          │
-│  Live Stream │    │                                             │
-│  reqMktData  │    │  ┌───────┐  ┌────────────┐  ┌────────┐     │
-│  reqMktDepth │    │  │ EYES  │→ │CEREBELLUM  │→ │CORTEX  │     │
-│  reqHistData │    │  │(data) │  │(signals)   │  │(score) │     │
-│  reqPnL      │    │  └───────┘  └──────┬──────┘  └────┬───┘     │
-│  bracketOrd  │    │                   │                │          │
-│  pendingTkr  │    │  ┌────────────────┘    ┌─────────┘          │
-│  waitOnUpd  │    │  ▼                        ▼                   │
-└────────────┘    │ ┌────────┐   ┌──────────────────┐           │
-                  │ │ HANDS  │   │ IMMUNE SYSTEM    │           │
-                  │ │(execute│   │ (hard-coded safety)│           │
-                  │ │ brackets│   └────────┬─────────┘           │
-                  │ │ ATR stops) │         │                    │
-                  │ └────────┘               │                    │
-                  │                          │                    │
-                  │ ┌────────────────────────┘                    │
-                  │ ▼                                              │
-                  │ ┌──────────────┐    ┌──────────┐             │
-                  │ │ HIPPOCAMPUS  │    │ MEMORY   │             │
-                  │ │ (learning)   │ →  │(journal) │             │
-                  │ └──────────────┘    └──────────┘             │
-                  └─────────────────────────────────────────────┘
-
-IB Adapter Layer (4 files):
-  ib_compat.py   → Python 3.14 event loop shim for ib_insync
-  ib_streamer.py → reqMktData + reqMktDepth + reqHistoricalData → StreamBuffer
-  ib_executor.py → bracketOrder() + exits + journal stamping
-  ib_adapter.py  → main event loop: pendingTickers → Cortex → bracket
+┌─────────────────────────────────────────────────────────────────┐
+│                    JULI BRAIN (the thinker)                     │
+│                                                                 │
+│  ┌─────────┐  ┌────────────┐  ┌────────┐                      │
+│  │  EYES   │→ │ CEREBELLUM │→ │ CORTEX │                      │
+│  │ (data)  │  │ (signals)  │  │(score) │                      │
+│  └─────────┘  └────────────┘  └───┬────┘                      │
+│                                   │                             │
+│  ┌────────────────────┐    ┌──────┴──────┐                     │
+│  │ IMMUNE SYSTEM      │    │    HANDS     │                     │
+│  │ (hard-coded safety)│    │ (execution)  │                     │
+│  └─────────┬──────────┘    └──────┬──────┘                     │
+│            │                       │                             │
+│  ┌─────────┴──────────┐    ┌──────┴──────┐                     │
+│  │    HIPPOCAMPUS     │    │    MEMORY   │                     │
+│  │    (learning)      │→   │   (journal) │                     │
+│  └────────────────────┘    └─────────────┘                     │
+│                                                                 │
+│  JULI does ALL the thinking:                                    │
+│  - Evaluates indicators from IB stream                          │
+│  - Makes buy/sell decisions                                     │
+│  - Trails stop AND target orders                                │
+│  - Cancels orphaned orders                                      │
+│  - Monitors all orders and children                             │
+│  - Learns from trade outcomes                                   │
+│  - Records IB state to journal (carbon copy)                    │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    IB GATEWAY (the hands)                       │
+│                                                                 │
+│  IB only executes what JULI tells it:                           │
+│  - Receives bracket orders (parent + stop + target)             │
+│  - Reports fills, positions, P&L                                │
+│  - Streams market data (reqMktData + reqMktDepth)               │
+│  - Modifies orders when JULI trails                             │
+│                                                                 │
+│  IB is the source of truth for:                                 │
+│  - Positions: ib.positions()                                    │
+│  - P&L: reqPnL()                                                │
+│  - Orders: ib.trades()                                          │
+│  - Fills: trade.fill objects                                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Principles
 
-1. **IB is the Single Source of Truth**: JULI does NOTHING locally that IB
-   already provides. Positions, P&L, orders, fills — all come from IB.
-   The system is like a human trader who views, selects, buys, sells, and
-   holds entirely through IB TWS. Journal is a carbon copy of IB state.
-2. **Single Consciousness**: JULI is ONE process. IB socket → ring buffer →
-   cerebellum → cortex → immune check → hands. Every component shares memory.
-3. **Parallel Processing**: JULI has TWO independent screens (LONG/SHORT)
-   running simultaneously. Each ticker gets its own cerebellum/cortex instance.
-4. **Punishment-Dominant Learning**: JULI is punished 2× harder for losses
-   than rewarded for wins. Weight decay (0.999/trade) prevents paralysis.
-5. **Hard Safety Nets**: The Immune System is non-overridable.
-   IB-reported daily loss → hard stop. 3 consecutive IB fills → pause.
-   3 max concurrent positions. $50 max loss per trade.
-6. **Limit Orders Only**: Exits use limit orders, not market orders.
-   Market fills are random and unpredictable. Limit orders give control.
+1. **JULI is the Brain**: JULI does ALL the thinking, trailing, learning, and cleanup. IB only executes.
+2. **IB is the Hands**: IB receives orders from JULI, reports state, and executes. No logic in IB.
+3. **IB is Source of Truth**: Positions, P&L, orders, fills — all come from IB. Journal is carbon copy.
+4. **Every Order Has Children**: Every parent order has stop loss and take profit children.
+5. **JULI Trails Both**: JULI trails BOTH stop and target as position moves in favor.
+6. **JULI Cancels Orphans**: JULI monitors all orders and cancels orphans immediately.
+7. **Single Consciousness**: JULI is ONE process. IB socket → ring buffer → cerebellum → cortex → hands.
+8. **Punishment-Dominant Learning**: JULI is punished 2× harder for losses than rewarded for wins.
+9. **Hard Safety Nets**: The Immune System is non-overridable. IB-reported daily loss → hard stop.
+
+---
+
+## What JULI Does (Local)
+
+1. **Analyzes**: Reads IB market data, computes indicators, evaluates scores
+2. **Decides**: Makes buy/sell/hold decisions based on indicators
+3. **Places Orders**: Tells IB to place bracket orders (parent + stop + target)
+4. **Trails Orders**: Modifies stop and target as position moves in favor
+5. **Cancels Orphans**: Cancels orders that IB no longer tracks
+6. **Records**: Copies IB state to journal (carbon copy, not generated)
+7. **Learns**: Adapts indicator weights based on trade outcomes
+
+## What IB Does (Remote)
+
+1. **Executes**: Places/modifies/cancels orders when told by JULI
+2. **Reports**: Streams positions, P&L, fills, market data
+3. **Stores**: Maintains order book, position state, trade history
+4. **Fills**: Executes orders when price conditions are met
 
 ---
 
@@ -99,6 +126,8 @@ IB Adapter Layer (4 files):
 | Any source file | 200 | — | — |
 | Any function | — | 40 | 3 levels |
 
+---
+
 ## Indicators (exactly 5, no more — R4)
 
 1. **VPIN** — Volume-synchronized probability of informed trading
@@ -109,6 +138,8 @@ IB Adapter Layer (4 files):
 
 Every indicator must pass `R4_indicator_edge` (permutation test, p < 0.05) before
 it is admitted. Non-performing indicators are **deleted**, not dampened.
+
+---
 
 ## Current Parameters
 
@@ -126,6 +157,8 @@ it is admitted. Non-performing indicators are **deleted**, not dampened.
 | KELLY_FRACTION | 0.25 (25%) | Fractional Kelly for capital preservation |
 | TIMEOUT_BARS | 999 (disabled) | ATR barriers decide entry/exit |
 | Short allowed | True | Dual LONG/SHORT screens |
+
+---
 
 ## Learning System (R8 — Single System Only)
 
@@ -147,6 +180,8 @@ Bounds:             w_i ∈ [-2.0, +2.0]
 No other file may implement weight adaptation. All learning goes through
 `hippocampus.record_trade()`.
 
+---
+
 ## Safety Nets (R6 — Hard Constants)
 
 | Limit | Value | Description |
@@ -162,6 +197,8 @@ No other file may implement weight adaptation. All learning goes through
 All values are literal constants in `immune.py`. No `os.environ`, no config
 files, no CLI flags. The system cannot be weakened at runtime.
 
+---
+
 ## Data Flow Contract
 
 ### Live Mode (IB Direct — Primary Path)
@@ -173,7 +210,8 @@ IB Gateway (reqMktData + reqMktDepth + reqPnL)
     → cortex.evaluate() → Thought(direction, score, z_scores)
     → immune check (positions from ib.positions())
     → ib_executor.place_bracket() → IB bracketOrder()
-    → IB handles exits via bracket children (stop/target)
+    → JULI trails stop AND target (modifies IB orders)
+    → IB fills when price conditions met
     → ib_executor._journal_snapshot() → carbon copy of IB state
     → hippocampus.record_trade() → asymmetric weight adaptation
 ```
@@ -187,7 +225,7 @@ IB Gateway (reqMktData + reqMktDepth + reqPnL)
 **The system does NOT:**
 - Maintain local position state that could drift from IB
 - Compute P&L independently when IB provides it
-- Use market orders (random fills) — only limit orders
+- Use market orders (random fills) — only bracket orders with children
 - Generate synthetic journal entries — only carbon copies IB state
 
 ### Backtest Mode (CSV — Validation Only)
@@ -205,6 +243,8 @@ CSV (1-min OHLCV) → eyes.load_ohlcv() → numpy arrays
 Backtest mode exists ONLY to validate strategy before going live.
 The live system never touches CSV files.
 
+---
+
 ## Excluded Files
 
 - **`ib_adapter.py`** — Live IB connection adapter. Excluded from mypy,
@@ -219,3 +259,5 @@ The live system never touches CSV files.
   IB orders and stamps the journal.
 - **`ib_compat.py`** — ib_insync import compatibility shim (Python 3.14
   event loop fixup). Excluded from all checks. 29 lines of boilerplate.
+- **`_ib_sync.py`** — IB state reading helpers. Excluded from mypy,
+  R10/R11/R13/R15 checks. Pure functions that read from IB.
