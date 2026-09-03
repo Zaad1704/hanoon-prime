@@ -115,7 +115,7 @@ def protect_position(
 
     for pos in ib_client.positions():
         sym = pos.contract.symbol if pos.contract else ""
-        if sym not in tracked or sym in pending:
+        if sym not in tracked or sym in pending or sym in brackets:
             continue
         d = 1 if pos.position > 0 else -1
         expected_qty, expected_action = abs(pos.position), "SELL" if d > 0 else "BUY"
