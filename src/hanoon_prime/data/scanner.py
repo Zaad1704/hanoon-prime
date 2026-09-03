@@ -16,15 +16,20 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 SCAN_CONFIGS: dict[str, dict[str, Any]] = {
-    "hot_volume": {
+    "most_active": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
-        "scanCode": "HOT_ACTIVE_US",
+        "scanCode": "MOST_ACTIVE",
     },
     "top_gainers": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
-        "scanCode": "TOP_VOLUME_GAIN",
+        "scanCode": "TOP_PCT_GAIN",
+    },
+    "high_volume": {
+        "instrument": "STK",
+        "locationCode": "STK.US.MAJOR",
+        "scanCode": "HOT_BY_VOLUME",
     },
 }
 

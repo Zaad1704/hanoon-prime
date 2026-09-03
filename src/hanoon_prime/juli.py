@@ -56,7 +56,7 @@ class JuliBrain:
         if now - self._last_scan < SCANNER_INTERVAL:
             return
         try:
-            self.scanner.scan("hot_volume")
+            self.scanner.scan("most_active")
             self._candidates = self.scanner.get_candidates()
             self._last_scan = now
             log.info("SCAN: %d raw candidates", len(self._candidates))
