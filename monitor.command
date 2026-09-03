@@ -19,6 +19,9 @@ ok()   { echo -e "\033[32m[$(date '+%H:%M:%S')]\033[0m ✅ $*"; }
 warn() { echo -e "\033[33m[$(date '+%H:%M:%S')]\033[0m ⚠️  $*"; }
 hdr()  { echo -e "\033[1;37m$*\033[0m"; }
 
+# Filter noisy ib_insync messages
+LOG_FILTER='grep -v -E "(commissionReport|Error 10147.*OrderId 0.*not found|Error 10092|Deep market data|execDetails|orderStatus)" || true'
+
 # ── Process status ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━████
 show_status() {
   echo ""
@@ -119,27 +122,26 @@ if command -v tmux >/dev/null 2>&1 && [[ -z "${TMUX:-}" ]]; then
   if [[ ! -f "$LOG_DIR/hanoon_prime.log" ]]; then
     warn "No log file at $LOG_DIR/hanoon_prime.log"
     log "Waiting for bot to start... (run: bash start.command)"
-    # Create the log file if it doesn't exist so tail can follow it
     touch "$LOG_DIR/hanoon_prime.log"
   fi
 
   _session="hanoon_monitor"
   tmux kill-session -t "$_session" 2>/dev/null || true
 
-  # Main bot log (left pane)
+  # Main bot log (left pane) - filter noisy ib_insync messages
   tmux new-session -d -s "$_session" \
-    "tail -f '$LOG_DIR/hanoon_prime.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+    "tail -f '$LOG_DIR/hanoon_prime.log' 2>/dev/null | grep --line-buffered -v -E '(commissionReport|Error 10147.*OrderId 0.*not found|Error 10092|Deep market data|execDetails|orderStatus)'"
 
   # HALIM log (right pane, if exists)
   if [[ -f "$LOG_DIR/halim_serve.log" ]]; then
     tmux split-window -t "$_session" -h \
-      "tail -f '$LOG_DIR/halim_serve.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+      "tail -f '$LOG_DIR/halim_serve.log' 2>/dev/null | grep --line-buffered -v -E '(commissionReport|Error 10147.*OrderId 0.*not found)'"
   fi
 
   # Health check bottom pane (if overnight monitor exists)
   if [[ -f "$LOG_DIR/overnight_monitor.log" ]]; then
     tmux split-window -t "$_session" -v \
-      "tail -f '$LOG_DIR/overnight_monitor.log' 2>/dev/null | grep --line-buffered -v 'Error 10147.*OrderId 0.*not found'"
+      "tail -f '$LOG_DIR/overnight_monitor.log' 2>/dev/null | grep --line-buffered -v -E '(commissionReport|Error 10147.*OrderId 0.*not found)'"
   fi
 
   tmux select-layout -t "$_session" tiled 2>/dev/null
@@ -147,11 +149,10 @@ if command -v tmux >/dev/null 2>&1 && [[ -z "${TMUX:-}" ]]; then
 else
   # Fallback: plain tail with color highlighting
   if [[ -f "$LOG_DIR/hanoon_prime.log" ]]; then
-    tail -f "$LOG_DIR/hanoon_prime.log" 2>/dev/null | grep --line-buffered -v "Error 10147.*OrderId 0.*not found"
+    tail -f "$LOG_DIR/hanoon_prime.log" 2>/dev/null | grep --line-buffered -v -E "(commissionReport|Error 10147.*OrderId 0.*not found|Error 10092|Deep market data|execDetails|orderStatus)"
   else
     warn "No log file at $LOG_DIR/hanoon_prime.log"
     log "Waiting for bot to start... (run: bash start.command)"
-    # Create and follow the log file
     touch "$LOG_DIR/hanoon_prime.log"
     tail -f "$LOG_DIR/hanoon_prime.log" 2>/dev/null
   fi
