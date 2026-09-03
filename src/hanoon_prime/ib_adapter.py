@@ -58,7 +58,7 @@ class IBStreamingBot:
         self._last_beat: float = 0.0
         self._setup_signals()
     def _setup_signals(self) -> None:
-        def _h(s: int, f: Any) -> None:
+        def _h(s: int, _: Any) -> None:
             log.warning("Signal %s — shutting down.", s); self._running = False
         signal.signal(signal.SIGINT, _h); signal.signal(signal.SIGTERM, _h)
     def connect(self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
@@ -101,29 +101,34 @@ class IBStreamingBot:
             log.error("PnL subscription failed: %s", e)
             return None
     def _get_snapshot(self, sym: str) -> dict[str, Any] | None:
-        """Build market data snapshot for JuliBrain."""
+        """Market data snapshot — partial if not enough bars yet."""
         tk = self.streamer.ticker_subs.get(sym)
-        if tk is None or not tk.hasBidAsk() or not self.streamer.ready(sym):
+        if tk is None or not tk.hasBidAsk():
             return None
-        a = self.streamer.get_arrays(sym)
-        return {"bid": float(tk.bid), "ask": float(tk.ask),
+        base = {"bid": float(tk.bid), "ask": float(tk.ask),
                 "last": float(tk.last or tk.close or 0),
                 "volume": float(tk.volume or 0),
-                "daily_volume": float(tk.volume or 0),
-                "atr": self.streamer.buffer_atr(sym),
-                "prices": list(a["close"]), "volumes": list(a["volume"]),
-                "close_arr": a["close"], "vol_arr": a["volume"],
-                "buy_vol_arr": a["buy_volume"],
-                "bid_sizes": a["bid_sizes"], "ask_sizes": a["ask_sizes"]}
-    def _process_cycle(self, seed: list[str], poll_interval: float, pnl: Any) -> None:
-        """One iteration — IB is source of truth for everything."""
+                "daily_volume": float(tk.volume or 0)}
+        if not self.streamer.ready(sym):
+            return base
+        a = self.streamer.get_arrays(sym)
+        base["atr"] = self.streamer.buffer_atr(sym)
+        base["prices"] = list(a["close"])
+        base["volumes"] = list(a["volume"])
+        base["close_arr"] = a["close"]
+        base["vol_arr"] = a["volume"]
+        base["buy_vol_arr"] = a["buy_volume"]
+        base["bid_sizes"] = a["bid_sizes"]
+        base["ask_sizes"] = a["ask_sizes"]
+        return base
+    def _process_cycle(self, _seed: list[str], poll_interval: float, pnl: Any) -> None:
         started = time.monotonic()
         try:
             self.executor.sync_from_ib(self.streamer)
             self._check_safety_nets(pnl)
+            self._sync_subscriptions()
             positions = set(self.brain._open_positions.keys())
             decisions = self.juli.tick(positions, self._get_snapshot)
-            self._sync_subscriptions()
             bars = 0
             for tk in self.ib.pendingTickers():
                 s = tk.contract.symbol if tk.contract else ""
@@ -142,17 +147,18 @@ class IBStreamingBot:
         except Exception as e:
             log.error("Cycle error: %s", e)
     def _sync_subscriptions(self) -> None:
-        """Subscribe to new tickers discovered by scanner."""
         tracked = self.juli.budget.get_all_tracked()
+        scanner_syms = {c.symbol for c in self.juli._candidates[:20]}
+        positions = set(self.brain._open_positions.keys())
+        all_needed = tracked | scanner_syms | positions
         self.executor.tracked_tickers = tracked
-        new = [s for s in tracked if s not in self.streamer.ticker_subs]
-        for sym in new:
+        new = [s for s in all_needed if s not in self.streamer.ticker_subs]
+        for sym in new[:5]:
             self._subscribe_one(sym)
     def _subscribe_one(self, sym: str) -> None:
         try: self.streamer.subscribe(sym); self.streamer.seed_history(sym)
         except Exception as e: log.warning("Sub %s fail: %s", sym, e)
     def _execute_decision(self, dec: dict[str, Any]) -> None:
-        """Execute a JuliBrain decision."""
         ticker = dec["ticker"]
         thought = dec["thought"]
         tk = self.streamer.ticker_subs.get(ticker)
@@ -167,22 +173,16 @@ class IBStreamingBot:
         self.executor.last_thoughts[ticker] = thought
     def _heartbeat(self) -> None:
         now = time.monotonic()
-        if now - self._last_beat < 60.0:
-            return
+        if now - self._last_beat < 60.0: return
         self._last_beat = now
-        log.info("HEARTBEAT open=%d journal=%d",
-                 len(self.brain._open_positions), self.journal.count())
+        log.info("HEARTBEAT open=%d journal=%d", len(self.brain._open_positions), self.journal.count())
     def _check_safety_nets(self, pnl: Any) -> None:
         if not self.brain.safety_enabled: return
         count = _count_ib_positions(self.ib, self.executor.tracked_tickers)
-        if count > 3:
-            log.critical("SAFETY NET: %d positions > 3 max", count)
-            self._halt_bot("too_many_positions"); return
+        if count > 3: log.critical("SAFETY NET: %d positions > 3 max", count); self._halt_bot("too_many_positions"); return
         if pnl is not None and float(pnl.dailyPnL) < -200.0:
-            log.critical("SAFETY NET: IB daily P&L $%.2f", float(pnl.dailyPnL))
-            self._halt_bot("daily_loss_limit"); return
-        if self.brain._consecutive_losses >= 3:
-            self._halt_bot("consecutive_losses")
+            log.critical("SAFETY NET: IB daily P&L $%.2f", float(pnl.dailyPnL)); self._halt_bot("daily_loss_limit"); return
+        if self.brain._consecutive_losses >= 3: self._halt_bot("consecutive_losses")
     def _halt_bot(self, reason: str) -> None:
         self.journal.append({"event": "halt", "reason": reason, "ts": time.time()})
         safety_halt(reason); self._running = False
