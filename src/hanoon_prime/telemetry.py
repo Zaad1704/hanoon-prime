@@ -76,11 +76,14 @@ class _TelemetryHandler(BaseHTTPRequestHandler):
     def _respond(self, code: int, payload: dict[str, Any]) -> None:
         """Write JSON response with the given status code."""
         body = json.dumps(payload).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log.debug("client disconnected mid-response: %s", e)
 
     @staticmethod
     def _ib_positions(ib: Any) -> list[Any]:
