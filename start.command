@@ -67,9 +67,9 @@ python3 -m pytest "$BOT_ROOT/tests/test_contract.py" -q --tb=short 2>&1 | tail -
 ok "Pre-flight passed"
 
 # ── 0b. Source .env ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if [[ -f "$REBUILD_ROOT/.env" ]]; then
+if [[ -f "$BOT_ROOT/.env" ]]; then
   set -a
-  source "$REBUILD_ROOT/.env"
+  source "$BOT_ROOT/.env"
   set +a
 fi
 
@@ -129,7 +129,7 @@ fi
 log "Step 3/5: HALIM serve"
 
 _HALIM_PID_FILE="$PID_DIR/halim_serve.pid"
-_HALIM_START="$REBUILD_ROOT/scripts/halim_start_rebuild.sh"
+_HALIM_START="$BOT_ROOT/scripts/halim_start.sh"
 
 if _check_running "$_HALIM_PID_FILE" "HALIM serve"; then
   :

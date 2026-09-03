@@ -42,3 +42,17 @@ data/market_data/
 # Static analysis caches
 .mypy_cache/
 .ruff_cache/
+
+# Halim weights — the merged 3GB base is too large for git. The Kaggle
+# LoRA adapter and all Halim code ARE committed; the merged checkpoint
+# stays local in halim/data/checkpoints (symlink latest -> qwen3.5_4b_v2).
+halim/data/checkpoints/qwen3.5_4b_v2/model.safetensors
+halim/data/checkpoints/qwen3.5_4b_v2/adapter_model.safetensors
+halim/data/checkpoints/latest
+halim/data/checkpoints/__huggingface_repos__.json
+
+# Learning data — lives in the vault repos (hanoon-halim-sft /
+# hanoon-juli-weights) snapshotted per session via git releases.
+halim/data/training/sft/gold.jsonl
+halim/data/training/sft/gold_simulated.jsonl
+halim/data/training/sft/gold_fakeib.jsonl

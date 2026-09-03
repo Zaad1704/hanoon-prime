@@ -8,20 +8,21 @@ repos:
     hooks:
       - id: ruff
         args: [--select=E501,C901,PLR0912,B008,ERA001,F401,F841, --extend-ignore=E501]
-        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$|^scripts/.*$
+        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$|^scripts/.*$|^halim/.*$
 
   - repo: https://github.com/psf/black
     rev: 23.12.1
     hooks:
       - id: black
         args: [--line-length=88]
-        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat)|hands|validator)\.py$
+        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat)|hands|validator)\.py$|^halim/.*$
 
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
         args: [--profile=black, --line-length=88]
+        exclude: ^halim/.*$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.11.2

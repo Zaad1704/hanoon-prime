@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Export all Halim training gold sources — idempotent, Colab-ready."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(ROOT / "halim") not in sys.path:
+    sys.path.insert(0, str(ROOT / "halim"))
+
+from halim.dataset import count_raw_sources, repo_root  # noqa: E402
+
+
+def export_all(*, include_learn_cache: bool = True) -> dict:
+    import os
+
+    os.environ.setdefault("HALIM_REPO_ROOT", str(repo_root()))
+
+    from core.halim_action_learn import export_action_gold
+    from core.halim_ppo_coevolution import export_coevolution_gold
+    from core.halim_ppo_dialogue import export_dialogue_gold
+    from core.halim_outcome_gold import export_outcome_gold
+    from core.commander_ib_gold import export_commander_gold
+    from archive.zombie_modules.halim_json_entry_gold import export_json_entry_gold
+
+    json_entry = export_json_entry_gold(root=repo_root())
+    web_drills = {}
+    if os.getenv("HALIM_V5_PREP", "false").lower() in ("1", "true", "yes") or os.getenv(
+        "HALIM_JSON_ENTRY_API", "false"
+    ).lower() in ("1", "true", "yes"):
+        from archive.zombie_modules.halim_json_entry_gold import export_web_json_drills
+
+        web_drills = export_web_json_drills(root=repo_root())
+    action = export_action_gold(include_learn_cache=include_learn_cache)
+    coev = export_coevolution_gold()
+    dialogue = export_dialogue_gold()
+    outcome = export_outcome_gold()
+    commander = export_commander_gold()
+    raw = count_raw_sources(repo_root())
+
+    return {
+        "ok": True,
+        "json_entry_gold": json_entry,
+        "web_json_drills": web_drills,
+        "action_gold": action,
+        "coevolution_gold": coev,
+        "dialogue_gold": dialogue,
+        "outcome_gold": outcome,
+        "commander_gold": commander,
+        "raw_sources": raw,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Export Halim training gold for SFT / Colab")
+    parser.add_argument("--no-learn-cache", action="store_true")
+    args = parser.parse_args()
+    result = export_all(include_learn_cache=not args.no_learn_cache)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
