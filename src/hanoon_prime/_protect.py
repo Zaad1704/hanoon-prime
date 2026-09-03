@@ -26,10 +26,15 @@ def _place_oca(
     oca: str,
 ) -> None:
     """Place OCA STP+LMT pair as position protection."""
-    kw = dict(action=action, totalQuantity=qty, tif="GTC", ocaGroup=oca, ocaType=1)
-    ib_client.placeOrder(
-        contract, _ib.Order(orderType="STP", auxPrice=stop, transmit=False, **kw)
+    kw = dict(
+        action=action,
+        totalQuantity=qty,
+        tif="GTC",
+        ocaGroup=oca,
+        ocaType=1,
+        transmit=True,
     )
+    ib_client.placeOrder(contract, _ib.Order(orderType="STP", auxPrice=stop, **kw))
     ib_client.placeOrder(contract, _ib.Order(orderType="LMT", lmtPrice=target, **kw))
 
 
