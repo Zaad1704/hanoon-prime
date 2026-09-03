@@ -8,7 +8,6 @@ Usage:
     python3 -m hanoon_prime.cli           # default FAST tickers
     python3 -m hanoon_prime.cli AAPL NVDA # custom tickers
 """
-
 from __future__ import annotations
 
 import logging
@@ -23,12 +22,21 @@ from .telemetry import TelemetryAPI
 log = logging.getLogger(__name__)
 
 
-def main() -> None:
-    """Entry point: start telemetry + bot, connect to IB Gateway live."""
+def _setup_logging() -> None:
+    """Configure logging — suppress verbose ib_insync messages."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Suppress verbose ib_insync.wrapper messages (portfolio updates, etc.)
+    logging.getLogger("ib_insync.wrapper").setLevel(logging.WARNING)
+    # Suppress ib_insync internal messages
+    logging.getLogger("ib_insync.ib").setLevel(logging.WARNING)
+
+
+def main() -> None:
+    """Entry point: start telemetry + bot, connect to IB Gateway live."""
+    _setup_logging()
     tickers = sys.argv[1:] if len(sys.argv) > 1 else list(FAST_TICKERS)
     journal_path = Path("runtime") / "journal_live.jsonl"
     journal_path.parent.mkdir(parents=True, exist_ok=True)
