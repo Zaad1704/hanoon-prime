@@ -128,14 +128,15 @@ class IBStreamingBot:
         started = time.monotonic()
         self.executor.sync_from_ib(self.streamer)
         self._check_safety_nets(pnl)
+        bars = 0
         for tk in self.ib.pendingTickers():
-            sym = tk.contract.symbol if tk.contract else ""
-            if sym in tickers and self.streamer.update_bar(sym):
-                self._handle_ticker(sym, tk)
+            s = tk.contract.symbol if tk.contract else ""
+            if s in tickers and self.streamer.update_bar(s):
+                self._handle_ticker(s, tk)
+                bars += 1
         if pnl is not None:
             self.brain._daily_pnl = float(pnl.dailyPnL)
         self.ib.waitOnUpdate(timeout=poll_interval)
-        # Cap CPU: events arrive faster than poll_interval — sleep the rest.
         elapsed = time.monotonic() - started
         if elapsed < poll_interval:
             time.sleep(poll_interval - elapsed)
@@ -196,5 +197,4 @@ class IBStreamingBot:
         """Connect to IB Gateway live port (4001) and run."""
         self.connect(port=IB_LIVE_PORT)
         self.run(tickers)
-
 __all__ = ["IBStreamingBot", "SafetyNetStopped"]
