@@ -137,12 +137,12 @@ class IBStreamingBot:
         if pnl is not None:
             self.brain._daily_pnl = float(pnl.dailyPnL)
         self.ib.waitOnUpdate(timeout=poll_interval)
-        elapsed = time.monotonic() - started
-        if elapsed < poll_interval:
-            time.sleep(poll_interval - elapsed)
+        if time.monotonic() - started < poll_interval:
+            time.sleep(poll_interval - (time.monotonic() - started))
         self._heartbeat()
+        if bars:
+            log.info("CYCLE bars=%d open=%d", bars, len(self.brain._open_positions))
     def _heartbeat(self) -> None:
-        """Periodic liveness line so the log never looks frozen."""
         now = time.monotonic()
         if now - self._last_beat < 60.0:
             return

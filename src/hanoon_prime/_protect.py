@@ -16,24 +16,36 @@ from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
 log = logging.getLogger(__name__)
 
 
+def _is_valid_protection(trades: list[Any]) -> bool:
+    """Check if OCA group has exactly STP+LMT pair."""
+    return len(trades) == 2 and {t.order.orderType for t in trades} == {"STP", "LMT"}
+
+
 def sweep_zombies(ib_client: Any) -> None:
-    """Cancel all JULI_* OCA orders on startup (zombie cleanup)."""
+    """Validate JULI_* OCA orders and fix broken ones."""
     try:
-        zombies = [
-            t
-            for t in ib_client.openTrades()
-            if t.order.ocaGroup and t.order.ocaGroup.startswith("JULI_")
-        ]
+        all_trades = ib_client.openTrades()
     except Exception:
         return
-    if not zombies:
+    juli = [
+        t
+        for t in all_trades
+        if t.order.ocaGroup and t.order.ocaGroup.startswith("JULI_")
+    ]
+    if not juli:
         return
-    log.info("SWEEP: cancelling %d zombie JULI_* orders", len(zombies))
-    for t in zombies:
-        try:
-            ib_client.cancelOrder(t.order)
-        except Exception as e:
-            log.debug("sweep cancel skip: %s", e)
+    from collections import defaultdict
+
+    groups: dict[str, list[Any]] = defaultdict(list)
+    for t in juli:
+        groups[t.order.ocaGroup].append(t)
+    for grp, trades in groups.items():
+        if _is_valid_protection(trades):
+            continue
+        sym = grp.replace("JULI_", "")
+        types = {t.order.orderType for t in trades}
+        log.info("SWEEP %s: %d orders (%s) — fixing", sym, len(trades), types)
+        _cancel_oca(ib_client, trades)
 
 
 def _get_oca_orders(ib_client: Any, sym: str) -> list[Any]:
