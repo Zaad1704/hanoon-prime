@@ -58,10 +58,12 @@ def _calc_pnl_from_fill(fill: float, pos: Position) -> float:
 
 
 def read_ib_orders(ib_client: Any) -> list[dict[str, Any]]:
-    """Read open orders from IB for journal carbon copy."""
+    """Read OPEN orders from IB for journal carbon copy (done ones excluded)."""
     orders: list[dict[str, Any]] = []
     try:
         for trade in ib_client.trades():
+            if trade.isDone():
+                continue  # filled/cancelled orders are no longer open
             o = trade.order
             if o and not getattr(o, "parentId", None):
                 orders.append(
@@ -182,19 +184,3 @@ def journal_exit(journal: Journal, ticker: str, pnl: float, pos: Position) -> No
             "timestamp": time.time(),
         }
     )
-
-
-def count_consecutive_losses(journal: Journal) -> int:
-    """Count consecutive losses from journal (carbon copy of IB fills)."""
-    try:
-        count = 0
-        for entry in reversed(journal.entries()):
-            if entry.get("event") != "position_closed":
-                continue
-            if entry.get("pnl", 0) < 0:
-                count += 1
-            else:
-                break
-        return count
-    except Exception:
-        return 0

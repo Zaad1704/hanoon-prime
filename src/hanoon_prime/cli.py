@@ -38,7 +38,9 @@ def main() -> None:
     """Entry point: start telemetry + bot, connect to IB Gateway live."""
     _setup_logging()
     tickers = sys.argv[1:] if len(sys.argv) > 1 else list(FAST_TICKERS)
-    journal_path = Path("runtime") / "journal_live.jsonl"
+    # Anchor to repo root, NOT CWD — bot may be launched from anywhere.
+    repo_root = Path(__file__).resolve().parents[2]
+    journal_path = repo_root / "runtime" / "journal_live.jsonl"
     journal_path.parent.mkdir(parents=True, exist_ok=True)
 
     bot = IBStreamingBot(account="PAPER")

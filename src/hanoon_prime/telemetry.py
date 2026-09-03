@@ -102,14 +102,13 @@ class _TelemetryHandler(BaseHTTPRequestHandler):
             return {"status": "starting", "bot": False}
         ib = getattr(bot, "ib", None)
         connected = ib.isConnected() if ib else False
+        journal = getattr(bot, "journal", None)
         return {
             "status": "ok" if connected else "disconnected",
             "connected": connected,
             "tickers": [s for s in bot.streamer.ticker_subs] if bot else [],
             "positions": [p.contract.symbol for p in self._ib_positions(ib)],
-            "journal_entries": (
-                len(bot.journal.entries()) if hasattr(bot, "journal") else 0
-            ),
+            "journal_entries": journal.count() if journal else 0,
             "safety_net_enabled": self._safety_net_status().get("enabled", False),
         }
 
@@ -142,7 +141,7 @@ class _TelemetryHandler(BaseHTTPRequestHandler):
         """Return the last 20 journal entries."""
         if not self.journal_path or not self.journal_path.exists():
             return {"entries": []}
-        entries = Journal(self.journal_path).entries()[::-1][:20]
+        entries = Journal(self.journal_path).tail(20)[::-1]
         return {"entries": entries}
 
     def _positions(self) -> dict[str, Any]:

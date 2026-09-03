@@ -1,5 +1,4 @@
 """hanoon_prime.ib_adapter — IB Gateway streaming adapter.
-
 IB is the SINGLE source of truth for everything.
 Journal is a carbon copy of IB state — not generated data.
 Excluded from mypy strict — ib_insync is not fully typed.
@@ -12,7 +11,6 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ._ib_sync import count_consecutive_losses
 from .cerebellum import compute_alpha
 from .cortex import Thought
 from .hippocampus import Hippocampus
@@ -23,13 +21,10 @@ from .immune import IB_CLIENT_ID, IB_HOST, IB_LIVE_PORT, IB_PAPER_PORT
 from .memory import Journal
 
 log = logging.getLogger(__name__)
-
 MAX_RECONNECT = 5
 RECONNECT_DELAY = 5
-
 class SafetyNetStopped(Exception):
     """Raised when a hard safety net triggers."""
-
 def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
     """Count actual positions in IB for tracked tickers."""
     try:
@@ -55,7 +50,8 @@ class IBStreamingBot:
         self.ib: Any = ib.IB()
         self.account = account
         self.brain = Hippocampus(safety_enabled=False)
-        self.journal = Journal(Path("runtime") / "journal_live.jsonl")
+        repo_root = Path(__file__).resolve().parents[2]
+        self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.brain, self.journal)
         self._running = False
@@ -134,6 +130,7 @@ class IBStreamingBot:
 
     def _process_cycle(self, tickers: list[str], poll_interval: float, pnl: Any) -> None:
         """One iteration — IB is source of truth for everything."""
+        started = time.monotonic()
         self.executor.sync_from_ib(self.streamer)
         self._check_safety_nets(pnl)
         for tk in self.ib.pendingTickers():
@@ -143,6 +140,10 @@ class IBStreamingBot:
         if pnl is not None:
             self.brain._daily_pnl = float(pnl.dailyPnL)
         self.ib.waitOnUpdate(timeout=poll_interval)
+        # Cap CPU: events arrive faster than poll_interval — sleep the rest.
+        elapsed = time.monotonic() - started
+        if elapsed < poll_interval:
+            time.sleep(poll_interval - elapsed)
 
     def _check_safety_nets(self, pnl: Any) -> None:
         """Check safety nets against IB's actual state."""
@@ -157,7 +158,7 @@ class IBStreamingBot:
             log.critical("SAFETY NET: IB daily P&L $%.2f", float(pnl.dailyPnL))
             self._halt_bot("daily_loss_limit")
             return
-        if count_consecutive_losses(self.journal) >= 3:
+        if self.brain._consecutive_losses >= 3:
             self._halt_bot("consecutive_losses")
 
     def _halt_bot(self, reason: str) -> None:

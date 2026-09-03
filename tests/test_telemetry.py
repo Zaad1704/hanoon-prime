@@ -35,6 +35,9 @@ class _FakeJournal:
     def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
         self._entries = entries or []
 
+    def count(self) -> int:
+        return len(self._entries)
+
     def entries(self) -> list[dict[str, Any]]:
         return self._entries
 

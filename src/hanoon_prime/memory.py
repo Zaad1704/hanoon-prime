@@ -4,6 +4,10 @@ R7: Entries are appended and can NEVER be deleted, updated, or overwritten.
 Every entry includes the SHA-256 hash of the previous entry — a
 lightweight hash chain so tampering is detectable.
 
+Appends are O(1): the entry count and last hash are cached in memory
+and seeded from the file tail once at startup, so a growing journal
+never forces full-file re-reads on every write.
+
 Renamed from journal.py to complete the neuro-morphic naming.
 """
 
@@ -15,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+_TAIL_BYTES = 1 << 20  # read at most 1MB from the end for tail operations
+
 
 class Journal:
     """Append-only trade journal with hash-chaining for tamper detection."""
@@ -22,36 +28,36 @@ class Journal:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._count, self._last_hash_val = self._seed()
+
+    def _seed(self) -> tuple[int, str | None]:
+        """Recover entry count + last hash from the file tail (O(1))."""
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return 0, None
+        with open(self.path, "rb") as f:
+            size = f.seek(0, 2)
+            f.seek(max(0, size - _TAIL_BYTES))
+            data = f.read().decode("utf-8", "replace").rstrip("\n")
+        try:
+            entry = json.loads(data.split("\n")[-1])
+        except (json.JSONDecodeError, KeyError, ValueError):
+            return 0, None
+        seq = int(entry.get("seq", -1))
+        return seq + 1, str(entry.get("hash")) if entry.get("hash") else None
 
     def append(self, entry: dict[str, Any]) -> None:
         """Append a single entry. Never deletes or updates existing entries."""
         stamped = {
             "ts": time.time(),
-            "seq": self._next_seq(),
-            "prev_hash": self._last_hash(),
+            "seq": self._count,
+            "prev_hash": self._last_hash_val,
             **entry,
         }
         stamped["hash"] = self._hash_entry(stamped)
         with open(self.path, "a") as f:
             f.write(json.dumps(stamped, sort_keys=True) + "\n")
-
-    def _next_seq(self) -> int:
-        if not self.path.exists():
-            return 0
-        with open(self.path) as f:
-            return len(f.readlines())
-
-    def _last_hash(self) -> str | None:
-        if not self.path.exists():
-            return None
-        with open(self.path) as f:
-            lines = f.readlines()
-        if not lines:
-            return None
-        try:
-            return str(json.loads(lines[-1])["hash"])
-        except (json.JSONDecodeError, KeyError):
-            return None
+        self._count += 1
+        self._last_hash_val = stamped["hash"]
 
     @staticmethod
     def _hash_entry(entry: dict[str, Any]) -> str:
@@ -59,6 +65,10 @@ class Journal:
         to_hash = {k: v for k, v in entry.items() if k != "hash"}
         raw = json.dumps(to_hash, sort_keys=True, default=str)
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def count(self) -> int:
+        """Number of entries — O(1), cached in memory."""
+        return self._count
 
     def entries(self) -> list[dict[str, Any]]:
         """Read all entries. Returns empty list if file doesn't exist."""
@@ -71,6 +81,18 @@ class Journal:
                 if line:
                     result.append(json.loads(line))
         return result
+
+    def tail(self, n: int) -> list[dict[str, Any]]:
+        """Read the last n entries (newest last) — reads only the file tail."""
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return []
+        with open(self.path, "rb") as f:
+            size = f.seek(0, 2)
+            f.seek(max(0, size - _TAIL_BYTES))
+            data = f.read().decode("utf-8", "replace")
+        lines = [ln for ln in data.split("\n") if ln.strip()]
+        parsed = [json.loads(ln) for ln in lines[-n:]]
+        return parsed
 
     def verify_chain(self) -> bool:
         """Verify hash chain integrity. Returns True if intact."""

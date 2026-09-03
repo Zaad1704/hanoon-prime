@@ -1,17 +1,16 @@
 """hanoon_prime.ib_executor — JULI's execution layer.
-
 JULI is the BRAIN — it does everything:
   - Places bracket orders (parent + stop + target)
   - Trails BOTH stop and target as position moves in favor
   - Monitors all orders and their children
   - Cancels orphaned orders
   - Records exits to journal (carbon copy of IB)
-
 IB is just the HANDS — it only executes what JULI tells it.
 """
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -31,7 +30,6 @@ def _find_stop_target(children: Any) -> tuple[float, float]:
     stop = max((c.auxPrice for c in children if c.auxPrice), default=0.0)
     target = max((c.lmtPrice for c in children if c.lmtPrice), default=0.0)
     return float(stop), float(target)
-
 def _should_trail(d: int, cur: float, level: float, atr: float) -> bool:
     """Check if order should be trailed (moved 1 ATR in favor)."""
     if d > 0:
@@ -52,6 +50,7 @@ class IBExecutor:
         self.last_thoughts: dict[str, Any] = {}
         self._brackets: dict[str, tuple[float, float]] = {}
         self._pending_parent: set[str] = set()
+        self._last_snapshot: float = 0.0
 
     def place_bracket(
         self, ticker: str, thought: Any, price: float, streamer: Any
@@ -89,7 +88,10 @@ class IBExecutor:
         self._monitor_all_orders(ib_positions, streamer)
         self._record_closed_positions(ib_positions, streamer)
         self.brain._open_positions = ib_positions
-        journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
+        now = time.monotonic()
+        if now - self._last_snapshot >= 10.0:  # carbon copy, not spam
+            self._last_snapshot = now
+            journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
 
     def _ping_ib(self) -> bool:
         """Verify IB connection is alive."""
