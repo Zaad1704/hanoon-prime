@@ -185,6 +185,7 @@ class TelemetryAPI:
         """Shut down the HTTP server."""
         if self._server:
             self._server.shutdown()
+            self._server.server_close()
             log.info("TelemetryAPI stopped")
 
 
