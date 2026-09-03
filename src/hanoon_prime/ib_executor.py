@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
+from ._protect import protect_position
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_compat import ib
@@ -84,6 +85,8 @@ class IBExecutor:
         """JULI syncs everything from IB — IB is source of truth."""
         if not self._ping_ib():
             return
+        protect_position(self.ib, self.tracked_tickers,
+                         self._brackets, self._pending_parent, streamer)
         ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
         self._monitor_all_orders(ib_positions, streamer)
         self._record_closed_positions(ib_positions, streamer)
@@ -99,7 +102,6 @@ class IBExecutor:
             return bool(self.ib.isConnected())
         except Exception:
             return False
-
     def _monitor_all_orders(
         self, ib_positions: dict[str, Position], streamer: Any
     ) -> None:
@@ -115,7 +117,6 @@ class IBExecutor:
                 self._handle_parent(trade, o, sym, ib_positions, streamer)
         except Exception as e:
             log.warning("monitor orders failed: %s", e)
-
     def _handle_parent(
         self, trade: Any, order: Any, sym: str,
         ib_positions: dict[str, Position], streamer: Any,
@@ -186,7 +187,6 @@ class IBExecutor:
             ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
         )
         journal_exit(self.journal, ticker, pnl, pos)
-
     def cancel_all(self) -> None:
         """Cancel all open orders in IB."""
         try:
