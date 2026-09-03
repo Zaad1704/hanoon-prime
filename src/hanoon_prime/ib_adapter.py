@@ -90,8 +90,13 @@ class IBStreamingBot:
     def _on_entry(self, ticker: str, thought: Thought, tk: Any) -> None:
         """Handle BUY/SELL verdict: safety nets, then bracket entry."""
         if not self.brain.check_entry_allowed():
+            log.info("SKIP %s safety_nets blocked", ticker)
             return
-        if ticker in self.brain._open_positions or not tk.hasBidAsk():
+        if ticker in self.brain._open_positions:
+            log.info("SKIP %s already open", ticker)
+            return
+        if not tk.hasBidAsk():
+            log.info("SKIP %s no bid/ask", ticker)
             return
         price = float((tk.bid + tk.ask) * 0.5)
         self.executor.place_bracket(ticker, thought, price, self.streamer)
@@ -109,7 +114,6 @@ class IBStreamingBot:
         while self._running:
             self._process_cycle(tickers, poll_interval, pnl)
         self._cleanup(pnl)
-
     def _start_pnl_stream(self) -> Any:
         """Start IB P&L streaming for safety net monitoring."""
         try:
@@ -119,7 +123,6 @@ class IBStreamingBot:
         except Exception as e:
             log.error("PnL subscription failed: %s", e)
             return None
-
     def _process_cycle(self, tickers: list[str], poll_interval: float, pnl: Any) -> None:
         """One iteration — IB is source of truth for everything."""
         started = time.monotonic()
@@ -137,7 +140,6 @@ class IBStreamingBot:
         if elapsed < poll_interval:
             time.sleep(poll_interval - elapsed)
         self._heartbeat()
-
     def _heartbeat(self) -> None:
         """Periodic liveness line so the log never looks frozen."""
         now = time.monotonic()
@@ -146,7 +148,6 @@ class IBStreamingBot:
         self._last_beat = now
         log.info("HEARTBEAT open=%d journal=%d",
                  len(self.brain._open_positions), self.journal.count())
-
     def _check_safety_nets(self, pnl: Any) -> None:
         """Check safety nets against IB's actual state."""
         if not self.brain.safety_enabled:
@@ -162,20 +163,21 @@ class IBStreamingBot:
             return
         if self.brain._consecutive_losses >= 3:
             self._halt_bot("consecutive_losses")
-
     def _halt_bot(self, reason: str) -> None:
         """Halt the bot and record to journal."""
         self.journal.append({"event": "safety_net_triggered", "source": "ib_gateway",
                              "reason": reason, "timestamp": time.time()})
         self._running = False
-
     def _handle_ticker(self, sym: str, tk: Any) -> None:
         """Evaluate ticker update and enter if verdict is non-HOLD."""
         thought = self._evaluate(sym)
-        if thought and thought.direction != 0 and thought.verdict != "HOLD":
+        if not thought:
+            return
+        d = "+" if thought.direction > 0 else "-" if thought.direction < 0 else "0"
+        log.info("THINK %s %s%s score=%.3f", sym, thought.verdict, d, thought.score)
+        if thought.direction != 0 and thought.verdict != "HOLD":
             thought.z_scores = getattr(thought, "z_scores", {})
             self._on_entry(sym, thought, tk)
-
     def _cleanup(self, pnl: Any) -> None:
         """Cancel all IB subscriptions and disconnect safely."""
         log.info("Shutting down — cancelling all streams.")
@@ -186,12 +188,10 @@ class IBStreamingBot:
         if self.ib.isConnected():
             self.ib.disconnect()
         log.info("All IB subscriptions cancelled. JULI Prime stopped.")
-
     def run_paper(self, tickers: list[str]) -> None:
         """Connect to IB Gateway paper port (4002) and run."""
         self.connect(port=IB_PAPER_PORT)
         self.run(tickers)
-
     def run_live(self, tickers: list[str]) -> None:
         """Connect to IB Gateway live port (4001) and run."""
         self.connect(port=IB_LIVE_PORT)
