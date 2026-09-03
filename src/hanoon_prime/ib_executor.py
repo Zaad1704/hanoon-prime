@@ -17,6 +17,7 @@ import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from ._protect import protect_position, sweep_zombies
+from ._telegram import trade_closed, trade_opened
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_compat import ib
@@ -80,6 +81,7 @@ class IBExecutor:
         self._pending_parent.add(ticker)
         log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
                  action, ticker, round(price, 2), stop, target, shares)
+        trade_opened(ticker, action, shares, price, stop, target)
     def sync_from_ib(self, streamer: Any) -> None:
         """JULI syncs everything from IB — IB is source of truth."""
         if not self._ping_ib():
@@ -134,7 +136,6 @@ class IBExecutor:
         if stop and target:
             self._brackets[sym] = (stop, target)
             self._trail_both(sym, ib_positions[sym], streamer, stop, target, trade)
-
     def _cancel_if_active(self, trade: Any, order: Any) -> None:
         """Cancel an orphan order only if IB reports it active."""
         try:
@@ -142,7 +143,6 @@ class IBExecutor:
                 self.ib.cancelOrder(order)
         except Exception as e:
             log.debug("cancel skip: %s", e)
-
     def _trail_both(
         self, sym: str, pos: Position, streamer: Any,
         stop: float, target: float, trade: Any,
@@ -171,7 +171,6 @@ class IBExecutor:
                 self.ib.placeOrder(trade.contract, trade.order)
                 log.info("TRAIL TARGET %s -> %.2f", trade.contract.symbol, price)
                 return
-
     def _record_closed_positions(self, ib_positions: dict[str, Position], streamer: Any) -> None:
         for t in set(self._brackets) - set(ib_positions):
             self._record_exit(t, streamer)
@@ -183,6 +182,7 @@ class IBExecutor:
             return
         pnl = get_ib_pnl(self.ib, ticker, pos)
         log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
+        trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
         self.brain.record_trade(
             ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
         )

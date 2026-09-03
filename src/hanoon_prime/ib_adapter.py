@@ -1,6 +1,5 @@
 """hanoon_prime.ib_adapter — IB Gateway streaming adapter.
 IB is the SINGLE source of truth for everything.
-Journal is a carbon copy of IB state — not generated data.
 Excluded from mypy strict — ib_insync is not fully typed.
 """
 from __future__ import annotations
@@ -11,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from ._telegram import safety_halt, shutdown, startup
 from .cerebellum import compute_alpha
 from .cortex import Thought
 from .hippocampus import Hippocampus
@@ -55,7 +55,6 @@ class IBStreamingBot:
         self._last_beat: float = 0.0
         self._setup_signals()
     def _setup_signals(self) -> None:
-        """Register SIGINT/SIGTERM for safe shutdown."""
         def _handler(signum: int, frame: Any) -> None:
             log.warning("Received signal %s. Initiating safe shutdown.", signum)
             self._running = False
@@ -105,6 +104,7 @@ class IBStreamingBot:
         """Subscribe to IB streams, evaluate verdicts, place bracket orders."""
         self._running = True
         log.info("JULI Prime — live monitoring %s", tickers)
+        startup(tickers)
         self.executor.tracked_tickers = set(tickers)
         for t in tickers:
             self.streamer.subscribe(t)
@@ -126,21 +126,24 @@ class IBStreamingBot:
     def _process_cycle(self, tickers: list[str], poll_interval: float, pnl: Any) -> None:
         """One iteration — IB is source of truth for everything."""
         started = time.monotonic()
-        self.executor.sync_from_ib(self.streamer)
-        self._check_safety_nets(pnl)
-        bars = 0
-        for tk in self.ib.pendingTickers():
-            s = tk.contract.symbol if tk.contract else ""
-            if s in tickers and self.streamer.update_bar(s):
-                self._handle_ticker(s, tk)
-                bars += 1
-        if pnl is not None:
-            self.brain._daily_pnl = float(pnl.dailyPnL)
-        self.ib.waitOnUpdate(timeout=poll_interval)
-        if time.monotonic() - started < poll_interval:
-            time.sleep(poll_interval - (time.monotonic() - started))
-        self._heartbeat()
-        log.info("CYCLE bars=%d open=%d", bars, len(self.brain._open_positions))
+        try:
+            self.executor.sync_from_ib(self.streamer)
+            self._check_safety_nets(pnl)
+            bars = 0
+            for tk in self.ib.pendingTickers():
+                s = tk.contract.symbol if tk.contract else ""
+                if s in tickers and self.streamer.update_bar(s):
+                    self._handle_ticker(s, tk)
+                    bars += 1
+            if pnl is not None:
+                self.brain._daily_pnl = float(pnl.dailyPnL)
+            self.ib.waitOnUpdate(timeout=poll_interval)
+            if time.monotonic() - started < poll_interval:
+                time.sleep(poll_interval - (time.monotonic() - started))
+            self._heartbeat()
+            log.info("CYCLE bars=%d open=%d", bars, len(self.brain._open_positions))
+        except Exception as e:
+            log.error("Cycle error: %s", e)
     def _heartbeat(self) -> None:
         now = time.monotonic()
         if now - self._last_beat < 60.0:
@@ -149,7 +152,6 @@ class IBStreamingBot:
         log.info("HEARTBEAT open=%d journal=%d",
                  len(self.brain._open_positions), self.journal.count())
     def _check_safety_nets(self, pnl: Any) -> None:
-        """Check safety nets against IB's actual state."""
         if not self.brain.safety_enabled:
             return
         count = _count_ib_positions(self.ib, self.executor.tracked_tickers)
@@ -167,6 +169,7 @@ class IBStreamingBot:
         """Halt the bot and record to journal."""
         self.journal.append({"event": "safety_net_triggered", "source": "ib_gateway",
                              "reason": reason, "timestamp": time.time()})
+        safety_halt(reason)
         self._running = False
     def _handle_ticker(self, sym: str, tk: Any) -> None:
         """Evaluate ticker update and enter if verdict is non-HOLD."""
@@ -185,15 +188,13 @@ class IBStreamingBot:
         self.executor.cancel_all()
         if pnl is not None:
             self.ib.cancelPnL(self.account)
-        if self.ib.isConnected():
-            self.ib.disconnect()
+        self.ib.disconnect() if self.ib.isConnected() else None
         log.info("All IB subscriptions cancelled. JULI Prime stopped.")
+        shutdown()
     def run_paper(self, tickers: list[str]) -> None:
-        """Connect to IB Gateway paper port (4002) and run."""
-        self.connect(port=IB_PAPER_PORT)
-        self.run(tickers)
+        """Connect to IB paper port and run."""
+        self.connect(port=IB_PAPER_PORT); self.run(tickers)
     def run_live(self, tickers: list[str]) -> None:
-        """Connect to IB Gateway live port (4001) and run."""
-        self.connect(port=IB_LIVE_PORT)
-        self.run(tickers)
+        """Connect to IB live port and run."""
+        self.connect(port=IB_LIVE_PORT); self.run(tickers)
 __all__ = ["IBStreamingBot", "SafetyNetStopped"]
