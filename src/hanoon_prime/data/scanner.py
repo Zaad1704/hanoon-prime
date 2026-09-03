@@ -55,9 +55,9 @@ class IBScanner:
         self._scan_interval: float = 300.0
         self._scan_list: Any = None
 
-    def scan(self, config_name: str = "hot_volume") -> list[ScanResult]:
+    def scan(self, config_name: str = "most_active") -> list[ScanResult]:
         """Run a scanner subscription and collect results."""
-        config = SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["hot_volume"])
+        config = SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])
         try:
             from ib_insync import ScannerSubscription, TagValue
 

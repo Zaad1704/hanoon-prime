@@ -55,10 +55,10 @@ class JuliBrain:
         now = time.time()
         if now - self._last_scan < SCANNER_INTERVAL:
             return
+        self._last_scan = now
         try:
             self.scanner.scan("most_active")
             self._candidates = self.scanner.get_candidates()
-            self._last_scan = now
             log.info("SCAN: %d raw candidates", len(self._candidates))
         except Exception as e:
             log.warning("Scan failed: %s", e)
