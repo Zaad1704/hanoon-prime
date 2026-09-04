@@ -158,7 +158,7 @@ class JuliBrain:
         self, ticker: str, snap: dict[str, Any], open_count: int
     ) -> dict[str, Any] | None:
         """Evaluate one ticker through the full brain pipeline."""
-        prices = snap.get("prices", [])
+        prices = snap.get("prices") or []
         if len(prices) < 20:
             return None
         self._state.set_latest_prices(prices)
