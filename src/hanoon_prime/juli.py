@@ -68,12 +68,12 @@ class JuliBrain:
         """Screen candidates — subscribe only, budget handles allocation."""
         if not self._candidates:
             return
-        passed = sum(
+        n = sum(
             1
             for c in self._candidates[:MAX_CANDIDATES]
             if (snap := get_snapshot(c.symbol)) is not None and snap.get("last", 0) > 0
         )
-        log.info("SCREEN: %d/%d passed", passed, len(self._candidates))
+        log.info("SCREEN: %d/%d passed", n, len(self._candidates))
 
     def _maybe_allocate(self, positions: set[str]) -> None:
         now = time.time()
@@ -132,9 +132,7 @@ class JuliBrain:
             ]
         }
         alpha = compute_all_alpha(**kw)
-        if not alpha:
-            alpha = compute_alpha(**kw) or {}
-        return alpha
+        return alpha if alpha else (compute_alpha(**kw) or {})
 
     def _build_decision(
         self, ticker: str, direction: int, result: dict[str, Any]
@@ -144,11 +142,12 @@ class JuliBrain:
         verdict = result.get("verdict", "")
         conf = result.get("confidence", 0.5)
         log.info(
-            "THINK %s %s score=%.3f regime=%s",
+            "THINK %s %s score=%.3f regime=%s risk=%s",
             ticker,
             "BUY" if direction > 0 else "SELL",
             score,
             result.get("regime", "?"),
+            result.get("risk", "normal"),
         )
         thought = type(
             "T",
@@ -176,6 +175,7 @@ class JuliBrain:
         prices = snap.get("prices", [])
         if len(prices) < 20:
             return None
+        self._state.set_latest_prices(prices)
         t0 = time.perf_counter_ns()
         result = self.brain.tick(
             alpha=self._compute_alpha(snap),

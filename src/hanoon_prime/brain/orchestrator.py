@@ -84,6 +84,7 @@ class JuliBrain:
         """Core fast evaluation — no I/O, pure computation."""
         regime_mult = self.state.get("regime_multiplier", 1.0)
         regime_label = self.state.get("regime_label", "unknown")
+        regime_risk = self.state.get("regime_risk", "normal")
         halim_mod = self.state.get("halim_modifier", 0.0)
         episodic_bias = self.state.get("episodic_bias", 0.0)
         base = self.cortex.evaluate(alpha)
@@ -106,6 +107,7 @@ class JuliBrain:
             "confidence": base.confidence,
             "sizing": sizing,
             "regime": regime_label,
+            "risk": regime_risk,
             "trace": {"base": base.score, "regime": regime_mult, "halim": halim_mod},
             "dyn_reason": dyn_reason,
         }

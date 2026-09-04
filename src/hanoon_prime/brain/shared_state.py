@@ -67,3 +67,13 @@ class BrainState:
         with self._lock:
             a = self._state.get("latest_alpha")
             return dict(a) if a else None
+
+    def set_latest_prices(self, prices: list[float]) -> None:
+        """Store latest price array from System 1 for regime classification."""
+        with self._lock:
+            self._state["latest_prices"] = list(prices[-50:]) if prices else []
+
+    def get_latest_prices(self) -> list[float]:
+        """Read latest prices computed by System 1."""
+        with self._lock:
+            return list(self._state.get("latest_prices", []))

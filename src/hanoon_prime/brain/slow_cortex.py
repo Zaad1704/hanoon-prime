@@ -24,7 +24,6 @@ from .guardians import Guardians
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .reflection import Reflector
-from .regime import RegimeDetector
 from .shared_state import BrainState
 
 log = logging.getLogger(__name__)
@@ -43,7 +42,6 @@ class SlowCortex:
         self.interval = interval
         self.memory = JuliMemory()
         self.episodic = EpisodicMemory()
-        self.regime = RegimeDetector()
         self.affective = Affective()
         self.guardians = Guardians()
         self.halim = HalimAdapter(base_url=halim_url)
@@ -102,15 +100,19 @@ class SlowCortex:
         )
 
     def _update_regime(self) -> None:
-        """Detect market regime from latest indicators."""
+        """Get rich regime classification from HALIM with numpy fallback."""
         alpha = self._get_latest_alpha()
         if not alpha:
             return
-        prices = [alpha.get(k, 0.5) for k in ["vpin", "momentum", "vwap_deviation"]]
-        regime = self.regime.detect(prices)
+        prices = self.state.get_latest_prices()
+        regime = self.halim.get_regime(alpha, prices)
         self.state.update(
-            regime_multiplier=regime.multiplier,
-            regime_label=regime.regime,
+            regime_multiplier=regime.get("multiplier", 1.0),
+            regime_label=regime.get("regime", "normal"),
+            regime_confidence=regime.get("confidence", 0.5),
+            regime_risk=regime.get("risk_adjustment", "normal"),
+            regime_drivers=regime.get("key_drivers", []),
+            regime_description=regime.get("description", ""),
         )
 
     def _update_halim(self) -> None:
