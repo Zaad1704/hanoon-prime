@@ -242,9 +242,8 @@ class IBExecutor:
             log.warning("close_position failed %s: %s", ticker, e)
 
     def close_all_positions(self, streamer: Any) -> int:
-        """Market-flatten every open position via IB. Returns count closed."""
+        """Flatten every open position via limit orders (post-market safe)."""
         count = 0
-        # Close ALL IB positions, not just Juli-tracked ones
         try:
             ib_positions = self.ib.positions()
         except Exception:
@@ -253,13 +252,20 @@ class IBExecutor:
             sym = pos.contract.symbol
             qty = abs(int(pos.position))
             if qty == 0:
-                continue
+            continue
             action = "SELL" if pos.position > 0 else "BUY"
+            # Use market price with small offset for limit fill
+            mp = float(getattr(pos, "marketPrice", pos.avgCost))
+            if mp <= 0:
+                mp = pos.avgCost
+            # SELL limit slightly above, BUY limit slightly below
+            offset = 0.02 if action == "SELL" else -0.02
+            limit_price = round(mp + offset, 2)
             try:
-                from ib_insync import MarketOrder
-
-                self.ib.placeOrder(pos.contract, MarketOrder(action, qty, tif="DAY"))
-                log.info("FLATTEN %s %s %d", action, sym, qty)
+                from ib_insync import LimitOrder
+                order = LimitOrder(action, qty, limit_price, tif="DAY", outsideRth=True)
+                self.ib.placeOrder(pos.contract, order)
+                log.info("FLATTEN %s %s %d @ %.2f", action, sym, qty, limit_price)
                 count += 1
             except Exception as e:
                 log.warning("FLATTEN failed %s: %s", sym, e)
