@@ -162,7 +162,7 @@ def _process_bar(
     """Process one bar: evaluate, enter, exit. Returns (pos, z, trade)."""
     thought = _evaluate_bar(i, window, close, high, low, volume, buy_vol, cortex)
     z_scores = thought.z_scores
-    if position is None and thought.direction != 0 and not brain.check_entry_allowed():
+    if position is None and thought.direction != 0 and brain.check_entry_allowed():
         atr_val = rolling_atr(high[: i + 1], low[: i + 1], close[: i + 1], ATR_PERIOD)
         position = _enter_position(
             ticker, i, thought, float(close[i + 1]),

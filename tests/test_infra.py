@@ -4,6 +4,7 @@ Covers backtest.py CLI paths, calibrate.py helpers, validator.py
 permutation edge tests, and error handling for corrupt/missing data.
 Runs on FAST tickers only for speed.
 """
+
 from __future__ import annotations
 
 import json
@@ -375,3 +376,25 @@ def test_pooled_signals_skips_missing(tmp_path):
     assert isinstance(pooled, dict)
     assert len(pooled) == 5
     assert len(returns) == 0
+
+
+class TestEquityStats:
+    """Regression for Fix #76: drawdown blew up to ~-1e12 when the equity
+    peak sat at ~0 (early losses off a flat start), and that same line carried
+    an unused ``# type: ignore`` that failed ``mypy --strict``.
+    """
+
+    def test_drawdown_zero_when_peak_never_positive(self):
+        """Losses off a flat 0.0 start must yield 0.0 drawdown, not -1e12."""
+        from hanoon_prime.metrics import _equity_stats
+
+        dd, _ = _equity_stats([0.0, -0.005, -0.01])
+        assert dd == 0.0
+
+    def test_drawdown_measured_after_positive_peak(self):
+        """Once a positive peak exists, drawdown is the real fractional drop."""
+        from hanoon_prime.metrics import _equity_stats
+
+        dd, _ = _equity_stats([0.0, 0.05, 0.03])
+        assert dd == pytest.approx(-0.4)
+        assert -1.0 <= dd < 0.0

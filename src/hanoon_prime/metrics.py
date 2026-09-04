@@ -19,8 +19,14 @@ def _equity_stats(
     if len(ec) <= 1:
         return 0.0, 0.0
     running_max = np.maximum.accumulate(ec)
-    dd = (ec - running_max) / np.maximum(running_max, 1e-12)  # type: ignore[operator]
-    max_dd = float(np.min(dd)) if len(dd) > 0 else 0.0
+    # A drawdown is only meaningful above a positive peak. When the equity
+    # peak is ~0 (early losses off a flat start) a naive divide blows up to
+    # ~-1e12, so floor non-positive peaks to a safe denominator and mask those
+    # points back to 0 drawdown.
+    denom = np.where(running_max > 0, running_max, 1.0)
+    dd = (ec - denom) / denom  # type: ignore[operator]
+    dd = np.where(running_max > 0, dd, 0.0)
+    max_dd = float(np.min(dd))
     returns = np.diff(ec)
     sharpe = float(np.mean(returns) / (np.std(returns) + 1e-12))
     return max_dd, sharpe
