@@ -13,11 +13,11 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .spike import Spike
+from .attractor import AttractorMemory
 from .lif import LIFNeuron
 from .network import LIFNetwork
+from .spike import Spike
 from .stdp import STDPLearner
-from .attractor import AttractorMemory
 
 
 @dataclass
@@ -70,14 +70,21 @@ class SleepReplayEngine:
                 continue
 
             weight = self.WIN_BIAS if att.wins > att.losses else 0.5
-            patterns.append((dict(zip(
-                [f"alpha_{i}" for i in range(len(att.center))],
-                att.center,
-            )), weight))
+            patterns.append(
+                (
+                    dict(
+                        zip(
+                            [f"alpha_{i}" for i in range(len(att.center))],
+                            att.center,
+                        )
+                    ),
+                    weight,
+                )
+            )
 
         if len(patterns) > self.MAX_PATTERNS:
             random.shuffle(patterns)
-            patterns = patterns[:self.MAX_PATTERNS]
+            patterns = patterns[: self.MAX_PATTERNS]
 
         return patterns
 
@@ -94,7 +101,7 @@ class SleepReplayEngine:
         weights_updated = 0
         total_change = 0.0
 
-        for pattern, weight in patterns[:self.REPLAY_BATCH]:
+        for pattern, weight in patterns[: self.REPLAY_BATCH]:
             count, change = self._replay_pattern(pattern, weight)
             spikes_generated += count
             total_change += change
@@ -102,10 +109,11 @@ class SleepReplayEngine:
         self._cycle_count += 1
 
         return SleepResult(
-            patterns_replayed=len(patterns[:self.REPLAY_BATCH]),
+            patterns_replayed=len(patterns[: self.REPLAY_BATCH]),
             spikes_generated=spikes_generated,
             weights_updated=weights_updated,
-            mean_weight_change=total_change / max(1, len(patterns[:self.REPLAY_BATCH])),
+            mean_weight_change=total_change
+            / max(1, len(patterns[: self.REPLAY_BATCH])),
             duration_ms=(time.time() - start) * 1000,
         )
 

@@ -8,17 +8,21 @@ from __future__ import annotations
 import pytest
 
 from hanoon_prime.brain.neurons import (
-    LIFNeuron,
-    LIFNetwork,
-    STDPLearner,
-    Synapse,
-    AttractorMemory,
     Attractor,
+    AttractorMemory,
+    LIFNetwork,
+    LIFNeuron,
     SleepReplayEngine,
     SleepResult,
+    STDPLearner,
+    Synapse,
 )
-from hanoon_prime.brain.neurons.bridge import NeuromorphicBridge, DECISION_THRESHOLD
-from hanoon_prime.brain.neurons.constants import ALPHA_KEYS, HIDDEN_NEURONS, DECISION_NEURONS
+from hanoon_prime.brain.neurons.bridge import DECISION_THRESHOLD, NeuromorphicBridge
+from hanoon_prime.brain.neurons.constants import (
+    ALPHA_KEYS,
+    DECISION_NEURONS,
+    HIDDEN_NEURONS,
+)
 
 
 class TestLIFNeuron:
@@ -236,12 +240,14 @@ class TestNeuromorphicIntegration:
     def test_julibrain_creates_with_neuromorphic(self) -> None:
         """JuliBrain creates neuromorphic bridge when enabled."""
         from hanoon_prime.brain.orchestrator import JuliBrain
+
         brain = JuliBrain()
         assert brain._neuromorphic is not None
 
     def test_julibrain_creates_without_neuromorphic(self) -> None:
         """JuliBrain can be created without neuromorphic."""
         from hanoon_prime.brain.orchestrator import JuliBrain
+
         brain = JuliBrain(enable_neuromorphic=False)
         assert brain._neuromorphic is None
 
@@ -258,7 +264,9 @@ class TestNeuromorphicIntegration:
             "momentum": 0.3,
             "vwap_deviation": -0.1,
         }
-        result = brain.tick(alpha=alpha, ticker="TEST", entry_price=100.0, atr=2.0, open_positions=0)
+        result = brain.tick(
+            alpha=alpha, ticker="TEST", entry_price=100.0, atr=2.0, open_positions=0
+        )
         assert "verdict" in result
         assert result["verdict"] in ("BUY", "SELL", "HOLD")
 
@@ -298,7 +306,9 @@ class TestNeuromorphicIntegration:
             "vwap_deviation": -0.1,
         }
 
-        result = brain.tick(alpha=alpha, ticker="TEST", entry_price=100.0, atr=2.0, open_positions=0)
+        result = brain.tick(
+            alpha=alpha, ticker="TEST", entry_price=100.0, atr=2.0, open_positions=0
+        )
 
         # Result should have all required fields
         assert "verdict" in result

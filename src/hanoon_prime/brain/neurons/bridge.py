@@ -11,15 +11,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from .attractor import AttractorMemory
+from .bridge_scoring import InputEncoder, ScoreComputer
+from .constants import ALPHA_KEYS
 from .lif import LIFNeuron
+from .moe_config import DECISION_NEURONS, HIDDEN_NEURONS
 from .network import LIFNetwork
 from .stdp import STDPLearner
-from .attractor import AttractorMemory
 from .threshold_adapter import DynamicThresholdAdapter
 from .weights_config import get_default_synaptic_weights
-from .constants import ALPHA_KEYS
-from .moe_config import HIDDEN_NEURONS, DECISION_NEURONS
-from .bridge_scoring import InputEncoder, ScoreComputer
 
 log = logging.getLogger(__name__)
 

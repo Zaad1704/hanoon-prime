@@ -9,22 +9,38 @@ from __future__ import annotations
 # ── Alpha Keys (31 total → 62 input neurons) ────────────────────────────
 # Base 27 indicators mapped to bull/bear neuron pairs
 ALPHA_KEYS: tuple[str, ...] = (
-    "vpin_bull", "vpin_bear",
-    "orderbook_imbalance_bull", "orderbook_imbalance_bear",
-    "institutional_flow_bull", "institutional_flow_bear",
-    "momentum_bull", "momentum_bear",
-    "vwap_deviation_bull", "vwap_deviation_bear",
-    "buy_volume_bull", "buy_volume_bear",
-    "bid_strength_bull", "bid_strength_bear",
-    "ask_strength_bull", "ask_strength_bear",
-    "volume_zscore_bull", "volume_zscore_bear",
-    "price_momentum_bull", "price_momentum_bear",
-    "trend_strength_bull", "trend_strength_bear",
-    "volatility_bull", "volatility_bear",
-    "liquidity_bull", "liquidity_bear",
-    "order_imbalance_bull", "order_imbalance_bear",
-    "flow_confidence_bull", "flow_confidence_bear",
-    "mean_reversion_bull", "mean_reversion_bear",
+    "vpin_bull",
+    "vpin_bear",
+    "orderbook_imbalance_bull",
+    "orderbook_imbalance_bear",
+    "institutional_flow_bull",
+    "institutional_flow_bear",
+    "momentum_bull",
+    "momentum_bear",
+    "vwap_deviation_bull",
+    "vwap_deviation_bear",
+    "buy_volume_bull",
+    "buy_volume_bear",
+    "bid_strength_bull",
+    "bid_strength_bear",
+    "ask_strength_bull",
+    "ask_strength_bear",
+    "volume_zscore_bull",
+    "volume_zscore_bear",
+    "price_momentum_bull",
+    "price_momentum_bear",
+    "trend_strength_bull",
+    "trend_strength_bear",
+    "volatility_bull",
+    "volatility_bear",
+    "liquidity_bull",
+    "liquidity_bear",
+    "order_imbalance_bull",
+    "order_imbalance_bear",
+    "flow_confidence_bull",
+    "flow_confidence_bear",
+    "mean_reversion_bull",
+    "mean_reversion_bear",
 )
 
 # Cross-asset signals (4 keys → 4 input neurons)
@@ -41,8 +57,12 @@ ALL_ALPHA_KEYS: tuple[str, ...] = ALPHA_KEYS + CROSS_ASSET_KEYS
 # ── Neuron Lists by Layer ──────────────────────────────────────────────
 # Input layer: 62 neurons (31 alpha keys × bull/bear + 4 cross-asset)
 INPUT_NEURONS: dict[str, tuple[str, ...]] = {
-    "bull": tuple(k.replace("_bear", "_bull") for k in ALPHA_KEYS if k.endswith("_bull")),
-    "bear": tuple(k.replace("_bull", "_bear") for k in ALPHA_KEYS if k.endswith("_bear")),
+    "bull": tuple(
+        k.replace("_bear", "_bull") for k in ALPHA_KEYS if k.endswith("_bull")
+    ),
+    "bear": tuple(
+        k.replace("_bull", "_bear") for k in ALPHA_KEYS if k.endswith("_bear")
+    ),
     "cross_asset": CROSS_ASSET_KEYS,
 }
 
@@ -61,7 +81,7 @@ BEAR_HIDDEN: tuple[str, ...] = (
     "hidden_structure",
 )
 
-HIDDEN_NEURONS: tuple[str, :] = BULL_HIDDEN + BEAR_HIDDEN
+HIDDEN_NEURONS: tuple[str, ...] = BULL_HIDDEN + BEAR_HIDDEN
 
 # MoE Expert layer: domain specialists
 # Each specialist gets 3 neurons for pattern formation
@@ -83,7 +103,9 @@ LIQUIDITY_HIDDEN: tuple[str, ...] = (
     "expert_liquidity_3",
 )
 
-MOE_HIDDEN_NEURONS: tuple[str, ...] = MOMENTUM_HIDDEN + MEANREV_HIDDEN + LIQUIDITY_HIDDEN
+MOE_HIDDEN_NEURONS: tuple[str, ...] = (
+    MOMENTUM_HIDDEN + MEANREV_HIDDEN + LIQUIDITY_HIDDEN
+)
 
 # Decision layer: 3 neurons (long, short, hold)
 DECISION_NEURONS: tuple[str, ...] = (
@@ -93,7 +115,12 @@ DECISION_NEURONS: tuple[str, ...] = (
 )
 
 # ── Network Summary ─────────────────────────────────────────────────────
-TOTAL_NEURONS: int = len(ALL_ALPHA_KEYS) * 2 + len(HIDDEN_NEURONS) + len(MOE_HIDDEN_NEURONS) + len(DECISION_NEURONS)
+TOTAL_NEURONS: int = (
+    len(ALL_ALPHA_KEYS) * 2
+    + len(HIDDEN_NEURONS)
+    + len(MOE_HIDDEN_NEURONS)
+    + len(DECISION_NEURONS)
+)
 INPUT_COUNT: int = len(ALL_ALPHA_KEYS) * 2
 HIDDEN_COUNT: int = len(HIDDEN_NEURONS) + len(MOE_HIDDEN_NEURONS)
 DECISION_COUNT: int = len(DECISION_NEURONS)
@@ -116,7 +143,7 @@ REFRACTORY_MS: float = 0.001  # 1ms refractory period
 
 # ── STDP Parameters (market-scaled) ───────────────────────────────────────
 A_PLUS: float = 0.01  # Max LTP per spike pair
-A_MINUS: float = 0.012  # Max LTD per spike pair  
+A_MINUS: float = 0.012  # Max LTD per spike pair
 TAU_PLUS: float = 2.0  # LTP time constant (seconds)
 TAU_MINUS: float = 2.5  # LTD time constant (seconds)
 WEIGHT_MIN: float = 0.01  # Min synaptic strength

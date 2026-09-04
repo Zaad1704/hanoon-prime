@@ -10,8 +10,8 @@ import time
 from collections import deque
 from typing import Dict, List, Optional
 
-from .spike import Spike
 from .lif import LIFNeuron
+from .spike import Spike
 
 
 class LIFNetwork:

@@ -11,23 +11,23 @@ R1 COMPLIANT: Only Cortex produces verdicts — this module outputs scores only.
 
 from __future__ import annotations
 
-from .spike import Spike
+from .attractor import Attractor, AttractorMemory
+from .bridge import NeuromorphicBridge, create_bridge
 from .lif import LIFNeuron
-from .network import LIFNetwork
-from .stdp import STDPLearner, Synapse
-from .attractor import AttractorMemory, Attractor
-from .sleep import SleepReplayEngine, SleepResult
-from .threshold_adapter import DynamicThresholdAdapter
-from .weights_config import get_default_synaptic_weights, get_network_topology
 from .moe_config import (
-    MOMENTUM_HIDDEN,
-    MEANREV_HIDDEN,
-    LIQUIDITY_HIDDEN,
-    HIDDEN_NEURONS,
     DECISION_NEURONS,
+    HIDDEN_NEURONS,
+    LIQUIDITY_HIDDEN,
+    MEANREV_HIDDEN,
+    MOMENTUM_HIDDEN,
     NETWORK_ARCHITECTURE,
 )
-from .bridge import NeuromorphicBridge, create_bridge
+from .network import LIFNetwork
+from .sleep import SleepReplayEngine, SleepResult
+from .spike import Spike
+from .stdp import STDPLearner, Synapse
+from .threshold_adapter import DynamicThresholdAdapter
+from .weights_config import get_default_synaptic_weights, get_network_topology
 
 __all__ = [
     "Spike",

@@ -11,9 +11,9 @@ is done via "plasticity" terminology.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
-import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -122,7 +122,7 @@ class STDPLearner:
         """Apply reward signal to recent synapses."""
         now = time.time()
         for syn in self._synapses.values():
-            is_recent = (now - syn.last_pre_spike < window_sec or syn.trace > 0.1)
+            is_recent = now - syn.last_pre_spike < window_sec or syn.trace > 0.1
             if is_recent:
                 if reward > 0:
                     bonus = A_PLUS * 0.3 * reward

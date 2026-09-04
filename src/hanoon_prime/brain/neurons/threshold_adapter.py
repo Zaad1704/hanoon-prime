@@ -34,7 +34,7 @@ class DynamicThresholdAdapter:
         history = self.price_history.get(asset_idx, [])
         history.append(price)
         if len(history) > self.volatility_window:
-            self.price_history[asset_idx] = history[-self.volatility_window:]
+            self.price_history[asset_idx] = history[-self.volatility_window :]
 
     def create_ticker_key(self, ticker: str) -> str:
         """Generate stable key for ticker-specific settings."""
@@ -47,8 +47,8 @@ class DynamicThresholdAdapter:
         if len(history) < 10:
             return self.base_threshold
 
-        prices = history[-min(len(history), self.volatility_window):]
-        returns = [prices[i+1]/prices[i] - 1 for i in range(len(prices)-1)]
+        prices = history[-min(len(history), self.volatility_window) :]
+        returns = [prices[i + 1] / prices[i] - 1 for i in range(len(prices) - 1)]
 
         if not returns:
             return self.base_threshold
@@ -57,7 +57,9 @@ class DynamicThresholdAdapter:
         vix_scale = 1.0 + 0.02 * max(0.0, self.vix - 15.0)
         dynamic_theta = self.base_threshold * vol * vix_scale
 
-        return max(self.base_threshold * 0.5, min(self.base_threshold * 5.0, dynamic_theta))
+        return max(
+            self.base_threshold * 0.5, min(self.base_threshold * 5.0, dynamic_theta)
+        )
 
     def adapt_for_market(
         self,

@@ -10,18 +10,18 @@ Enhanced with neuromorphic neurons for spiking computation.
 from __future__ import annotations
 
 from .neurons import (
-    LIFNeuron,
-    LIFNetwork,
-    STDPLearner,
-    Synapse,
-    AttractorMemory,
     Attractor,
+    AttractorMemory,
+    LIFNetwork,
+    LIFNeuron,
+    NeuromorphicBridge,
     SleepReplayEngine,
     SleepResult,
-    NeuromorphicBridge,
+    STDPLearner,
+    Synapse,
     create_bridge,
 )
-from .orchestrator import NeuromorphicBrain, JuliBrain
+from .orchestrator import JuliBrain, NeuromorphicBrain
 
 __all__ = [
     "LIFNeuron",

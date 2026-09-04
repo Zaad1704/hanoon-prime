@@ -12,9 +12,9 @@ from typing import List, Optional
 
 import numpy as np
 
-from .spike import Spike
 from .lif import LIFNeuron
 from .network import LIFNetwork
+from .spike import Spike
 
 
 class NetworkStepper:
@@ -93,7 +93,9 @@ class NetworkStepper:
             if len(active_idx) == 0:
                 break
             v_m[active_idx] *= decay[active_idx]
-            v_m[active_idx] += weights[active_idx] * total_current[active_idx] * dt / nsub
+            v_m[active_idx] += (
+                weights[active_idx] * total_current[active_idx] * dt / nsub
+            )
             still_active = np.array([i in active_idx for i in range(len(v_m))])
             active_idx = active_idx[still_active[active_idx]]
 
@@ -151,7 +153,9 @@ class NetworkStepper:
                     target.inject_charge(strength * spike.amplitude)
 
                     if target_id in network._decision_evidence:
-                        network._decision_evidence[target_id] += strength * spike.amplitude
+                        network._decision_evidence[target_id] += (
+                            strength * spike.amplitude
+                        )
 
 
 __all__ = ["NetworkStepper"]
