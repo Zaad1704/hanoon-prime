@@ -94,6 +94,12 @@ class SlowCortex:
         self._check_guardians()
         self._consolidate_episodic()
         self._persist_state()
+        log.info(
+            "System 2 write complete | regime=%.2f halim=%.3f threshold=%.3f",
+            self.state.get("regime_multiplier", 1.0),
+            self.state.get("halim_modifier", 0.0),
+            self.state.get("threshold", 0.58),
+        )
 
     def _update_regime(self) -> None:
         """Detect market regime from latest indicators."""

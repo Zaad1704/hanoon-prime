@@ -1,8 +1,5 @@
 """hanoon_prime.juli — Biological brain orchestrator.
-
-JULI is the full brain: scanner → indicators → JuliBrain → decision.
-Keeps IB scanner/budget for ticker discovery.
-Delegates all cognition to brain/orchestrator.py (the 22-module brain).
+Scanner discovery + full cognitive pipeline via brain/orchestrator.py.
 Returns (decisions, exit_signals) for ib_adapter to execute.
 """
 
@@ -38,6 +35,7 @@ class JuliBrain:
         self._last_scan: float = 0.0
         self._last_alloc: float = 0.0
         self._open_positions: dict[str, Any] = {}
+        log.info("System 1 (JuliBrain) fast-path initialized")
         self.slow_cortex.start()
 
     def tick(
@@ -177,6 +175,7 @@ class JuliBrain:
         prices = snap.get("prices", [])
         if len(prices) < 20:
             return None
+        t0 = time.perf_counter_ns()
         result = self.brain.tick(
             alpha=self._compute_alpha(snap),
             ticker=ticker,
@@ -184,6 +183,9 @@ class JuliBrain:
             atr=snap.get("atr", 1.0),
             open_positions=open_count,
         )
+        latency_us = (time.perf_counter_ns() - t0) / 1000.0
+        if latency_us > 1000.0:
+            log.warning("Tick latency spike: %.0f us for %s", latency_us, ticker)
         direction = result.get("direction", 0)
         return (
             self._build_decision(ticker, direction, result) if direction != 0 else None

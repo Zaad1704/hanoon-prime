@@ -61,7 +61,11 @@ class Dynamics:
 
     def set_refractory(self, duration: float = 2.0) -> None:
         """Set refractory period after trade event (neuronal hyperpolarization)."""
+        import logging
+
+        log = logging.getLogger(__name__)
         self._refractory_until = time.time() + duration
+        log.info("REFRACTORY set for %.1fs (threshold spike)", duration)
 
     def _apply_refractory(self) -> float:
         """Exponential decay penalty after trade events."""
