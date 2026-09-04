@@ -1,8 +1,5 @@
 """hanoon_prime.ib_adapter — IB Gateway streaming adapter.
-
 IB is the SINGLE source of truth for everything.
-Uses JuliBrain orchestrator for dynamic scanner discovery.
-Excluded from mypy strict — ib_insync is not fully typed.
 """
 from __future__ import annotations
 
@@ -10,10 +7,9 @@ import logging
 import signal
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ._telegram import safety_halt, shutdown, startup
-from .cortex import Thought
 from .hippocampus import Hippocampus
 from .ib_compat import _ib_available, ib
 from .ib_executor import IBExecutor
@@ -23,18 +19,15 @@ from .juli import JuliBrain
 from .memory import Journal
 
 log = logging.getLogger(__name__)
-MAX_RECONNECT = 5
-RECONNECT_DELAY = 5
+MAX_RECONNECT, RECONNECT_DELAY = 5, 5
 class SafetyNetStopped(Exception):
-    """Raised when a hard safety net triggers."""
+    pass
 def _count_ib_positions(ib_client: Any, tracked: set[str]) -> int:
-    """Count actual positions in IB for tracked tickers."""
     try:
         return len([p for p in ib_client.positions() if p.contract.symbol in tracked])
     except Exception:
         return 0
 def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
-    """Try to connect once. Returns True on success."""
     try:
         ib_client.connect(host, port, clientId=client_id)
         return bool(ib_client.isConnected())
@@ -42,7 +35,7 @@ def _try_connect(ib_client: Any, host: str, port: int, client_id: int) -> bool:
         log.warning("Connection failed: %s", e)
         return False
 class IBStreamingBot:
-    """Live bot: IB Gateway stream → JuliBrain → bracket orders."""
+    """Live bot: IB Gateway stream -> JuliBrain -> bracket orders."""
     def __init__(self, account: str = "PAPER") -> None:
         if not _ib_available:
             raise ImportError("ib_insync required: pip install ib_insync")
@@ -54,8 +47,7 @@ class IBStreamingBot:
         self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.brain, self.journal)
-        self._running = False
-        self._last_beat: float = 0.0
+        self._running, self._last_beat = False, 0.0
         self._setup_signals()
     def _setup_signals(self) -> None:
         def _h(s: int, _: Any) -> None:
@@ -65,18 +57,15 @@ class IBStreamingBot:
                 client_id: int = IB_CLIENT_ID) -> None:
         """Connect to IB Gateway with retry logic."""
         for attempt in range(1, MAX_RECONNECT + 1):
-            log.info("Connecting to %s:%s (client=%s, attempt %d)",
-                     host, port, client_id, attempt)
+            log.info("Connecting %s:%s (client=%s, attempt %d)", host, port, client_id, attempt)
             if _try_connect(self.ib, host, port, client_id):
-                self._subscribe_ib_events()
+                self.ib.execDetailsEvent += self.streamer.record_execution
+                self.ib.commissionReportEvent += self.streamer.record_commission
                 log.info("Connected. Account: %s", self.account)
                 return
             if attempt < MAX_RECONNECT:
                 time.sleep(RECONNECT_DELAY)
         raise ConnectionError(f"Failed after {MAX_RECONNECT} attempts")
-    def _subscribe_ib_events(self) -> None:
-        self.ib.execDetailsEvent += self.streamer.record_execution
-        self.ib.commissionReportEvent += self.streamer.record_commission
     def run(self, tickers: list[str] | None = None, poll_interval: float = 1.0) -> None:
         """Run with optional seed tickers. JuliBrain discovers the rest."""
         self._running = True
@@ -107,8 +96,7 @@ class IBStreamingBot:
             return None
         base: dict[str, Any] = {"bid": float(tk.bid), "ask": float(tk.ask),
                 "last": float(tk.last or tk.close or 0),
-                "volume": float(tk.volume or 0),
-                "daily_volume": float(tk.volume or 0)}
+                "volume": float(tk.volume or 0), "daily_volume": float(tk.volume or 0)}
         if not self.streamer.ready(sym):
             return base
         a = self.streamer.get_arrays(sym)
@@ -117,6 +105,8 @@ class IBStreamingBot:
         base["volumes"] = list(a["volume"])
         base["close_arr"] = a["close"]
         base["vol_arr"] = a["volume"]
+        base["high_arr"] = a["high"]
+        base["low_arr"] = a["low"]
         base["buy_vol_arr"] = a["buy_volume"]
         base["bid_sizes"] = a["bid_sizes"]
         base["ask_sizes"] = a["ask_sizes"]
@@ -128,49 +118,58 @@ class IBStreamingBot:
             self._check_safety_nets(pnl)
             self._sync_subscriptions()
             positions = set(self.brain._open_positions.keys())
-            decisions = self.juli.tick(positions, self._get_snapshot)
+            decisions, exit_signals = self.juli.tick(positions, self._get_snapshot, self.streamer)
             bars = 0
             for tk in self.ib.pendingTickers():
                 s = tk.contract.symbol if tk.contract else ""
                 if self.streamer.update_bar(s):
                     bars += 1
+            for exit_sig in exit_signals:
+                self.executor.close_position(exit_sig["ticker"], self.streamer)
+                log.info("BRAIN EXIT %s: %s", exit_sig["ticker"], exit_sig["reason"])
             for dec in decisions:
                 self._execute_decision(dec)
+            self._process_closed_trades()
             if pnl is not None:
                 self.brain._daily_pnl = float(pnl.dailyPnL)
             self.ib.waitOnUpdate(timeout=poll_interval)
             if time.monotonic() - started < poll_interval:
                 time.sleep(poll_interval - (time.monotonic() - started))
             self._heartbeat()
-            log.info("CYCLE bars=%d open=%d decisions=%d",
-                     bars, len(self.brain._open_positions), len(decisions))
+            log.info("CYCLE bars=%d open=%d decisions=%d exits=%d",
+                     bars, len(self.brain._open_positions), len(decisions), len(exit_signals))
         except Exception as e:
             log.error("Cycle error: %s", e)
     def _sync_subscriptions(self) -> None:
         tracked = self.juli.budget.get_all_tracked()
         scanner_syms = {c.symbol for c in self.juli._candidates[:20]}
-        positions = set(self.brain._open_positions.keys())
-        all_needed = tracked | scanner_syms | positions
+        all_needed = tracked | scanner_syms | set(self.brain._open_positions.keys())
         self.executor.tracked_tickers = tracked
-        new = [s for s in all_needed if s not in self.streamer.ticker_subs]
-        for sym in new[:5]:
+        for sym in [s for s in all_needed if s not in self.streamer.ticker_subs][:5]:
             self._subscribe_one(sym)
     def _subscribe_one(self, sym: str) -> None:
         try: self.streamer.subscribe(sym); self.streamer.seed_history(sym)
         except Exception as e: log.warning("Sub %s fail: %s", sym, e)
     def _execute_decision(self, dec: dict[str, Any]) -> None:
-        ticker = dec["ticker"]
-        thought = dec["thought"]
+        ticker, thought = dec["ticker"], dec["thought"]
         tk = self.streamer.ticker_subs.get(ticker)
         if tk is None or not tk.hasBidAsk():
             return
         if not self.brain.check_entry_allowed():
-            log.info("SKIP %s safety_nets blocked", ticker); return
+            log.info("SKIP %s safety blocked", ticker); return
         if ticker in self.brain._open_positions:
             log.info("SKIP %s already open", ticker); return
         price = float((tk.bid + tk.ask) * 0.5)
         self.executor.place_bracket(ticker, thought, price, self.streamer)
         self.executor.last_thoughts[ticker] = thought
+        self.juli.brain.register_position(ticker, price)
+    def _process_closed_trades(self) -> None:
+        """Route closed trades to brain reflection."""
+        for trade in self.executor.get_newly_closed_trades():
+            won = trade["pnl"] > 0
+            self.juli.on_trade_close(ticker=trade["ticker"], won=won,
+                pnl_pct=trade["return_pct"], direction=trade["direction"])
+            log.info("REFLECT %s %s pnl=%.4f", trade["ticker"], "WIN" if won else "LOSS", trade["pnl"])
     def _heartbeat(self) -> None:
         now = time.monotonic()
         if now - self._last_beat < 60.0: return
@@ -187,9 +186,9 @@ class IBStreamingBot:
         self.journal.append({"event": "halt", "reason": reason, "ts": time.time()})
         safety_halt(reason); self._running = False
     def _cleanup(self, pnl: Any) -> None:
-        self.streamer.cancel_all(); self.executor.cancel_all()
-        self.juli.scanner.cancel_all(); self.ib.cancelPnL(self.account) if pnl else None
-        self.ib.disconnect() if self.ib.isConnected() else None
+        self.streamer.cancel_all(); self.executor.cancel_all(); self.juli.scanner.cancel_all()
+        if pnl: self.ib.cancelPnL(self.account)
+        if self.ib.isConnected(): self.ib.disconnect()
         shutdown()
     def run_paper(self, tickers: list[str] | None = None) -> None:
         """Connect to IB paper port and run."""

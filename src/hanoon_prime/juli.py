@@ -1,200 +1,191 @@
 """hanoon_prime.juli — Biological brain orchestrator.
 
-JULI is the full brain: scanner → thalamus → amygdala/pfc → decision.
-Replaces hardcoded tickers with dynamic IB scanner discovery.
-Allocates data budget smartly across positions and candidates.
-Works slowly and carefully, like a real biological brain.
+JULI is the full brain: scanner → indicators → JuliBrain → decision.
+Keeps IB scanner/budget for ticker discovery.
+Delegates all cognition to brain/orchestrator.py (the 22-module brain).
+Returns (decisions, exit_signals) for ib_adapter to execute.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
-from .brain.amygdala import Amygdala
-from .brain.pfc import PrefrontalCortex
-from .brain.plasticity import Plasticity
-from .brain.thalamus import Thalamus, ThalamusVerdict
+from .brain.indicators import compute_all_alpha
+from .brain.orchestrator import JuliBrain as BrainPipeline
 from .cerebellum import compute_alpha
-from .cortex import Cortex, Thought
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
 
 log = logging.getLogger(__name__)
-SCANNER_INTERVAL: float = 300.0
 MAX_CANDIDATES: int = 20
-ENTRY_THRESHOLD: float = 0.65
 
 
 class JuliBrain:
-    """Biological brain orchestrator — scanner to decision."""
+    """Biological brain: scanner discovery + full cognitive pipeline."""
 
     def __init__(self, ib_client: Any) -> None:
         self.ib = ib_client
         self.scanner = IBScanner(ib_client)
-        self.thalamus = Thalamus()
-        self.amygdala = Amygdala()
-        self.pfc = PrefrontalCortex()
-        self.plasticity = Plasticity()
         self.budget = DataBudget()
-        self.cortex = Cortex()
+        self.brain = BrainPipeline()
         self._candidates: list[ScanResult] = []
-        self._eligible: list[ThalamusVerdict] = []
         self._last_scan: float = 0.0
         self._last_alloc: float = 0.0
+        self._open_positions: dict[str, Any] = {}
 
-    def tick(self, positions: set[str], get_snapshot: Any) -> list[dict[str, Any]]:
-        """One brain cycle. Returns list of decisions."""
+    def tick(
+        self, positions: set[str], get_snapshot: Any, streamer: Any
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """One full brain cycle. Returns (entry_decisions, exit_signals)."""
+        self._open_positions = dict.fromkeys(positions, True)
         self._maybe_scan()
-        self._collect_scan()
         self._maybe_screen(get_snapshot)
         self._maybe_allocate(positions)
-        return self._evaluate(positions, get_snapshot)
+        return self._evaluate_exits(positions, get_snapshot), self._evaluate_entries(
+            positions, get_snapshot
+        )
 
     def _maybe_scan(self) -> None:
-        """Start scanner every 5 minutes."""
+        """Start scanner and collect results every 5 minutes."""
         if not self.scanner.should_scan():
             return
         try:
             self.scanner.scan("most_active")
-        except Exception as e:
-            log.warning("Scan start failed: %s", e)
-
-    def _collect_scan(self) -> None:
-        try:
             self._candidates = self.scanner.collect()
         except Exception as e:
-            log.debug("Scan collect error: %s", e)
+            log.warning("Scan failed: %s", e)
 
     def _maybe_screen(self, get_snapshot: Any) -> None:
-        """Screen candidates through thalamus."""
+        """Screen candidates — subscribe only, budget handles allocation."""
         if not self._candidates:
             return
-        screened: list[ThalamusVerdict] = []
-        for cand in self._candidates[:MAX_CANDIDATES]:
-            snap = get_snapshot(cand.symbol)
-            if snap is None:
-                continue
-            v = self.thalamus.screen(
-                ticker=cand.symbol,
-                bid=snap.get("bid", 0),
-                ask=snap.get("ask", 0),
-                last=snap.get("last", 0),
-                volume=snap.get("volume", 0),
-                daily_volume=snap.get("daily_volume", 0),
-            )
-            screened.append(v)
-        self._eligible = self.thalamus.rank(screened)
-        syms = [s.ticker for s in self._eligible[:10]]
-        log.info(
-            "THALAMUS: %d/%d — %s",
-            len(self._eligible),
-            len(self._candidates),
-            syms,
+        passed = sum(
+            1
+            for c in self._candidates[:MAX_CANDIDATES]
+            if (snap := get_snapshot(c.symbol)) is not None and snap.get("last", 0) > 0
         )
+        log.info("SCREEN: %d/%d passed", passed, len(self._candidates))
 
     def _maybe_allocate(self, positions: set[str]) -> None:
         now = time.time()
         if now - self._last_alloc < 5.0:
             return
         self._last_alloc = now
-        candidates = [s.ticker for s in self._eligible[:MAX_CANDIDATES]]
-        to_sub, to_unsub = self.budget.allocate(positions, candidates)
-        if to_sub or to_unsub:
-            log.info(
-                "BUDGET: +%d -%d tiers=%s",
-                len(to_sub),
-                len(to_unsub),
-                self.budget.count_tiers(),
-            )
+        self.budget.allocate(
+            positions, [c.symbol for c in self._candidates[:MAX_CANDIDATES]]
+        )
 
-    def _evaluate(self, positions: set[str], get_snapshot: Any) -> list[dict[str, Any]]:
-        """Evaluate all tracked tickers + open positions."""
+    def _evaluate_exits(
+        self, positions: set[str], get_snapshot: Any
+    ) -> list[dict[str, Any]]:
+        """Check brain exit signals for open positions."""
+        exits: list[dict[str, Any]] = []
+        for ticker in positions:
+            snap = get_snapshot(ticker)
+            if snap is None or snap.get("last", 0) <= 0:
+                continue
+            sig = self.brain.check_exit(ticker, snap["last"], direction=1)
+            if sig.should_exit:
+                exits.append(
+                    {"ticker": ticker, "reason": sig.reason, "exit_type": sig.exit_type}
+                )
+                log.info("EXIT SIGNAL %s: %s", ticker, sig.reason)
+        return exits
+
+    def _evaluate_entries(
+        self, positions: set[str], get_snapshot: Any
+    ) -> list[dict[str, Any]]:
+        """Evaluate all tracked tickers for entry decisions."""
         decisions: list[dict[str, Any]] = []
-        all_tickers = self.budget.get_all_tracked() | positions
-        for ticker in all_tickers:
+        for ticker in self.budget.get_all_tracked() | positions:
             snap = get_snapshot(ticker)
             if snap is None:
                 continue
-            thought = self._eval_one(ticker, snap)
-            if thought is not None and thought.direction != 0:
-                decisions.append(
-                    {
-                        "ticker": ticker,
-                        "direction": thought.direction,
-                        "verdict": thought.verdict,
-                        "score": thought.score,
-                        "thought": thought,
-                    }
-                )
+            dec = self._eval_one(ticker, snap, len(positions))
+            if dec is not None:
+                decisions.append(dec)
         return decisions
 
-    def _eval_one(self, ticker: str, snap: dict[str, Any]) -> Optional[Thought]:
-        """Evaluate one ticker through the brain pipeline."""
-        prices = snap.get("prices", [])
-        if len(prices) < 20:
-            return None
-        threat = self._check_threat(ticker, snap, prices)
-        if threat.trigger_exit:
-            log.info("AMYGDALA %s EXIT: %s", ticker, threat.reason)
-            return None
-        pfc = self.pfc.evaluate(
-            ticker=ticker,
-            prices=prices,
-            volumes=snap.get("volumes", []),
-            atr=snap.get("atr", 1.0),
-        )
-        cortex_score = self._brain_score(snap)
-        combined = self.plasticity.synthesize(
-            {"amygdala": threat.score, "pfc": pfc.intent, "hippocampus": cortex_score}
-        )
-        return self._make_thought(ticker, combined, pfc.regime, threat.fear)
-
-    def _check_threat(
-        self, ticker: str, snap: dict[str, Any], prices: list[float]
-    ) -> Any:
-        """Run amygdala threat check."""
-        return self.amygdala.evaluate(
-            ticker=ticker,
-            bid=snap.get("bid", 0),
-            ask=snap.get("ask", 0),
-            last=snap.get("last", 0),
-            volume=snap.get("volume", 0),
-            atr=snap.get("atr", 1.0),
-            prices=prices,
-        )
-
-    def _brain_score(self, snap: dict[str, Any]) -> float:
-        """Compute cortex signal score."""
-        alpha = compute_alpha(
+    def _compute_alpha(self, snap: dict[str, Any]) -> dict[str, float]:
+        """Compute all indicators from snapshot arrays."""
+        alpha = compute_all_alpha(
             close=snap.get("close_arr"),
+            high=snap.get("high_arr"),
+            low=snap.get("low_arr"),
             volume=snap.get("vol_arr"),
             buy_volume=snap.get("buy_vol_arr"),
             bid_sizes=snap.get("bid_sizes"),
             ask_sizes=snap.get("ask_sizes"),
         )
-        thought = self.cortex.evaluate(alpha) if alpha else None
-        return thought.score if thought else 0.0
+        if not alpha:
+            alpha = (
+                compute_alpha(
+                    close=snap.get("close_arr"),
+                    volume=snap.get("vol_arr"),
+                    buy_volume=snap.get("buy_vol_arr"),
+                    bid_sizes=snap.get("bid_sizes"),
+                    ask_sizes=snap.get("ask_sizes"),
+                )
+                or {}
+            )
+        return alpha
 
-    def _make_thought(
-        self, ticker: str, score: float, regime: str, fear: float
-    ) -> Optional[Thought]:
-        """Convert combined score to Thought if above threshold."""
-        if abs(score) < ENTRY_THRESHOLD:
-            return None
-        direction = 1 if score > 0 else -1
+    def _build_decision(
+        self, ticker: str, direction: int, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build decision dict from brain result."""
+        score = result.get("score", 0)
+        verdict = result.get("verdict", "")
+        conf = result.get("confidence", 0.5)
         log.info(
-            "JULI %s %s score=%.3f regime=%s fear=%.2f",
+            "THINK %s %s score=%.3f regime=%s",
             ticker,
             "BUY" if direction > 0 else "SELL",
             score,
-            regime,
-            fear,
+            result.get("regime", "?"),
         )
-        return Thought(
-            verdict="BUY" if direction > 0 else "SELL",
-            score=score,
-            direction=direction,
-            confidence=0.5 + abs(score) * 0.45,
+        thought = type(
+            "T",
+            (),
+            {
+                "direction": direction,
+                "score": score,
+                "verdict": verdict,
+                "confidence": conf,
+            },
+        )()
+        return {
+            "ticker": ticker,
+            "direction": direction,
+            "verdict": verdict,
+            "score": score,
+            "thought": thought,
+            "sizing": result.get("sizing"),
+        }
+
+    def _eval_one(
+        self, ticker: str, snap: dict[str, Any], open_count: int
+    ) -> dict[str, Any] | None:
+        """Evaluate one ticker through the full brain pipeline."""
+        prices = snap.get("prices", [])
+        if len(prices) < 20:
+            return None
+        result = self.brain.tick(
+            alpha=self._compute_alpha(snap),
+            ticker=ticker,
+            entry_price=float(prices[-1]),
+            atr=snap.get("atr", 1.0),
+            open_positions=open_count,
         )
+        direction = result.get("direction", 0)
+        return (
+            self._build_decision(ticker, direction, result) if direction != 0 else None
+        )
+
+    def on_trade_close(
+        self, ticker: str, won: bool, pnl_pct: float, direction: int = 1
+    ) -> None:
+        """Route trade close to brain reflection system."""
+        self.brain.on_trade_close(ticker, won, pnl_pct, direction)
