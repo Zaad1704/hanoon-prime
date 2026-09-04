@@ -115,16 +115,14 @@ class _TelemetryHandler(BaseHTTPRequestHandler):
     def _safety_net_status(self) -> dict[str, Any]:
         """Return current safety net toggle status and limits."""
         bot = self.bot
-        brain = getattr(bot, "brain", None) if bot else None
-        enabled = getattr(brain, "safety_enabled", False) if brain else False
-        daily_pnl = getattr(brain, "_daily_pnl", 0.0) if brain else 0.0
+        hp = getattr(bot, "hippocampus", None) if bot else None
+        enabled = getattr(hp, "safety_enabled", False) if hp else False
+        daily_pnl = getattr(hp, "_daily_pnl", 0.0) if hp else 0.0
         return {
             "enabled": enabled,
             "daily_pnl": daily_pnl,
             "limit": DAILY_LOSS_LIMIT,
-            "consecutive_losses": (
-                getattr(brain, "_consecutive_losses", 0) if brain else 0
-            ),
+            "consecutive_losses": (getattr(hp, "_consecutive_losses", 0) if hp else 0),
         }
 
     def _set_safety_net(self, enabled: bool) -> None:
@@ -132,9 +130,9 @@ class _TelemetryHandler(BaseHTTPRequestHandler):
         bot = self.bot
         if bot is None:
             return
-        brain = getattr(bot, "brain", None)
-        if brain is not None:
-            brain.safety_enabled = enabled
+        hp = getattr(bot, "hippocampus", None)
+        if hp is not None:
+            hp.safety_enabled = enabled
             log.info("Safety net %s via webapp", "ENABLED" if enabled else "DISABLED")
 
     def _journal(self) -> dict[str, Any]:

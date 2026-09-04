@@ -5,16 +5,20 @@ Contains BotCycleMixin with cycle, sync, execution, and safety methods
 that IBStreamingBot mixes in. Also provides connect helpers.
 """
 from __future__ import annotations
+
 import logging
 import time
 from typing import Any
+
 from ._telegram import safety_halt, shutdown
 from .hippocampus import Hippocampus
 from .ib_executor import IBExecutor
 from .ib_streamer import IBStreamer
 from .memory import Journal
+from .monitor.sleep_manager import SleepManager
 
 log = logging.getLogger(__name__)
+_SLEEP_MGR = SleepManager()
 
 
 class SafetyNetStopped(Exception):
@@ -64,13 +68,14 @@ class BotCycleMixin:
             self._check_safety(pnl)
             self._sync_subs()
             positions = set(self.hippocampus._open_positions.keys())
+            market_open = _SLEEP_MGR.get_state().active
             exit_s, decisions = self.juli.tick(positions, self._snapshot, self.streamer, self._closing)
-            self._finish_cycle(exit_s, decisions, poll, started, pnl)
+            self._finish_cycle(exit_s, decisions, poll, started, pnl, market_open)
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
 
     def _finish_cycle(self, exit_s: list[dict[str, Any]], decisions: list[dict[str, Any]],
-                      poll: float, started: float, pnl: Any) -> None:
+                      poll: float, started: float, pnl: Any, market_open: bool = True) -> None:
         """Process tickers, exits, decisions, reflect, wait."""
         self._last_bars = sum(1 for tk in self.ib.pendingTickers()
             if self.streamer.update_bar(tk.contract.symbol if tk.contract else ""))
@@ -80,7 +85,8 @@ class BotCycleMixin:
                 self._closing.add(t)
                 self.executor.close_position(t, self.streamer)
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
-        for dec in decisions: self._exec_decision(dec)
+        for dec in decisions:
+            if market_open: self._exec_decision(dec)
         self._reflect_closed()
         if pnl is not None: self.hippocampus._daily_pnl = float(pnl.dailyPnL)
         elapsed = time.monotonic() - started
@@ -112,6 +118,10 @@ class BotCycleMixin:
             return
         if t in self.hippocampus._open_positions:
             log.info("SKIP %s open", t)
+            return
+        sizing = dec.get("sizing")
+        if sizing is None or getattr(sizing, "shares", 0) <= 0:
+            log.debug("SKIP %s sizing=0", t)
             return
         price = float((tk.bid + tk.ask) * 0.5)
         self.executor.place_bracket(t, dec["thought"], price, self.streamer)

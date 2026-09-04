@@ -2,8 +2,7 @@
 
 Decides whether the bot should be ACTIVE (trading) or SLEEPING (idle).
 Honors market sessions (RTH/pre/post), weekends, and holidays.
-
-Source: rebuild's monitoring/sleep.py (simplified).
+Uses zoneinfo for proper US/Eastern timezone (handles DST automatically).
 """
 
 from __future__ import annotations
@@ -11,10 +10,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
-# US Eastern Time offsets (simplified — no pytz dependency)
+_ET = ZoneInfo("America/New_York")
 _RTH_START_HOUR = 9  # 9:30 AM ET
 _RTH_START_MIN = 30
 _RTH_END_HOUR = 16  # 4:00 PM ET
@@ -32,7 +32,7 @@ class SleepManager:
     """Market session awareness."""
 
     def __init__(self) -> None:
-        """Auto-generated docstring."""
+        """Initialize with no forced override."""
         self._force_active: bool = False
 
     def get_state(self, ib_connected: bool = True) -> SleepState:
@@ -41,15 +41,11 @@ class SleepManager:
             return SleepState(active=True, session="forced", reason="manual")
         if not ib_connected:
             return SleepState(active=False, reason="IB disconnected")
-        now = datetime.now(timezone.utc)
-        # Convert to ET (UTC-4 or UTC-5 depending on DST)
-        # Simplified: assume UTC-4 (EDT)
-        et_hour = (now.hour - 4) % 24
+        now = datetime.now(timezone.utc).astimezone(_ET)
+        et_hour = now.hour
         et_min = now.minute
-        # Weekend check
         if now.weekday() >= 5:
             return SleepState(active=False, session="weekend", reason="Weekend")
-        # RTH check
         is_rth = et_hour > _RTH_START_HOUR or (
             et_hour == _RTH_START_HOUR and et_min >= _RTH_START_MIN
         )
@@ -59,9 +55,8 @@ class SleepManager:
         )
         if is_rth:
             return SleepState(active=True, session="RTH", reason="Market open")
-        # Pre/Post market
-        is_pre = et_hour == 8  # 8:00-9:30 AM ET
-        is_post = et_hour == 16  # 4:00-6:00 PM ET
+        is_pre = et_hour == 8
+        is_post = et_hour == 16
         if is_pre or is_post:
             return SleepState(
                 active=False, session="pre_post", reason="Pre/Post market"
@@ -69,5 +64,5 @@ class SleepManager:
         return SleepState(active=False, session="overnight", reason="Off hours")
 
     def force_active(self, active: bool) -> None:
-        """Auto-generated docstring."""
+        """Override market hours check."""
         self._force_active = active

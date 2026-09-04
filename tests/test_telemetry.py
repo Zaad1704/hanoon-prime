@@ -50,7 +50,7 @@ class _FakeBot:
         safety_enabled: bool = False,
         entries: list[dict[str, Any]] | None = None,
     ) -> None:
-        self.brain = _FakeBrain(safety_enabled=safety_enabled)
+        self.hippocampus = _FakeBrain(safety_enabled=safety_enabled)
         self.ib = MagicMock()
         self.ib.isConnected.return_value = True
         self.ib.positions.return_value = []

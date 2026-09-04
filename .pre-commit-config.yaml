@@ -15,14 +15,14 @@ repos:
     hooks:
       - id: black
         args: [--line-length=88]
-        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat)|hands|validator)\.py$|^halim/.*$
+        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat|cycle)|hands|validator)\.py$|^halim/.*$
 
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
         args: [--profile=black, --line-length=88]
-        exclude: ^halim/.*$
+        exclude: ^src/hanoon_prime/ib_cycle\.py$|^halim/.*$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.11.2
