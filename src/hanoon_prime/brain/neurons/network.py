@@ -21,7 +21,7 @@ class LIFNetwork:
         self._neurons: Dict[str, LIFNeuron] = {}
         self._synapses: Dict[str, List[str]] = {}
         self._weights: Dict[str, Dict[str, float]] = {}
-        self._spike_log: deque = deque(maxlen=1000)
+        self._spike_log: deque[Spike] = deque(maxlen=1000)
         self._settle_spike_counts: Dict[str, int] = {}
         self._decision_evidence: Dict[str, float] = {}
 
@@ -94,7 +94,7 @@ class LIFNetwork:
         if target_id in self._decision_evidence:
             self._decision_evidence[target_id] += weight * spike.amplitude
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> dict[str, int]:
         """Full network state for telemetry."""
         return {
             "neuron_count": len(self._neurons),

@@ -19,7 +19,8 @@ def analyze_trade(base_url: str, trade_data: dict[str, Any]) -> dict[str, Any]:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode())
+            result: dict[str, Any] = json.loads(resp.read().decode())
+            return result
     except Exception as e:
         log.debug("HALIM trade analysis failed: %s", e)
         return {}
@@ -35,8 +36,9 @@ def get_improvement_recommendations(base_url: str) -> list[dict[str, Any]]:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-            return result.get("recommendations", [])
+            raw: dict[str, Any] = json.loads(resp.read().decode())
+            recs: list[dict[str, Any]] = raw.get("recommendations", [])
+            return recs
     except Exception as e:
         log.debug("HALIM recommendations failed: %s", e)
         return []
@@ -52,7 +54,8 @@ def get_health_advice(base_url: str) -> dict[str, Any]:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode())
+            health: dict[str, Any] = json.loads(resp.read().decode())
+            return health
     except Exception as e:
         log.debug("HALIM health check failed: %s", e)
         return {}

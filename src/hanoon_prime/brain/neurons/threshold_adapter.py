@@ -57,9 +57,10 @@ class DynamicThresholdAdapter:
         vix_scale = 1.0 + 0.02 * max(0.0, self.vix - 15.0)
         dynamic_theta = self.base_threshold * vol * vix_scale
 
-        return max(
+        result: float = max(
             self.base_threshold * 0.5, min(self.base_threshold * 5.0, dynamic_theta)
         )
+        return result
 
     def adapt_for_market(
         self,

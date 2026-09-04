@@ -152,7 +152,7 @@ class ConsolidationEngine:
         """Route trade close to thinker + buffer (slow path learning)."""
         from ..reflection.buffer import BUY, SELL
         alpha = self._get_latest_alpha() or {}
-        self.thinker.episodic.add(alpha, pnl_pct)
+        self.thinker.episodic.add(alpha, won, pnl_pct)
         self.thinker.emotion.update(won, pnl_pct)
         self.state.set_refractory(2.0)
         side = BUY if direction > 0 else SELL

@@ -20,7 +20,8 @@ class HalimAnalyzer:
         """Deep post-trade analysis via HALIM API."""
         if self._halim is None: return {}
         try:
-            return self._halim.analyze_trade(ticker, won, pnl, alpha)
+            result: dict[str, Any] = self._halim.analyze_trade(ticker, won, pnl, alpha)
+            return result
         except Exception as e:
             log.debug("HALIM trade analysis failed: %s", e)
             return {}
@@ -42,7 +43,8 @@ class HalimAnalyzer:
         """Get HALIM's recommendations for improvement."""
         if self._halim is None: return []
         try:
-            return self._halim.get_improvement_recommendations()
+            recs: list[dict[str, Any]] = self._halim.get_improvement_recommendations()
+            return recs
         except Exception:
             return []
 
@@ -50,7 +52,8 @@ class HalimAnalyzer:
         """Get HALIM's health assessment and recommendations."""
         if self._halim is None: return {}
         try:
-            return self._halim.get_health_advice()
+            advice: dict[str, Any] = self._halim.get_health_advice()
+            return advice
         except Exception as e:
             log.debug("HALIM health check failed: %s", e)
             return {}

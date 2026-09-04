@@ -4,7 +4,7 @@ Defines the baseline connection strengths for the neuromorphic brain.
 All alpha indicators feed into appropriate hidden neurons for decision making.
 """
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 def _get_input_to_hidden_weights() -> Dict[str, float]:
@@ -60,7 +60,7 @@ def get_default_synaptic_weights() -> Dict[str, float]:
     return _get_input_to_hidden_weights()
 
 
-def get_network_topology() -> Dict[str, List[Tuple]]:
+def get_network_topology() -> Dict[str, List[Any]]:
     """Get network connectivity structure."""
     return {
         "input_to_hidden": [

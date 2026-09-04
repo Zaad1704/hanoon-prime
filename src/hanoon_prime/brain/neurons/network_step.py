@@ -22,7 +22,7 @@ class NetworkStepper:
 
     def __init__(self, network: LIFNetwork) -> None:
         self._network = network
-        self._decay_cache: dict = {}
+        self._decay_cache: dict[str, float] = {}
         self._last_step_time: float = 0.0
 
     def step_all(self, dt: float = 0.05) -> List[Spike]:
@@ -42,7 +42,7 @@ class NetworkStepper:
 
         return spikes
 
-    def _extract_state(self, now: float) -> tuple:
+    def _extract_state(self, now: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Extract neuron states into numpy arrays."""
         neurons = self._network._neurons
         n = len(neurons)

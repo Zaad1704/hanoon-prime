@@ -24,7 +24,7 @@ def _equity_stats(
     # ~-1e12, so floor non-positive peaks to a safe denominator and mask those
     # points back to 0 drawdown.
     denom = np.where(running_max > 0, running_max, 1.0)
-    dd = (ec - denom) / denom  # type: ignore[operator]
+    dd = (ec - denom) / denom
     dd = np.where(running_max > 0, dd, 0.0)
     max_dd = float(np.min(dd))
     returns = np.diff(ec)

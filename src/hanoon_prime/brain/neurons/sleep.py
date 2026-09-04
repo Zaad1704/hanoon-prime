@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .attractor import AttractorMemory
+from .attractor import Attractor, AttractorMemory
 from .lif import LIFNeuron
 from .network import LIFNetwork
 from .spike import Spike
@@ -60,7 +60,7 @@ class SleepReplayEngine:
 
     def select_patterns(self) -> List[Tuple[Dict[str, float], float]]:
         """Select attractor patterns for replay."""
-        attractors = list(self._memory)
+        attractors: list[Attractor] = list(self._memory)
         if not attractors:
             return []
 

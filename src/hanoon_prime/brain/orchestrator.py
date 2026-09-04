@@ -86,7 +86,7 @@ class NeuromorphicBrain:
                 self.state.get("halim_modifier", 0.0),
                 self.state.get("episodic_bias", 0.0))
 
-    def _process_alpha(self, alpha: dict[str, float], ticker: str) -> dict:
+    def _process_alpha(self, alpha: dict[str, float], ticker: str) -> dict[str, Any]:
         """Process alpha through neuromorphic network."""
         if self._neuromorphic is None: return {"score": 0.0, "trace": {}}
         r = self._neuromorphic.process_alpha(alpha, ticker)

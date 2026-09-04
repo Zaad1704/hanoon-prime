@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from .spike import Spike
 
@@ -117,8 +117,8 @@ class LIFNeuron:
 
         # Spike-count leak
         if self._spike_count > 0:
-            self._spike_count *= math.exp(-dt / 1.0)
-            if self._spike_count < 0.01:
+            self._spike_count = int(self._spike_count * math.exp(-dt / 1.0))
+            if self._spike_count < 1:
                 self._spike_count = 0
 
         return self._check_fire(now)
@@ -147,7 +147,7 @@ class LIFNeuron:
 
     # ── Telemetry ──────────────────────────────────────────────────────
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> dict[str, Any]:
         """Current state for telemetry."""
         return {
             "id": self.id,

@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 
 @dataclass
@@ -119,7 +119,19 @@ class AttractorMemory:
     def __len__(self) -> int:
         return len(self._attractors)
 
-    def __iter__(self):
+    def _prune(self) -> None:
+        """Remove oldest patterns when over capacity."""
+        if len(self._attractors) <= self._max_patterns:
+            return
+        excess = len(self._attractors) - self._max_patterns
+        self._attractors = self._attractors[excess:]
+        self._ticker_index.clear()
+        for i, att in enumerate(self._attractors):
+            if att.ticker not in self._ticker_index:
+                self._ticker_index[att.ticker] = []
+            self._ticker_index[att.ticker].append(i)
+
+    def __iter__(self) -> Iterator[Attractor]:
         return iter(self._attractors)
 
 

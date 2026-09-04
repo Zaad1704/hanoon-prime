@@ -107,6 +107,53 @@ class STDPLearner:
             elif syn.strength < BASELINE_STEEP:
                 syn.strength = min(BASELINE_STEEP, syn.strength + decay_step)
 
+    def _record_pre_spike(self, neuron_id: str, now: float) -> None:
+        """Record pre-synaptic spike timestamp."""
+        if neuron_id not in self._pre_spikes:
+            self._pre_spikes[neuron_id] = []
+        spikes = self._pre_spikes[neuron_id]
+        spikes.append(now)
+        if len(spikes) > self._max_spikes:
+            self._pre_spikes[neuron_id] = spikes[-self._max_spikes:]
+
+    def _record_post_spike(self, neuron_id: str, now: float) -> None:
+        """Record post-synaptic spike and apply LTP."""
+        if neuron_id not in self._post_spikes:
+            self._post_spikes[neuron_id] = []
+        spikes = self._post_spikes[neuron_id]
+        spikes.append(now)
+        if len(spikes) > self._max_spikes:
+            self._post_spikes[neuron_id] = spikes[-self._max_spikes:]
+        self._apply_ltp(neuron_id, now)
+
+    def _apply_ltp(self, neuron_id: str, now: float) -> None:
+        """Apply LTP to synapses targeting this post-synaptic neuron."""
+        for src_id, syn in self._incoming.get(neuron_id, {}).items():
+            pre_spikes = self._pre_spikes.get(src_id, [])
+            if not pre_spikes:
+                continue
+            dt = now - pre_spikes[-1]
+            if 0 < dt < TAU_PLUS:
+                delta = A_PLUS * math.exp(-dt / TAU_PLUS)
+                syn.strength = min(STEEP_MAX, syn.strength + delta)
+                syn.trace += delta
+                syn.ltp_count += 1
+                syn.total_delta += delta
+
+    def _apply_ltd(self, neuron_id: str, now: float) -> None:
+        """Apply LTD to synapses from this pre-synaptic neuron."""
+        for dst_id, syn in self._outgoing.get(neuron_id, {}).items():
+            post_spikes = self._post_spikes.get(dst_id, [])
+            if not post_spikes:
+                continue
+            dt = now - post_spikes[-1]
+            if 0 < dt < TAU_MINUS:
+                delta = -A_MINUS * math.exp(-dt / TAU_MINUS)
+                syn.strength = max(STEEP_MIN, syn.strength + delta)
+                syn.trace += abs(delta)
+                syn.ltd_count += 1
+                syn.total_delta += delta
+
     def on_pre_spike(self, neuron_id: str, timestamp: float = 0.0) -> None:
         """Handle pre-synaptic spike event."""
         now = timestamp or time.time()
