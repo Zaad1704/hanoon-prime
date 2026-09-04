@@ -121,15 +121,18 @@ class STDPLearner:
     def apply_reward(self, reward: float, window_sec: float = 5.0) -> None:
         """Apply reward signal to recent synapses."""
         now = time.time()
+        if reward == 0:
+            return
         for syn in self._synapses.values():
             is_recent = now - syn.last_pre_spike < window_sec or syn.trace > 0.1
-            if is_recent:
-                if reward > 0:
-                    bonus = A_PLUS * 0.3 * reward
-                    syn.strength = min(STEEP_MAX, syn.strength + bonus)
-                elif reward < 0:
-                    penalty = A_MINUS * 0.3 * abs(reward)
-                    syn.strength = max(STEEP_MIN, syn.strength - penalty)
+            if not is_recent:
+                continue
+            if reward > 0:
+                bonus = A_PLUS * 0.3 * reward
+                syn.strength = min(STEEP_MAX, syn.strength + bonus)
+            elif reward < 0:
+                penalty = A_MINUS * 0.3 * abs(reward)
+                syn.strength = max(STEEP_MIN, syn.strength - penalty)
 
 
 __all__ = ["STDPLearner", "Synapse", "A_PLUS", "A_MINUS", "TAU_PLUS", "TAU_MINUS"]

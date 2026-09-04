@@ -13,21 +13,12 @@ from ._telegram import trade_closed, trade_opened
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
+from .ib_bracket import _brackets_from_trades
 from .memory import Journal
 
 log = logging.getLogger(__name__)
-def _brackets_from_trades(ib: Any, tracked: set[str], brackets: dict[str, tuple[float, float]]) -> None:
-    """Update bracket levels from IB trades."""
-    try:
-        for t in ib.trades():
-            sym = getattr(getattr(t, "contract", None), "symbol", "")
-            if sym in tracked and hasattr(t.order, "children") and t.order.children:
-                sp = [c.auxPrice for c in t.order.children if c.auxPrice is not None]
-                tp = [c.lmtPrice for c in t.order.children if c.lmtPrice is not None]
-                if sp and tp:
-                    brackets[sym] = (float(max(sp)), float(max(tp)))
-    except Exception:
-        pass
+
+
 class IBExecutor:
     """JULI's execution layer — monitors IB and manages all orders."""
     def __init__(self, ib_client: Any, brain: Hippocampus, journal: Journal, tracked_tickers: set[str] | None = None) -> None:
@@ -195,4 +186,6 @@ class IBExecutor:
             log.warning("cancel all failed: %s", e)
         self._brackets.clear()
         self._pending_parent.clear()
+
+
 __all__ = ["IBExecutor"]

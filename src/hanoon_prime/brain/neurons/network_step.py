@@ -147,15 +147,23 @@ class NetworkStepper:
             syn_weights = weights.get(spike.neuron_id, {})
 
             for target_id in targets:
-                target = network._neurons.get(target_id)
-                if target is not None:
-                    strength = syn_weights.get(target_id, 0.5)
-                    target.inject_charge(strength * spike.amplitude)
+                self._inject_to_target(
+                    network, target_id, syn_weights, spike.amplitude
+                )
 
-                    if target_id in network._decision_evidence:
-                        network._decision_evidence[target_id] += (
-                            strength * spike.amplitude
-                        )
+    def _inject_to_target(
+        self, network: LIFNetwork, target_id: str,
+        syn_weights: dict[str, float], amplitude: float
+    ) -> None:
+        """Inject charge to a single target neuron."""
+        target = network._neurons.get(target_id)
+        if target is None:
+            return
+        strength = syn_weights.get(target_id, 0.5)
+        target.inject_charge(strength * amplitude)
+
+        if target_id in network._decision_evidence:
+            network._decision_evidence[target_id] += strength * amplitude
 
 
 __all__ = ["NetworkStepper"]
