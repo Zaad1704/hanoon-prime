@@ -113,11 +113,11 @@ class IBStreamer:
         tk = self.ticker_subs.get(ticker)
         if tk is None or not tk.hasBidAsk():
             return None
-        close = float(tk.close or tk.last) if tk.last else None
+        close = next((float(v) for v in (tk.close, tk.last) if v and not np.isnan(v)), None)
         if close is None:
             return None
-        high = float(tk.high) if tk.high and not np.isnan(tk.high) else close
-        low = float(tk.low) if tk.low and not np.isnan(tk.low) else close
+        high = float(tk.high) if (tk.high and not np.isnan(tk.high)) else close
+        low = float(tk.low) if (tk.low and not np.isnan(tk.low)) else close
         vol = float(tk.volume or 0)
         bv = self._est_buy_vol(close, high, low, vol)
         dt = self.depth_subs.get(ticker)

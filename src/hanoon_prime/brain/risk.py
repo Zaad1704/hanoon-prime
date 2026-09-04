@@ -9,6 +9,7 @@ Merge of rebuild's ev_gate.py + risk_manager.py + sizer.py.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ..edge import compute_ev, kelly_fraction, score_to_win_prob
@@ -39,6 +40,22 @@ class SizingResult:
 class RiskEngine:
     """Risk gate and position sizing."""
 
+    @staticmethod
+    def _invalid_inputs(score: float, entry_price: float, atr: float) -> str | None:
+        """Return a rejection reason if inputs are non-finite/invalid, else None.
+
+        IB snapshots can carry NaN for last/close when a tick is stale or
+        mid-update. NaN survives ``<= 0`` checks (NaN <= 0 is False) and
+        would crash ``int(NaN)``. (Fix #75)
+        """
+        if not math.isfinite(entry_price) or entry_price <= 0:
+            return "Invalid entry_price (non-finite or non-positive)"
+        if not math.isfinite(atr) or atr <= 0:
+            return "Invalid ATR (non-finite or non-positive)"
+        if not math.isfinite(score):
+            return "Invalid score (non-finite)"
+        return None
+
     def evaluate(
         self,
         score: float,
@@ -48,17 +65,20 @@ class RiskEngine:
         open_positions: int,
     ) -> SizingResult:
         """Full risk evaluation. Returns sizing or rejection."""
+        bad = self._invalid_inputs(score, entry_price, atr)
+        if bad is not None:
+            return SizingResult(reason=bad)
         win_prob = score_to_win_prob(score)
         ev = compute_ev(win_prob)
         kelly = kelly_fraction(win_prob) * KELLY_FRACTION
+        if not math.isfinite(kelly) or kelly <= 0:
+            return SizingResult(reason="Invalid Kelly (non-finite or zero)")
         if ev["gross_ev"] < ENTRY_EV_THRESHOLD:
             return SizingResult(
                 reason=f"EV {ev['gross_ev']:.3f} < {ENTRY_EV_THRESHOLD}"
             )
         if open_positions >= MAX_CONCURRENT_POSITIONS:
             return SizingResult(reason=f"Max {MAX_CONCURRENT_POSITIONS} positions")
-        if atr <= 0 or entry_price <= 0:
-            return SizingResult(reason="Invalid ATR/price")
         risk_per_share = atr * ATR_STOP_MULT
         max_by_notional = MAX_POSITION_NOTIONAL / entry_price
         max_by_loss = MAX_LOSS_PER_TRADE / risk_per_share
@@ -68,7 +88,7 @@ class RiskEngine:
         stop = round(entry_price - d * ATR_STOP_MULT * atr, 2)
         target = round(entry_price + d * ATR_TARGET_MULT * atr, 2)
         return SizingResult(
-            shares=shares,
+            shares,
             stop_price=stop,
             target_price=target,
             ev=ev["gross_ev"],

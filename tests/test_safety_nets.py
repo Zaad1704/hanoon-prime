@@ -3,10 +3,12 @@
 These tests simulate dangerous scenarios and verify the system
 halts or refuses — never silently continues into danger.
 """
+
 from __future__ import annotations
 
 import pytest
 
+from hanoon_prime.brain.risk import RiskEngine
 from hanoon_prime.hippocampus import Hippocampus
 from hanoon_prime.immune import (
     CONSECUTIVE_LOSSES_PAUSE,
@@ -141,3 +143,116 @@ class TestSafetyNetToggle:
             brain.check_safety_nets()
         brain.safety_enabled = False
         brain.check_safety_nets()  # no-op again
+
+
+class TestNaNCrashRegression:
+    """Regression tests for Fix #75: NaN from stale IB ticks must never crash
+    ``int(min(...))`` in the sizing path and must not abort the whole cycle.
+    """
+
+    def test_risk_engine_rejects_nan_entry_price(self):
+        """NaN entry_price survives the ``<= 0`` guard and must be rejected,
+        not crash with ``ValueError: cannot convert float NaN to integer``."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.6,
+            confidence=0.7,
+            entry_price=float("nan"),
+            atr=2.0,
+            open_positions=0,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0
+        assert "entry_price" in result.reason
+
+    def test_risk_engine_rejects_nan_atr(self):
+        """NaN ATR must be rejected, not reach the sizing math."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.6,
+            confidence=0.7,
+            entry_price=100.0,
+            atr=float("nan"),
+            open_positions=0,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0
+        assert "ATR" in result.reason
+
+    def test_risk_engine_rejects_nan_score(self):
+        """NaN score must be rejected before any window-dressing math."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=float("nan"),
+            confidence=0.7,
+            entry_price=100.0,
+            atr=2.0,
+            open_positions=0,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0
+
+    def test_size_position_rejects_nan_price(self):
+        """Hippocampus live sizing must return 0.0 on NaN, not raise."""
+        brain = Hippocampus()
+        assert (
+            brain.size_position(win_prob=0.55, entry_price=float("nan"), atr=2.0) == 0.0
+        )
+
+    def test_risk_engine_still_sizes_valid_input(self):
+        """Valid, finite inputs still produce a non-zero sized decision
+        (regression guard so the NaN guard didn't also block good trades)."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.6,
+            confidence=0.7,
+            entry_price=100.0,
+            atr=2.0,
+            open_positions=0,
+        )
+        assert result.risk_pass is True
+        assert result.shares == 3
+        assert result.stop_price == 96.0
+        assert result.target_price == 112.0
+        assert result.ev == pytest.approx(0.84)
+        assert result.kelly == pytest.approx(0.07)
+
+    def test_risk_engine_rejects_zero_edge_score(self):
+        """Zero score -> win_prob floor -> kelly 0 -> rejected, never 1-share trade."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.0,
+            confidence=0.5,
+            entry_price=100.0,
+            atr=2.0,
+            open_positions=0,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0
+
+    def test_risk_engine_rejects_below_ev_threshold(self):
+        """A non-NaN but edge-barely-positive score is caught by the EV gate."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.02,
+            confidence=0.5,
+            entry_price=100.0,
+            atr=2.0,
+            open_positions=0,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0
+        assert "EV" in result.reason
+
+    def test_risk_engine_rejects_at_max_positions(self):
+        """Portfolio heat limit rejects even a valid candidate."""
+        engine = RiskEngine()
+        result = engine.evaluate(
+            score=0.6,
+            confidence=0.7,
+            entry_price=100.0,
+            atr=2.0,
+            open_positions=MAX_CONCURRENT_POSITIONS,
+        )
+        assert result.risk_pass is False
+        assert result.shares == 0

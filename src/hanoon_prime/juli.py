@@ -1,12 +1,12 @@
 """hanoon_prime.juli — Biological brain orchestrator.
-Scanner discovery + full cognitive pipeline via brain/orchestrator.py.
-Returns (decisions, exit_signals) for ib_adapter to execute.
+Scanner discovery + cognitive pipeline; returns (decisions, exit_signals).
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from types import SimpleNamespace
 from typing import Any
 
 from .brain.indicators import compute_all_alpha
@@ -112,7 +112,11 @@ class JuliBrain:
             snap = get_snapshot(ticker)
             if snap is None:
                 continue
-            dec = self._eval_one(ticker, snap, len(positions))
+            try:
+                dec = self._eval_one(ticker, snap, len(positions))
+            except Exception as e:
+                log.warning("Entry eval failed for %s: %s", ticker, e)
+                continue
             if dec is not None:
                 decisions.append(dec)
         return decisions
@@ -149,16 +153,12 @@ class JuliBrain:
             result.get("regime", "?"),
             result.get("risk", "normal"),
         )
-        thought = type(
-            "T",
-            (),
-            {
-                "direction": direction,
-                "score": score,
-                "verdict": verdict,
-                "confidence": conf,
-            },
-        )()
+        thought = SimpleNamespace(
+            direction=direction,
+            score=score,
+            verdict=verdict,
+            confidence=conf,
+        )
         return {
             "ticker": ticker,
             "direction": direction,

@@ -9,8 +9,10 @@ Learning rule (punishment-dominant):
   - Between trades: w_i *= 0.999 (geometric decay)
   - Clamped to [WEIGHT_MIN, WEIGHT_MAX] = [-2, +2]
 """
+
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .cerebellum import INDICATOR_NAMES, compute_alpha
@@ -73,10 +75,19 @@ class Hippocampus:
 
     def size_position(self, win_prob: float, entry_price: float, atr: float) -> float:
         """Fractional Kelly (25%) capped by notional and loss limits."""
-        if win_prob <= 0.0 or entry_price <= 0.0 or atr <= 0.0:
+        # R6 safety: NaN/inf from stale IB ticks survive `<= 0` checks
+        # (NaN <= 0 is False) and would poison the share math. (Fix #75)
+        if (
+            not math.isfinite(win_prob)
+            or not math.isfinite(entry_price)
+            or not math.isfinite(atr)
+            or win_prob <= 0.0
+            or entry_price <= 0.0
+            or atr <= 0.0
+        ):
             return 0.0
         kelly = kelly_fraction(win_prob) * KELLY_FRACTION
-        if kelly <= 0.0:
+        if not math.isfinite(kelly) or kelly <= 0.0:
             return 0.0
         risk_per_share = atr * ATR_STOP_MULT
         if risk_per_share <= 0.0:
