@@ -147,9 +147,12 @@ def error_notify(context: str, detail: str) -> None:
     send(f"❗ ERROR in {context}\n{detail}")
 
 
-def startup(tickers: list[str]) -> None:
+def startup(tickers: list[str] | None = None) -> None:
     """Notify bot startup."""
-    send(f"🚀 JULI Prime started\nTickers: {', '.join(tickers)}")
+    if tickers:
+        send(f"🚀 JULI Prime started\nSeed: {', '.join(tickers)}")
+    else:
+        send("🚀 JULI Prime started — scanning for tickers")
 
 
 def shutdown(reason: str = "") -> None:

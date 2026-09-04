@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DEFAULT_WEIGHTS, EPISODIC_CAPACITY, JULI_STATE_FILE
+from .weight_enforcer import get_enforcer
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class JuliMemory:
         """Replace indicator weights and persist."""
         with self._lock:
             self._weights = dict(weights)
+            get_enforcer().repair_on_load(self._weights)
             self._save()
 
     def add_episode(
@@ -164,6 +166,7 @@ class JuliMemory:
             d = json.loads(self._path.read_text())
             for k in SAVE_KEYS:
                 setattr(self, f"_{k}", d.get(k, getattr(self, f"_{k}")))
+            get_enforcer().repair_on_load(self._weights)
         except (json.JSONDecodeError, KeyError) as e:
             log.warning("State load failed (starting fresh): %s", e)
 

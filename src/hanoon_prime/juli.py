@@ -48,6 +48,7 @@ class JuliBrain:
         """One full brain cycle. Returns (entry_decisions, exit_signals)."""
         self._open_positions = dict.fromkeys(positions, True)
         self._maybe_scan()
+        self._collect_scanner()
         self._maybe_screen(get_snapshot)
         self._maybe_allocate(positions)
         exits = self._evaluate_exits(positions, get_snapshot, closing or set())
@@ -55,31 +56,37 @@ class JuliBrain:
         return exits, entries
 
     def _maybe_scan(self) -> None:
-        """Start scanner and collect results every 5 minutes."""
+        """Start a new scanner subscription every 5 minutes."""
         if not self.scanner.should_scan():
             return
         try:
             self.scanner.scan("most_active")
-            self._candidates = self.scanner.collect()
         except Exception as e:
-            log.warning("Scan failed: %s", e)
+            log.warning("Scan start failed: %s", e)
+
+    def _collect_scanner(self) -> None:
+        """Poll scanner results every cycle — IB returns them async."""
+        try:
+            results = self.scanner.collect()
+            if results:
+                self._candidates = results
+        except Exception as e:
+            log.debug("Scan collect error: %s", e)
 
     def _maybe_screen(self, get_snapshot: Any) -> None:
-        """Screen candidates — subscribe only, budget handles allocation."""
         if not self._candidates:
             return
         n = sum(
             1
             for c in self._candidates[:MAX_CANDIDATES]
-            if (snap := get_snapshot(c.symbol)) is not None and snap.get("last", 0) > 0
+            if (snap := get_snapshot(c.symbol)) and snap.get("last", 0) > 0
         )
         log.info("SCREEN: %d/%d passed", n, len(self._candidates))
 
     def _maybe_allocate(self, positions: set[str]) -> None:
-        now = time.time()
-        if now - self._last_alloc < 5.0:
+        if time.time() - self._last_alloc < 5.0:
             return
-        self._last_alloc = now
+        self._last_alloc = time.time()
         self.budget.allocate(
             positions, [c.symbol for c in self._candidates[:MAX_CANDIDATES]]
         )
@@ -87,7 +94,6 @@ class JuliBrain:
     def _evaluate_exits(
         self, positions: set[str], get_snapshot: Any, closing: set[str]
     ) -> list[dict[str, Any]]:
-        """Check brain exit signals for open positions."""
         exits: list[dict[str, Any]] = []
         for t in positions:
             if t in closing:

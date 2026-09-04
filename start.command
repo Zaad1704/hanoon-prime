@@ -99,7 +99,7 @@ if _check_running "$_BOT_PID_FILE" "HANOON Prime bot"; then
   :
 else
   # Start bot directly (no setsid needed on macOS)
-  "$PYTHON_BIN" -m hanoon_prime.cli AAPL MSFT SPY TSLA NVDA \
+  "$PYTHON_BIN" -m hanoon_prime.cli \
     >> "$BOT_LOG" 2>&1 &
   BOT_PID=$!
   echo "$BOT_PID" > "$_BOT_PID_FILE"

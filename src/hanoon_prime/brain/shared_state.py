@@ -19,7 +19,12 @@ class BrainState:
         self._state: dict[str, Any] = {
             "regime_multiplier": 1.0,
             "regime_label": "unknown",
+            "regime_risk": "normal",
             "halim_modifier": 0.0,
+            "nash_modifier": 0.0,
+            "thinker_modifier": 0.0,
+            "thinker_confidence_mod": 0.0,
+            "thinker_risk_scalar": 1.0,
             "episodic_bias": 0.0,
             "affective_mod": 0.0,
             "salience_atten": 1.0,
@@ -27,6 +32,10 @@ class BrainState:
             "refractory_until": 0.0,
             "risk_ceiling": 0.02,
             "indicator_weights": {},
+            "candidates": [],
+            "exit_signals": [],
+            "session_state": "rth",
+            "panic_mode": False,
             "timestamp": 0.0,
         }
 

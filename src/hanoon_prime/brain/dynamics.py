@@ -19,6 +19,12 @@ from .config import (
     THRESHOLD_MIN,
 )
 
+# Rolling quintile constants (from rebuild's adaptive_threshold.py)
+_QUINTILE_LOOKBACK: int = 100
+_QUINTILE_UPPER: float = 0.75
+_QUINTILE_LOWER: float = 0.25
+_QUINTILE_BLEND: float = 0.3
+
 
 class Dynamics:
     """Score stabilization and adaptive threshold management."""
@@ -27,6 +33,7 @@ class Dynamics:
         self._base_threshold = base_threshold
         self._threshold = base_threshold
         self._score_history: deque[float] = deque(maxlen=SCORE_VELOCITY_WINDOW)
+        self._quintile_history: deque[float] = deque(maxlen=_QUINTILE_LOOKBACK)
         self._last_direction: int = 0
         self._last_score: float = 0.0
         self._refractory_until: float = 0.0
@@ -35,6 +42,8 @@ class Dynamics:
     def process(self, raw_score: float, direction: int) -> tuple[float, str]:
         """Apply hysteresis + velocity + refractory. Returns (stabilized, reason)."""
         self._score_history.append(raw_score)
+        self._quintile_history.append(raw_score)
+        self._update_quintile_threshold()
         velocity = self._compute_velocity()
         hysteresis_adj = self._apply_hysteresis(raw_score, direction)
         refractory_adj = self._apply_refractory()
@@ -45,6 +54,22 @@ class Dynamics:
         return (
             stabilized,
             f"vel={velocity:.3f} hyst={hysteresis_adj:.3f} ref={refractory_adj:.3f}",
+        )
+
+    def _update_quintile_threshold(self) -> None:
+        """Widen threshold in volatile markets, tighten in trending."""
+        if len(self._quintile_history) < 20:
+            return
+        scores = sorted(self._quintile_history)
+        n = len(scores)
+        q25 = scores[int(n * _QUINTILE_LOWER)]
+        q75 = scores[int(n * _QUINTILE_UPPER)]
+        spread = q75 - q25
+        # Wider spread = more volatile = higher threshold needed
+        q_threshold = self._base_threshold + spread * 0.2
+        q_threshold = max(THRESHOLD_MIN, min(THRESHOLD_MAX, q_threshold))
+        self._threshold = (
+            self._threshold * (1 - _QUINTILE_BLEND) + q_threshold * _QUINTILE_BLEND
         )
 
     @property

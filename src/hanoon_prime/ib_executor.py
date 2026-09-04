@@ -66,7 +66,6 @@ class IBExecutor:
         self._pending_parent.add(ticker)
         log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
                  action, ticker, round(price, 2), stop, target, shares)
-        trade_opened(ticker, action, shares, price, stop, target)
     def sync_from_ib(self, streamer: Any) -> None:
         """Sync everything from IB — IB is source of truth."""
         if not self._ping_ib():
@@ -83,7 +82,6 @@ class IBExecutor:
             self._last_snapshot = now
             journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
     def _ping_ib(self) -> bool:
-        """Verify IB connection is alive."""
         try:
             return bool(self.ib.isConnected())
         except Exception:
@@ -108,6 +106,9 @@ class IBExecutor:
         if sym in self._pending_parent:
             if sym in ib_positions:
                 self._pending_parent.discard(sym)
+                pos = ib_positions[sym]
+                action = "BUY" if pos.direction > 0 else "SELL"
+                trade_opened(sym, action, abs(pos.shares), pos.entry_price, stop, target)
             else:
                 return
         elif sym not in ib_positions:
@@ -169,7 +170,7 @@ class IBExecutor:
             "shares": pos.shares,
         })
     def get_newly_closed_trades(self) -> list[dict[str, Any]]:
-        """Return and clear closed trade payloads for brain reflection."""
+        """Return and clear newly closed trades."""
         trades = list(self._closed_trades)
         self._closed_trades.clear()
         return trades

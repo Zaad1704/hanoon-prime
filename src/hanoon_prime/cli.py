@@ -16,7 +16,6 @@ import traceback
 from pathlib import Path
 
 from .ib_adapter import IBStreamingBot
-from .immune import FAST_TICKERS
 from .telemetry import TelemetryAPI
 
 log = logging.getLogger(__name__)

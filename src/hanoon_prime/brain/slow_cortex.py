@@ -17,14 +17,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .affective import Affective
-from .config import SIGNAL_THRESHOLD
-from .episodic import EpisodicMemory
-from .guardians import Guardians
+from ..reflection.buffer import Fill, TradeBuffer
+from ..reflection.supervisor import LearningSupervisor
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
-from .reflection import Reflector
 from .shared_state import BrainState
+from .thinker import Thinker
 
 log = logging.getLogger(__name__)
 
@@ -41,11 +39,10 @@ class SlowCortex:
         self.state = brain_state
         self.interval = interval
         self.memory = JuliMemory()
-        self.episodic = EpisodicMemory()
-        self.affective = Affective()
-        self.guardians = Guardians()
         self.halim = HalimAdapter(base_url=halim_url)
-        self.reflector = Reflector(self.memory, self.episodic)
+        self.thinker = Thinker()
+        self.buffer = TradeBuffer(on_trade_closed=self._on_trade_closed)
+        self.supervisor = LearningSupervisor(self.buffer, self.memory)
         self._thread: threading.Thread | None = None
         self._running = False
 
@@ -53,6 +50,7 @@ class SlowCortex:
         """Start System 2 background loop."""
         self._running = True
         self._sync_initial_state()
+        self.supervisor.start()
         self._thread = threading.Thread(
             target=self._loop, daemon=True, name="slow-cortex"
         )
@@ -88,15 +86,13 @@ class SlowCortex:
         """One full System 2 cognitive cycle."""
         self._update_regime()
         self._update_halim()
-        self._update_affective()
-        self._check_guardians()
-        self._consolidate_episodic()
+        self._run_thinker()
         self._persist_state()
         log.info(
-            "System 2 write complete | regime=%.2f halim=%.3f threshold=%.3f",
+            "System 2 | regime=%.2f halim=%.3f thinker=%.4f",
             self.state.get("regime_multiplier", 1.0),
             self.state.get("halim_modifier", 0.0),
-            self.state.get("threshold", 0.58),
+            self.state.get("thinker_modifier", 0.0),
         )
 
     def _update_regime(self) -> None:
@@ -105,7 +101,14 @@ class SlowCortex:
         if not alpha:
             return
         prices = self.state.get_latest_prices()
-        regime = self.halim.get_regime(alpha, prices)
+        try:
+            regime = self.halim.get_regime(alpha, prices)
+        except Exception as e:
+            log.warning("Regime query failed: %s", e)
+            return
+        if not isinstance(regime, dict):
+            log.warning("Regime returned non-dict: %s", type(regime).__name__)
+            return
         self.state.update(
             regime_multiplier=regime.get("multiplier", 1.0),
             regime_label=regime.get("regime", "normal"),
@@ -124,22 +127,24 @@ class SlowCortex:
         mod = self.halim.get_modifier(ticker, alpha, 0.0, "SCAN")
         self.state.update(halim_modifier=mod)
 
-    def _update_affective(self) -> None:
-        """Update market sentiment from recent trade outcomes."""
-        aff = self.affective.evaluate()
-        self.state.update(affective_mod=aff.modifier)
-
-    def _check_guardians(self) -> None:
-        """Run safety checks on learning stability."""
-        weights = self.memory.get_weights()
-        verdict = self.guardians.check_weights(weights)
-        if not verdict.safe:
-            log.warning("Guardian: %s", verdict.reason)
-
-    def _consolidate_episodic(self) -> None:
-        """Periodic episodic memory health check."""
-        if self.episodic.size > 500:
-            log.info("Episodic memory size: %d", self.episodic.size)
+    def _run_thinker(self) -> None:
+        """Run thinker deliberation and write results to shared state."""
+        alpha = self._get_latest_alpha()
+        if not alpha:
+            return
+        prices = self.state.get_latest_prices()
+        score = 0.0
+        direction = 1
+        regime = self.state.get("regime_label", "unknown")
+        threshold = self.state.get("threshold", 0.58)
+        result = self.thinker.think(
+            alpha, score, direction, regime, prices, prices, prices, threshold
+        )
+        self.state.update(
+            thinker_modifier=result.modifier,
+            thinker_confidence_mod=result.confidence_mod,
+            thinker_risk_scalar=result.risk_scalar,
+        )
 
     def _persist_state(self) -> None:
         """Atomic write to state.json (disk I/O — System 2 only)."""
@@ -166,11 +171,36 @@ class SlowCortex:
         return self.state.get_latest_alpha()
 
     def on_trade_close(
-        self, ticker: str, won: bool, pnl_pct: float, direction: int = 1
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int = 1,
+        qty: float = 1.0,
+        avg_price: float = 0.0,
+        fees: float = 0.0,
     ) -> None:
-        """Route trade close to reflection (called from System 1 thread)."""
-        alpha: dict[str, float] = {}
-        score = 0.0
-        self.reflector.on_trade_close(ticker, won, pnl_pct, direction, alpha, score)
-        self.affective.update(won, pnl_pct)
+        """Route trade close to thinker + buffer."""
+        from .reflection.buffer import BUY, SELL, Fill
+
+        alpha = self._get_latest_alpha() or {}
+        self.thinker.episodic.add(alpha, won, pnl_pct)
+        self.thinker.emotion.update(won, pnl_pct)
         self.state.set_refractory(2.0)
+        # Feed fill into trade buffer for learning
+        side = BUY if direction > 0 else SELL
+        self.buffer.on_fill(
+            Fill(
+                ticker=ticker,
+                side=side,
+                qty=qty,
+                price=avg_price,
+                time=time.time(),
+                commission=fees,
+            )
+        )
+
+    def _on_trade_closed(self, trade: Trade) -> None:
+        """Callback from TradeBuffer when a round-trip closes."""
+        self.supervisor.on_trade_close(trade)
+        log.info("Buffer trade closed: %s pnl=%.2f", trade.ticker, trade.pnl)

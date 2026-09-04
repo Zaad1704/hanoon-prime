@@ -76,11 +76,9 @@ class IBStreamer:
         self.contracts[ticker] = contract
         self.buffers[ticker] = StreamBuffer(ticker)
         self.ticker_subs[ticker] = self.ib.reqMktData(contract, "", False, False)
-        try:
-            self.depth_subs[ticker] = self.ib.reqMktDepth(contract, DEPTH_ROWS, False)
-        except Exception as e:
-            log.warning("DOM unavailable for %s: %s", ticker, e)
-            self.depth_subs[ticker] = None
+        # DOM (Level 2) not supported for US equities without subscription.
+        # Skip silently to avoid IB error 10092 flooding logs.
+        self.depth_subs[ticker] = None
         log.info("Subscribed to %s (mkt data + DOM)", ticker)
 
     def seed_history(self, ticker: str) -> None:
