@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..reflection.buffer import Fill, TradeBuffer
+from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
@@ -156,7 +156,7 @@ class SlowCortex:
                 "weights": self.memory.get_weights(),
                 "threshold": self.memory.threshold,
                 "pred_error": self.memory.pred_error,
-                "episodic_size": self.episodic.size,
+                "episodic_size": len(self.thinker.episodic._episodes) if hasattr(self.thinker, 'episodic') else 0,
                 "brain_state": self.state.snapshot(),
                 "timestamp": time.time(),
             }
