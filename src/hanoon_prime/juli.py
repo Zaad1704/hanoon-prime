@@ -14,6 +14,8 @@ from typing import Any
 
 from .brain.indicators import compute_all_alpha
 from .brain.orchestrator import JuliBrain as BrainPipeline
+from .brain.shared_state import BrainState
+from .brain.slow_cortex import SlowCortex
 from .cerebellum import compute_alpha
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
@@ -29,11 +31,14 @@ class JuliBrain:
         self.ib = ib_client
         self.scanner = IBScanner(ib_client)
         self.budget = DataBudget()
-        self.brain = BrainPipeline()
+        self._state = BrainState()
+        self.brain = BrainPipeline(brain_state=self._state)
+        self.slow_cortex = SlowCortex(brain_state=self._state)
         self._candidates: list[ScanResult] = []
         self._last_scan: float = 0.0
         self._last_alloc: float = 0.0
         self._open_positions: dict[str, Any] = {}
+        self.slow_cortex.start()
 
     def tick(
         self, positions: set[str], get_snapshot: Any, streamer: Any
@@ -187,5 +192,6 @@ class JuliBrain:
     def on_trade_close(
         self, ticker: str, won: bool, pnl_pct: float, direction: int = 1
     ) -> None:
-        """Route trade close to brain reflection system."""
+        """Route trade close to System 2 reflection."""
+        self.slow_cortex.on_trade_close(ticker, won, pnl_pct, direction)
         self.brain.on_trade_close(ticker, won, pnl_pct, direction)
