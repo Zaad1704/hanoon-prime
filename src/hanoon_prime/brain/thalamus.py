@@ -7,6 +7,7 @@ Computes Thalamic Salience Index for data budget prioritization.
 Biological analogy: Sensory relay station — only passes
 relevant stimuli to higher brain regions.
 """
+
 from __future__ import annotations
 
 import logging

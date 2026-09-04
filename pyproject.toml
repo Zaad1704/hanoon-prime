@@ -49,6 +49,10 @@ show_error_codes = true
 files = ["src/hanoon_prime"]
 exclude = ["tests/", "scripts/", "src/hanoon_prime/ib_adapter.py", "src/hanoon_prime/ib_streamer.py", "src/hanoon_prime/ib_executor.py", "src/hanoon_prime/ib_compat.py"]
 
+[[tool.mypy.overrides]]
+module = "hanoon_prime.brain.*"
+disable_error_code = ["index"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

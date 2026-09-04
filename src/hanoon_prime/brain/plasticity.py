@@ -7,6 +7,7 @@ resolution using exponential reinforcement.
 Biological analogy: Synaptic pruning — strengthens successful
 pathways, weakens failing ones.
 """
+
 from __future__ import annotations
 
 import logging

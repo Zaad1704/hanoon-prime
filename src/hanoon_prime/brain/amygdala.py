@@ -6,6 +6,7 @@ bid/ask imbalances, unusual volume. Can trigger immediate exits.
 Biological analogy: Fight-or-flight center — detects threats
 before the conscious mind (cortex) processes them.
 """
+
 from __future__ import annotations
 
 import logging
@@ -104,7 +105,7 @@ class Amygdala:
         if len(prices) < 10 or atr <= 0:
             return 0.0
         arr = np.array(prices[-10:], dtype=float)
-        prev = arr[:-1]  # type: ignore[index]
+        prev = arr[:-1]
         returns = np.diff(arr) / np.where(prev != 0, prev, 1.0)
         current_vol = float(np.std(returns))
         hist_vol = (
