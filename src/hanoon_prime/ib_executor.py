@@ -242,23 +242,27 @@ class IBExecutor:
             log.warning("close_position failed %s: %s", ticker, e)
 
     def close_all_positions(self, streamer: Any) -> int:
-        """Market-flatten every open position. Returns count closed."""
+        """Market-flatten every open position via IB. Returns count closed."""
         count = 0
-        for ticker, pos in list(self.brain._open_positions.items()):
-            contract = streamer.contracts.get(ticker)
-            if contract is None:
+        # Close ALL IB positions, not just Juli-tracked ones
+        try:
+            ib_positions = self.ib.positions()
+        except Exception:
+            ib_positions = []
+        for pos in ib_positions:
+            sym = pos.contract.symbol
+            qty = abs(int(pos.position))
+            if qty == 0:
                 continue
-            action = "SELL" if pos.direction > 0 else "BUY"
+            action = "SELL" if pos.position > 0 else "BUY"
             try:
                 from ib_insync import MarketOrder
 
-                self.ib.placeOrder(
-                    contract, MarketOrder(action, abs(pos.shares), tif="DAY")
-                )
-                log.info("EOD FLATTEN %s %s %d", action, ticker, abs(pos.shares))
+                self.ib.placeOrder(pos.contract, MarketOrder(action, qty, tif="DAY"))
+                log.info("FLATTEN %s %s %d", action, sym, qty)
                 count += 1
             except Exception as e:
-                log.warning("EOD flatten failed %s: %s", ticker, e)
+                log.warning("FLATTEN failed %s: %s", sym, e)
         self.cancel_all()
         return count
 
