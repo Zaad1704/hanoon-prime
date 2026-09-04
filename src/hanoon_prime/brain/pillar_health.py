@@ -55,11 +55,14 @@ class PillarHealthChecker:
     def _call_pillar(self, pillar: object) -> float:
         """Call a pillar with test data."""
         if hasattr(pillar, "modify"):
-            return pillar.modify(_TEST_ALPHA, 0.5, 1, "normal",
-                                _TEST_ALPHA, _TEST_ALPHA, 0.58)
+            return float(
+                pillar.modify(
+                    _TEST_ALPHA, 0.5, 1, "normal", _TEST_ALPHA, _TEST_ALPHA, 0.58
+                )
+            )
         if hasattr(pillar, "compute"):
             result = pillar.compute(_TEST_ALPHA)
-            return result.modifier if hasattr(result, "modifier") else 0.0
+            return float(result.modifier) if hasattr(result, "modifier") else 0.0
         return 0.0
 
     def get_failures(self, results: list[PillarResult]) -> list[str]:

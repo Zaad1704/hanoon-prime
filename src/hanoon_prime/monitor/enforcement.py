@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class DeepEnforcement:
         self._last_run: float = 0.0
 
     def run_pulse(
-        self, positions: dict, orders: dict, memory: object = None
+        self, positions: dict[str, Any], orders: dict[str, Any], memory: object = None
     ) -> EnforcementReport:
         """Run all enforcement checks."""
         now = time.time()
@@ -59,7 +60,7 @@ class DeepEnforcement:
         )
 
     def _check_position_consistency(
-        self, positions: dict, orders: dict
+        self, positions: dict[str, Any], orders: dict[str, Any]
     ) -> EnforcementCheck:
         """DE-001: Positions and orders are consistent."""
         for t in positions:
@@ -73,7 +74,7 @@ class DeepEnforcement:
                 )
         return EnforcementCheck("DE-001", "position_consistency", "info", True, "OK")
 
-    def _check_order_age(self, orders: dict) -> EnforcementCheck:
+    def _check_order_age(self, orders: dict[str, Any]) -> EnforcementCheck:
         """DE-002: No orders are too old."""
         now = time.time()
         for t, o in orders.items():

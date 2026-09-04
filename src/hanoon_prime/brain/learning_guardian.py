@@ -28,7 +28,7 @@ class LearningGuardian:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._violations: list[dict] = []
+        self._violations: list[dict[str, Any]] = []
 
     def check_exit_decision(self, ticker: str, won: bool, pnl: float) -> GuardianCheck:
         """Ensure exit decision is recorded."""

@@ -25,7 +25,7 @@ class DistillationEngine:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._digests: list[dict] = []
+        self._digests: list[dict[str, Any]] = []
         self._load()
 
     def distill(self, memory: Any) -> None:

@@ -30,9 +30,9 @@ class NerveCenter:
     def __init__(self) -> None:
         """Auto-generated docstring."""
         self._state = NerveState()
-        self._handlers: dict[str, list[Callable]] = {}
+        self._handlers: dict[str, list[Callable[..., Any]]] = {}
 
-    def register(self, signal: str, handler: Callable) -> None:
+    def register(self, signal: str, handler: Callable[..., Any]) -> None:
         """Auto-generated docstring."""
         self._handlers.setdefault(signal, []).append(handler)
 

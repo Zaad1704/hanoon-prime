@@ -98,4 +98,31 @@ IB_CLIENT_ID: int = 1  # API client ID
 
 # ── Trading universe ───────────────────────────────────────────────────
 FAST_TICKERS: tuple[str, ...] = ("AAPL", "MSFT", "SPY", "TSLA", "NVDA")
+# Boot fallback universe — liquid US stocks served immediately by IB Gateway
+# when scanner is still warming up. Replaces this as soon as MOST_ACTIVE
+# scan results fill in.
+LIQUID_US_SEED: tuple[str, ...] = (
+    "SPY",
+    "QQQ",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "TSLA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "AMD",
+    "INTC",
+    "NFLX",
+    "AVGO",
+    "JPM",
+    "BAC",
+    "XOM",
+    "CVX",
+    "LLY",
+    "UNH",
+    "COST",
+    "WMT",
+    "KO",
+)
 TELEMETRY_PORT: int = 8080  # HTTP health endpoint for cloudflared tunnel

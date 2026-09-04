@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class NewsLearner:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._patterns: dict[str, dict] = {}
+        self._patterns: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._load()
 
@@ -77,7 +77,7 @@ class NewsLearner:
                 self._patterns[key]["wins"] += 1
             self._save()
 
-    def get_advice(self, sentiment: float, horizon: str = "scalp") -> dict:
+    def get_advice(self, sentiment: float, horizon: str = "scalp") -> dict[str, Any]:
         """Get sentiment-based advice."""
         bucket = self._sentiment_bucket(sentiment)
         total = 0

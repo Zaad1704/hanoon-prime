@@ -4,9 +4,15 @@ Simulates future price paths to estimate trade viability before entry.
 Uses recent volatility to generate synthetic paths and checks if the
 target is reachable before the stop is hit. Modifier bounded ±0.03.
 """
+
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 MOD_BOUND: float = 0.03
 N_SIMS: int = 100
@@ -30,7 +36,9 @@ class PlanEngine:
         return max(-MOD_BOUND, min(MOD_BOUND, bias * 0.5))
 
     @staticmethod
-    def _extract_params(close, high, low):
+    def _extract_params(
+        close: Any, high: Any, low: Any
+    ) -> tuple[float, float, float, float]:
         c = np.asarray(close, dtype=float)
         if len(c) < 10:
             return 0.0, 0.0, 0.0, 0.0
@@ -40,11 +48,18 @@ class PlanEngine:
         return float(np.mean(returns)), float(np.std(returns)), float(c[-1]), atr
 
     @staticmethod
-    def _run_sims(mu, sigma, current, stop_dist, target_dist, direction):
+    def _run_sims(
+        mu: float,
+        sigma: float,
+        current: float,
+        stop_dist: float,
+        target_dist: float,
+        direction: int,
+    ) -> int:
         wins = 0
         for _ in range(N_SIMS):
             price = current
-            for r in np.random.normal(mu, sigma, HORIZON):
+            for r in np.asarray(np.random.normal(mu, sigma, HORIZON)):
                 price *= np.exp(r)
                 move = (price - current) * direction
                 if move >= target_dist:

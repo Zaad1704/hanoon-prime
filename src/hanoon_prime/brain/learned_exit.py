@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
+from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ _MIN_TRADES: int = 20
 @dataclass
 class ExitPolicy:
     health_floor: float = 0.0
-    trigger_weights: dict[str, float] = None
+    trigger_weights: Optional[dict[str, float]] = None
 
     def __post_init__(self) -> None:
         """Auto-generated docstring."""
@@ -33,7 +34,7 @@ class LearnedExitPolicy:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._trades: deque[dict] = deque(maxlen=200)
+        self._trades: deque[dict[str, Any]] = deque(maxlen=200)
 
     def record(self, health_score: float, triggers: list[str], won: bool) -> None:
         """Record exit outcome for learning."""
@@ -54,7 +55,7 @@ class LearnedExitPolicy:
         if wr_bottom < 0.5 and wr_top >= 0.5:
             health_floor = bottom_half[-1]["health"] if bottom_half else 0.0
         # Compute trigger weights
-        trigger_stats: dict[str, dict] = {}
+        trigger_stats: dict[str, dict[str, int]] = {}
         for t in self._trades:
             for trig in t["triggers"]:
                 if trig not in trigger_stats:

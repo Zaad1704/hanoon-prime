@@ -5,9 +5,10 @@ FAST tickers, plus a lightweight TelemetryAPI on :8080 for the
 cloudflared tunnel (api.hanoonweb.xyz → :8080).
 
 Usage:
-    python3 -m hanoon_prime.cli           # scanner mode (discovers tickers)
-    python3 -m hanoon_prime.cli AAPL NVDA # seed tickers + scanner discovery
+    python3 -m hanoon_prime.cli           # auto-seed from liquid universe
+    python3 -m hanoon_prime.cli AAPL NVDA # explicit tickers + scanner discovery
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,6 +17,7 @@ import traceback
 from pathlib import Path
 
 from .ib_adapter import IBStreamingBot
+from .immune import LIQUID_US_SEED
 from .telemetry import TelemetryAPI
 
 log = logging.getLogger(__name__)
@@ -36,7 +38,10 @@ def _setup_logging() -> None:
 def main() -> None:
     """Entry point: start telemetry + bot, connect to IB Gateway live."""
     _setup_logging()
-    tickers = sys.argv[1:] if len(sys.argv) > 1 else None
+    # CLI args: explicit tickers, or auto-seed from liquid universe
+    tickers = (
+        sys.argv[1:] if len(sys.argv) > 1 else list(LIQUID_US_SEED)[:5]
+    )  # top 5 for speed
     # Anchor to repo root, NOT CWD — bot may be launched from anywhere.
     repo_root = Path(__file__).resolve().parents[2]
     journal_path = repo_root / "runtime" / "journal_live.jsonl"
@@ -49,7 +54,7 @@ def main() -> None:
     telemetry.start()
 
     try:
-        bot.run_paper(tickers or None)
+        bot.run_paper(tickers)
     except Exception:
         log.error("Bot crashed:\n%s", traceback.format_exc())
         raise

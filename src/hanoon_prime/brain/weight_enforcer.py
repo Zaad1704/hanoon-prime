@@ -11,7 +11,7 @@ Source: rebuild's weight_enforcer.py (lines 1-193).
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from .config import DEFAULT_WEIGHTS
 
@@ -88,7 +88,7 @@ class WeightEnforcer:
             log.info("Weight repair complete")
         return repaired
 
-    def check_integrity(self, weights: dict[str, float]) -> dict:
+    def check_integrity(self, weights: dict[str, float]) -> dict[str, Any]:
         """Check weight integrity without modifying. Returns diagnostic."""
         if not weights:
             return {"ok": True, "reason": "empty"}

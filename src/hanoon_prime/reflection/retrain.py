@@ -38,7 +38,7 @@ class RetrainEngine:
         trades = self._buffer.get_trades(last_n=_MIN_TRADES)
         return len(trades) >= _MIN_TRADES
 
-    def retrain(self) -> dict:
+    def retrain(self) -> dict[str, Any]:
         """Run retraining. Returns report."""
         if not self.should_retrain():
             return {"status": "skipped", "reason": "not_needed"}
@@ -56,7 +56,7 @@ class RetrainEngine:
                 log.warning("on_retrained callback failed: %s", exc)
         return {"status": "done", "trades": len(trades), "wr": wr}
 
-    def get_telemetry(self) -> dict:
+    def get_telemetry(self) -> dict[str, Any]:
         """Auto-generated docstring."""
         return {
             "last_retrain": self._last_retrain,

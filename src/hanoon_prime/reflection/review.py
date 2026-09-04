@@ -70,16 +70,24 @@ class ReviewSession:
 class TradeReview:
     """Per-trade postmortem for learning."""
 
-    def review(self, trade: Any, alpha: Optional[dict] = None) -> TradePostmortem:
+    def review(
+        self, trade: Any, alpha: Optional[dict[str, Any]] = None
+    ) -> TradePostmortem:
         """Generate postmortem for a closed trade."""
         won = trade.win if hasattr(trade, "win") else trade.pnl > 0
         lessons = self._build_lessons(trade, won, alpha)
         ticker = trade.ticker if hasattr(trade, "ticker") else "?"
-        return TradePostmortem(ticker=ticker, won=won, entry_score=0.0,
-            exit_reason="closed", lessons=lessons)
+        return TradePostmortem(
+            ticker=ticker,
+            won=won,
+            entry_score=0.0,
+            exit_reason="closed",
+            lessons=lessons,
+        )
 
-    def _build_lessons(self, trade: Any, won: bool,
-                       alpha: Optional[dict]) -> list[str]:
+    def _build_lessons(
+        self, trade: Any, won: bool, alpha: Optional[dict[str, Any]]
+    ) -> list[str]:
         """Build lesson list from trade outcome."""
         pnl = trade.pnl if hasattr(trade, "pnl") else 0
         lessons = [f"{'Won' if won else 'Lost'} with pnl={pnl:.2f}"]

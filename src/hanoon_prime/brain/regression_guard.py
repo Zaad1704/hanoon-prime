@@ -161,4 +161,4 @@ def run_startup_guards() -> bool:
         log.warning("REGRESSION GUARD: %d FAILURES", result["n_fail"])
         for f in result["failures"]:
             log.warning("  FAILED: %s: %s", f["name"], f["detail"])
-    return result["all_pass"]
+    return bool(result["all_pass"])

@@ -4,8 +4,10 @@ Recalls similar past situations from memory. When JULI sees a familiar
 pattern, it recalls what happened last time and biases the current
 decision accordingly. Modifier bounded by EPISODIC_MOD_BOUND (±0.03).
 """
+
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -72,7 +74,8 @@ class EpisodicMemory:
         keys = set(a.keys()) | set(b.keys())
         if not keys:
             return 0.0
-        return sum((a.get(k, 0.0) - b.get(k, 0.0)) ** 2 for k in keys) ** 0.5
+        sq_sum = sum((a.get(k, 0.0) - b.get(k, 0.0)) ** 2 for k in keys)
+        return math.sqrt(float(sq_sum))
 
     def snapshot(self) -> dict[str, Any]:
         """Telemetry view."""

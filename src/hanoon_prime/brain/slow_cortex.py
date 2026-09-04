@@ -1,13 +1,9 @@
 """hanoon_prime.brain.slow_cortex — System 2: Slow Conceptual Engine.
-
 Runs asynchronously in a background thread every 10-30s.
 Handles all network I/O, heavy compute, and disk persistence.
 Updates shared BrainState for System 1 to read instantly.
-
-Biological parallel: The prefrontal cortex during sleep —
-consolidating memories, recalibrating weights, assessing risk.
+Biological parallel: The prefrontal cortex during sleep — consolidating memories.
 """
-
 from __future__ import annotations
 
 import json
@@ -51,8 +47,9 @@ class SlowCortex:
         self._running = True
         self._sync_initial_state()
         self.supervisor.start()
-        self._thread = threading.Thread(target=self._loop, daemon=True,
-                                       name="slow-cortex")
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="slow-cortex"
+        )
         self._thread.start()
         log.info("System 2 started (interval=%.0fs)", self.interval)
 
@@ -67,10 +64,7 @@ class SlowCortex:
     def _sync_initial_state(self) -> None:
         """Push initial state to shared dict on startup."""
         weights = self.memory.get_weights()
-        self.state.update(
-            threshold=self.memory.threshold,
-            indicator_weights=weights,
-        )
+        self.state.update(threshold=self.memory.threshold, indicator_weights=weights)
 
     def _loop(self) -> None:
         """Main background loop — runs every interval seconds."""
@@ -106,15 +100,17 @@ class SlowCortex:
             return
         if not isinstance(regime, dict):
             return
-        self.state.update(regime_multiplier=regime.get("multiplier", 1.0),
-                         regime_label=regime.get("regime", "normal"),
-                         regime_confidence=regime.get("confidence", 0.5),
-                         regime_risk=regime.get("risk_adjustment", "normal"),
-                         regime_drivers=regime.get("key_drivers", []),
-                         regime_description=regime.get("description", ""))
+        self.state.update(
+            regime_multiplier=regime.get("multiplier", 1.0),
+            regime_label=regime.get("regime", "normal"),
+            regime_confidence=regime.get("confidence", 0.5),
+            regime_risk=regime.get("risk_adjustment", "normal"),
+            regime_drivers=regime.get("key_drivers", []),
+            regime_description=regime.get("description", ""),
+        )
 
     def _update_halim(self) -> None:
-        """Poll HALIM external AI advisor (network I/O — System 2 only)."""
+        """Poll HALIM external AI advisor (network I/O)."""
         alpha = self._get_latest_alpha()
         if not alpha:
             return
@@ -130,15 +126,17 @@ class SlowCortex:
         prices = self.state.get_latest_prices()
         regime = self.state.get("regime_label", "unknown")
         threshold = self.state.get("threshold", 0.58)
-        result = self.thinker.think(alpha, 0.0, 1, regime, prices, prices,
-                                   prices, threshold)
-        self.state.update(thinker_modifier=result.modifier,
+        result = self.thinker.think(
+            alpha, 0.0, 1, regime, prices, prices, prices, threshold
+        )
+        self.state.update(
+            thinker_modifier=result.modifier,
             thinker_confidence_mod=result.confidence_mod,
             thinker_risk_scalar=result.risk_scalar,
         )
 
     def _persist_state(self) -> None:
-        """Atomic write to state.json (disk I/O — System 2 only)."""
+        """Atomic write to state.json (disk I/O)."""
         try:
             state_dir = Path(__file__).resolve().parents[2] / "runtime"
             state_dir.mkdir(parents=True, exist_ok=True)
@@ -147,7 +145,9 @@ class SlowCortex:
                 "weights": self.memory.get_weights(),
                 "threshold": self.memory.threshold,
                 "pred_error": self.memory.pred_error,
-                "episodic_size": len(self.thinker.episodic._episodes) if hasattr(self.thinker, 'episodic') else 0,
+                "episodic_size": len(self.thinker.episodic._episodes)
+                if hasattr(self.thinker, "episodic")
+                else 0,
                 "brain_state": self.state.snapshot(),
                 "timestamp": time.time(),
             }
@@ -172,13 +172,12 @@ class SlowCortex:
         fees: float = 0.0,
     ) -> None:
         """Route trade close to thinker + buffer."""
-        from .reflection.buffer import BUY, SELL, Fill
+        from ..reflection.buffer import BUY, SELL
 
         alpha = self._get_latest_alpha() or {}
         self.thinker.episodic.add(alpha, won, pnl_pct)
         self.thinker.emotion.update(won, pnl_pct)
         self.state.set_refractory(2.0)
-        # Feed fill into trade buffer for learning
         side = BUY if direction > 0 else SELL
         self.buffer.on_fill(
             Fill(

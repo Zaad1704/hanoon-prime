@@ -30,7 +30,7 @@ class IntelItem:
 @dataclass
 class IntelCache:
     news: dict[str, IntelItem] = field(default_factory=dict)
-    filings: dict[str, list[dict]] = field(default_factory=dict)
+    filings: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 class IBIntel:
@@ -77,6 +77,6 @@ class IBIntel:
             symbol=symbol, headline=headline, sentiment=sentiment, timestamp=time.time()
         )
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> dict[str, Any]:
         """Auto-generated docstring."""
         return {"n_news": len(self._cache.news), "n_filings": len(self._cache.filings)}

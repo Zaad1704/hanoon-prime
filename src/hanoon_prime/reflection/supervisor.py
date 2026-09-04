@@ -32,7 +32,7 @@ class LearningSupervisor:
         self,
         buffer: TradeBuffer,
         memory: Any = None,
-        on_review: Optional[Callable[[dict], None]] = None,
+        on_review: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> None:
         self._buffer = buffer
         self._memory = memory
@@ -72,7 +72,7 @@ class LearningSupervisor:
         else:
             self._memory.update_pred_error(trade.avg_entry, trade.avg_exit)
 
-    def force_review(self) -> dict:
+    def force_review(self) -> dict[str, Any]:
         """Run an immediate review (for testing or manual trigger)."""
         report = self._review()
         self._apply_findings(report)
@@ -111,7 +111,7 @@ class LearningSupervisor:
         except Exception as exc:
             log.warning("Weekly review failed: %s", exc)
 
-    def _review(self) -> dict:
+    def _review(self) -> dict[str, Any]:
         """Build a review report from recent trades."""
         trades = self._buffer.get_trades(last_n=100)
         if not trades:
@@ -154,7 +154,7 @@ class LearningSupervisor:
                 items.append(f"Decay weight for {tick} (WR={tw:.2f})")
         return items
 
-    def _apply_findings(self, report: dict) -> None:
+    def _apply_findings(self, report: dict[str, Any]) -> None:
         """Apply review findings to memory."""
         items = report.get("action_items", [])
         if not items or self._memory is None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
+from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class DecisionHealth:
     exit_quality: float = 0.5
     recent_accuracy: float = 0.5
     n_decisions: int = 0
-    issues: list[str] = None
+    issues: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         """Auto-generated docstring."""
@@ -35,8 +36,8 @@ class DecisionHealthTracker:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._entries: deque[dict] = deque(maxlen=200)
-        self._exits: deque[dict] = deque(maxlen=200)
+        self._entries: deque[dict[str, Any]] = deque(maxlen=200)
+        self._exits: deque[dict[str, Any]] = deque(maxlen=200)
 
     def record_entry(self, ticker: str, score: float, won: bool) -> None:
         """Auto-generated docstring."""

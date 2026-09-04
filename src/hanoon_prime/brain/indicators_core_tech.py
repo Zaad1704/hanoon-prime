@@ -69,7 +69,11 @@ def compute_volume_profile(close: Any, volume: Any) -> float:
 def compute_trade_intensity(volume: Any, window: int = 20) -> float:
     """Volume burst detection [0, 1]."""
     v = np.asarray(volume, dtype=float)
-    return _cl(v[-1] / (np.mean(v[-window:]) + 1e-12) / 3.0, 0.0, 1.0)
+    return (
+        0.5
+        if len(v) < window
+        else _cl(v[-1] / (np.mean(v[-window:]) + 1e-12) / 3.0, 0.0, 1.0)
+    )
 
 
 def compute_mean_reversion(close: Any, window: int = 20) -> float:
@@ -78,20 +82,10 @@ def compute_mean_reversion(close: Any, window: int = 20) -> float:
     if len(c) < window:
         return 0.5
     std = float(np.std(c[-window:]))
-    return (
-        _cl(
-            1.0
-            - float(
-                np.exp(
-                    -abs(c[-1] - float(np.mean(c[-window:]))) / max(std, 1e-12) / 2.0
-                )
-            ),
-            0.0,
-            1.0,
-        )
-        if std > 0
-        else 0.5
+    exp_val = 1.0 - float(
+        np.exp(-abs(c[-1] - float(np.mean(c[-window:]))) / max(std, 1e-12) / 2.0)
     )
+    return _cl(exp_val, 0.0, 1.0) if std > 0 else 0.5
 
 
 def compute_trend_strength(close: Any, window: int = 20) -> float:
@@ -126,7 +120,8 @@ def compute_elliott_wave(close: Any, window: int = 30) -> float:
     if len(c) < window:
         return 0.0
     r = np.diff(c[-window:])
-    up, dn = float(np.mean(r[r > 0])), float(np.mean(-r[r < 0]))
+    up = float(np.mean(r[r > 0])) if len(r[r > 0]) > 0 else 0.0
+    dn = float(np.mean(-r[r < 0])) if len(r[r < 0]) > 0 else 0.0
     return _cl((up - dn) / (up + dn + 1e-12))
 
 
@@ -156,8 +151,9 @@ def compute_keltner_position(
         return 0.5
     c, h, l = c[-n:], h[-n:], l[-n:]
     atr = float(np.mean(h[-window:] - l[-window:])) + 1e-12
-    sma = float(np.mean(c[-window:]))
-    return _cl((c[-1] - (sma - 2 * atr)) / (4 * atr + 1e-12), 0.0, 1.0)
+    return _cl(
+        (c[-1] - (float(np.mean(c[-window:])) - 2 * atr)) / (4 * atr + 1e-12), 0.0, 1.0
+    )
 
 
 def compute_vw_macd_hist(

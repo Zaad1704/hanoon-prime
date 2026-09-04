@@ -13,6 +13,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class PerformanceAttribution:
 
     def __init__(self) -> None:
         """Auto-generated docstring."""
-        self._history: deque[dict] = deque(maxlen=500)
+        self._history: deque[dict[str, Any]] = deque(maxlen=500)
 
     def attribute(
         self, ticker: str, pnl: float, alpha: dict[str, float]
@@ -43,9 +44,9 @@ class PerformanceAttribution:
         self._history.append({"ticker": ticker, "pnl": pnl, "alpha": dict(alpha)})
         return AttributionResult(ticker, pnl, contributions, dominant)
 
-    def get_signal_stats(self) -> dict[str, dict]:
+    def get_signal_stats(self) -> dict[str, dict[str, Any]]:
         """Get aggregated signal performance."""
-        stats: dict[str, dict] = {}
+        stats: dict[str, dict[str, Any]] = {}
         for entry in self._history:
             for k, v in entry.get("alpha", {}).items():
                 if k not in stats:
@@ -107,7 +108,7 @@ class BrainEnforcer:
 
     def check_all(
         self, weights: dict[str, float], threshold: float, score: float
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Run all brain enforcement checks."""
         issues = []
         total = sum(weights.values())

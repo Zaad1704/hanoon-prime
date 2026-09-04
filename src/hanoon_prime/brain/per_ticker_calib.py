@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class PerTickerCalibration:
         cal = raw_confidence + (realized_wr - raw_confidence) * pull
         return max(0.05, min(0.95, cal))
 
-    def get_stats(self, ticker: str) -> dict:
+    def get_stats(self, ticker: str) -> dict[str, Any]:
         """Get calibration stats for a ticker."""
         data = self._data.get(ticker, [])
         if not data:

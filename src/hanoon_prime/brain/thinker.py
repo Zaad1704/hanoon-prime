@@ -64,8 +64,16 @@ class Thinker:
         )
 
     def _compute_mods(
-        self, alpha, score, direction, regime, close, high, low, threshold
-    ):
+        self,
+        alpha: dict[str, float],
+        score: float,
+        direction: int,
+        regime: str,
+        close: Any,
+        high: Any,
+        low: Any,
+        threshold: float,
+    ) -> dict[str, float]:
         m: dict[str, float] = {}
         m["semantic"] = self.semantic.evaluate(alpha, regime)
         epi = self.episodic.recall(alpha)

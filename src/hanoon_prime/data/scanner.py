@@ -70,8 +70,13 @@ class IBScanner:
         except ImportError:
             return 0
         self._cancel_scan()
-        configs = SCAN_CONFIGS if config_name == "all" else {
-            config_name: SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])}
+        configs = (
+            SCAN_CONFIGS
+            if config_name == "all"
+            else {
+                config_name: SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])
+            }
+        )
         for name, config in configs.items():
             self._start_sub(name, config)
         self._scan_started = time.time()
@@ -79,14 +84,17 @@ class IBScanner:
         log.info("Scanner started: %d codes", len(self._scan_lists))
         return 0
 
-    def _start_sub(self, name: str, config: dict) -> None:
+    def _start_sub(self, name: str, config: dict[str, Any]) -> None:
         """Start a single scanner subscription."""
         try:
             from ib_insync import ScannerSubscription
-            sub = ScannerSubscription(numberOfRows=50,
+
+            sub = ScannerSubscription(
+                numberOfRows=50,
                 instrument=config["instrument"],
                 locationCode=config["locationCode"],
-                scanCode=config["scanCode"])
+                scanCode=config["scanCode"],
+            )
             self._scan_lists[name] = self.ib.reqScannerSubscription(sub)
         except Exception as e:
             log.debug("Scanner subscribe failed for %s: %s", name, e)
@@ -119,8 +127,7 @@ class IBScanner:
             return
         existing = self._results.get(sym)
         if existing is None or item.rank < existing.rank:
-            self._results[sym] = ScanResult(symbol=sym, contract=c,
-                                            rank=item.rank)
+            self._results[sym] = ScanResult(symbol=sym, contract=c, rank=item.rank)
 
     def _maybe_finalize(self) -> None:
         """Clear scan lists after timeout."""

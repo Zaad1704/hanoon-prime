@@ -22,6 +22,7 @@ _REFERENCE_PAIRS: list[tuple[str, float]] = [
     ("IWM", 0.15),
     ("VXX", 0.15),
 ]
+_REFERENCE_TICKERS: set[str] = {r for r, _ in _REFERENCE_PAIRS}
 
 
 @dataclass
@@ -88,7 +89,7 @@ class CrossAssetEngine:
             return 0.0
         correlations = []
         for ref, r_ret in self._ref_returns.items():
-            if len(r_ret) < 10 or ref not in _REFERENCE_PAIRS:
+            if len(r_ret) < 10 or ref not in _REFERENCE_TICKERS:
                 continue
             n = min(len(t_ret), len(r_ret))
             t_arr = np.array(list(t_ret)[-n:])

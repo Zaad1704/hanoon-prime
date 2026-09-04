@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -59,7 +59,7 @@ class NashBrain:
         score: float,
         direction: int,
         prices: Optional[list[float]] = None,
-        episodes: Optional[list[dict]] = None,
+        episodes: Optional[list[dict[str, Any]]] = None,
     ) -> NashPrediction:
         """Run pattern recognition using brain's own memory."""
         features = self._features(alpha, score, prices)
@@ -73,14 +73,14 @@ class NashBrain:
     def evaluate(self, alpha: dict[str, float], direction: int = 0) -> float:
         """Compatibility method — returns bounded modifier."""
         pred = self.predict(alpha, 0.0, direction)
-        return self.fold_opinion(pred)["modifier"]
+        return float(self.fold_opinion(pred)["modifier"])
 
     def record_outcome(self, alpha: dict[str, float], score: float, won: bool) -> None:
         """Record trade outcome for future pattern matching."""
         self._history.append(self._features(alpha, score, None))
         self._outcomes.append(won)
 
-    def fold_opinion(self, pred: NashPrediction) -> dict[str, float]:
+    def fold_opinion(self, pred: NashPrediction) -> dict[str, Any]:
         """Fold prediction into bounded modifier for JULI."""
         mod = max(-MOD_BOUND, min(MOD_BOUND, pred.opinion))
         return {
@@ -108,7 +108,7 @@ class NashBrain:
         return np.array(feats, dtype=np.float64)
 
     def _match(
-        self, features: np.ndarray, episodes: Optional[list[dict]]
+        self, features: np.ndarray, episodes: Optional[list[dict[str, Any]]]
     ) -> tuple[float, float, int]:
         """Match against historical patterns (k-NN)."""
         cands = []
@@ -141,9 +141,9 @@ class NashBrain:
             return 0.0
         return max(-MOD_BOUND, min(MOD_BOUND, (wp - 0.5) * 2 * conf * 0.15))
 
-    def get_telemetry(self) -> dict:
+    def get_telemetry(self) -> dict[str, Any]:
         """Return telemetry data."""
-        t = {"n_history": len(self._history)}
+        t: dict[str, Any] = {"n_history": len(self._history)}
         if self._last:
             t.update({"opinion": self._last.opinion, "conf": self._last.confidence})
         return t
