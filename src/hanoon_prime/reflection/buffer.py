@@ -145,9 +145,7 @@ class TradeBuffer:
     def get_win_rate(self, last_n: int = 0) -> float:
         """Win rate over recent trades."""
         trades = self.get_trades(last_n)
-        if not trades:
-            return 0.5
-        return sum(1 for t in trades if t.win) / len(trades)
+        return sum(1 for t in trades if t.win) / len(trades) if trades else 0.5
 
     def get_total_pnl(self, last_n: int = 0) -> float:
         """Sum of PnL over recent trades."""
@@ -157,20 +155,10 @@ class TradeBuffer:
         """Persist trades to JSON."""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            data = [
-                {
-                    "id": t.trade_id,
-                    "ticker": t.ticker,
-                    "entry": t.avg_entry,
-                    "exit": t.avg_exit,
-                    "pnl": t.pnl,
-                    "win": t.win,
-                    "fees": t.fees,
-                    "t0": t.entry_time,
-                    "t1": t.exit_time,
-                }
-                for t in self._trades[-500:]
-            ]
+            data = [{"id": t.trade_id, "ticker": t.ticker, "entry": t.avg_entry,
+                     "exit": t.avg_exit, "pnl": t.pnl, "win": t.win,
+                     "fees": t.fees, "t0": t.entry_time, "t1": t.exit_time}
+                    for t in self._trades[-500:]]
             tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data))
             tmp.replace(self._path)
@@ -182,19 +170,9 @@ class TradeBuffer:
         if not self._path.exists():
             return
         try:
-            data = json.loads(self._path.read_text())
-            for d in data:
-                t = Trade(
-                    d["id"],
-                    d["ticker"],
-                    d.get("t0", 0),
-                    d.get("t1", 0),
-                    d["entry"],
-                    d["exit"],
-                    0,
-                    d["pnl"],
-                    d.get("fees", 0),
-                )
+            for d in json.loads(self._path.read_text()):
+                t = Trade(d["id"], d["ticker"], d.get("t0", 0), d.get("t1", 0),
+                          d["entry"], d["exit"], 0, d["pnl"], d.get("fees", 0))
                 t.win = d.get("win", t.pnl > 0)
                 self._trades.append(t)
         except Exception as exc:

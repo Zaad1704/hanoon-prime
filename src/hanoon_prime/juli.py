@@ -74,27 +74,25 @@ class JuliBrain:
             log.debug("Scan collect error: %s", e)
 
     def _maybe_screen(self, get_snapshot: Any) -> None:
+        """Screen candidates through snapshots."""
         if not self._candidates:
             return
-        n = sum(
-            1
-            for c in self._candidates[:MAX_CANDIDATES]
-            if (snap := get_snapshot(c.symbol)) and snap.get("last", 0) > 0
-        )
+        n = sum(1 for c in self._candidates[:MAX_CANDIDATES]
+                if (snap := get_snapshot(c.symbol)) and snap.get("last", 0) > 0)
         log.info("SCREEN: %d/%d passed", n, len(self._candidates))
 
     def _maybe_allocate(self, positions: set[str]) -> None:
+        """Allocate data budget periodically."""
         if time.time() - self._last_alloc < 5.0:
             return
         self._last_alloc = time.time()
-        self.budget.allocate(
-            positions, [c.symbol for c in self._candidates[:MAX_CANDIDATES]]
-        )
+        syms = [c.symbol for c in self._candidates[:MAX_CANDIDATES]]
+        self.budget.allocate(positions, syms)
 
-    def _evaluate_exits(
-        self, positions: set[str], get_snapshot: Any, closing: set[str]
-    ) -> list[dict[str, Any]]:
-        exits: list[dict[str, Any]] = []
+    def _evaluate_exits(self, positions: set[str], get_snapshot: Any,
+                        closing: set[str]) -> list[dict[str, Any]]:
+        """Evaluate open positions for exit signals."""
+        exits = []
         for t in positions:
             if t in closing:
                 continue
@@ -103,17 +101,14 @@ class JuliBrain:
                 continue
             sig = self.brain.check_exit(t, snap["last"], direction=1)
             if sig.should_exit:
-                exits.append(
-                    {"ticker": t, "reason": sig.reason, "exit_type": sig.exit_type}
-                )
+                exits.append({"ticker": t, "reason": sig.reason})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)
         return exits
 
-    def _evaluate_entries(
-        self, positions: set[str], get_snapshot: Any
-    ) -> list[dict[str, Any]]:
+    def _evaluate_entries(self, positions: set[str],
+                         get_snapshot: Any) -> list[dict[str, Any]]:
         """Evaluate all tracked tickers for entry decisions."""
-        decisions: list[dict[str, Any]] = []
+        decisions = []
         for ticker in self.budget.get_all_tracked() | positions:
             snap = get_snapshot(ticker)
             if snap is None:
@@ -144,35 +139,20 @@ class JuliBrain:
         alpha = compute_all_alpha(**kw)
         return alpha if alpha else (compute_alpha(**kw) or {})
 
-    def _build_decision(
-        self, ticker: str, direction: int, result: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _build_decision(self, ticker: str, direction: int,
+                        result: dict[str, Any]) -> dict[str, Any]:
         """Build decision dict from brain result."""
         score = result.get("score", 0)
         verdict = result.get("verdict", "")
         conf = result.get("confidence", 0.5)
-        log.info(
-            "THINK %s %s score=%.3f regime=%s risk=%s",
-            ticker,
-            "BUY" if direction > 0 else "SELL",
-            score,
-            result.get("regime", "?"),
-            result.get("risk", "normal"),
-        )
-        thought = SimpleNamespace(
-            direction=direction,
-            score=score,
-            verdict=verdict,
-            confidence=conf,
-        )
-        return {
-            "ticker": ticker,
-            "direction": direction,
-            "verdict": verdict,
-            "score": score,
-            "thought": thought,
-            "sizing": result.get("sizing"),
-        }
+        log.info("THINK %s %s score=%.3f regime=%s risk=%s",
+                 ticker, "BUY" if direction > 0 else "SELL", score,
+                 result.get("regime", "?"), result.get("risk", "normal"))
+        thought = SimpleNamespace(direction=direction, score=score,
+                                 verdict=verdict, confidence=conf)
+        return {"ticker": ticker, "direction": direction, "verdict": verdict,
+                "score": score, "thought": thought,
+                "sizing": result.get("sizing")}
 
     def _eval_one(
         self, ticker: str, snap: dict[str, Any], open_count: int

@@ -51,9 +51,8 @@ class SlowCortex:
         self._running = True
         self._sync_initial_state()
         self.supervisor.start()
-        self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="slow-cortex"
-        )
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                       name="slow-cortex")
         self._thread.start()
         log.info("System 2 started (interval=%.0fs)", self.interval)
 
@@ -96,27 +95,23 @@ class SlowCortex:
         )
 
     def _update_regime(self) -> None:
-        """Get rich regime classification from HALIM with numpy fallback."""
+        """Get regime classification from HALIM."""
         alpha = self._get_latest_alpha()
         if not alpha:
             return
-        prices = self.state.get_latest_prices()
         try:
-            regime = self.halim.get_regime(alpha, prices)
+            regime = self.halim.get_regime(alpha, self.state.get_latest_prices())
         except Exception as e:
             log.warning("Regime query failed: %s", e)
             return
         if not isinstance(regime, dict):
-            log.warning("Regime returned non-dict: %s", type(regime).__name__)
             return
-        self.state.update(
-            regime_multiplier=regime.get("multiplier", 1.0),
-            regime_label=regime.get("regime", "normal"),
-            regime_confidence=regime.get("confidence", 0.5),
-            regime_risk=regime.get("risk_adjustment", "normal"),
-            regime_drivers=regime.get("key_drivers", []),
-            regime_description=regime.get("description", ""),
-        )
+        self.state.update(regime_multiplier=regime.get("multiplier", 1.0),
+                         regime_label=regime.get("regime", "normal"),
+                         regime_confidence=regime.get("confidence", 0.5),
+                         regime_risk=regime.get("risk_adjustment", "normal"),
+                         regime_drivers=regime.get("key_drivers", []),
+                         regime_description=regime.get("description", ""))
 
     def _update_halim(self) -> None:
         """Poll HALIM external AI advisor (network I/O — System 2 only)."""
@@ -133,15 +128,11 @@ class SlowCortex:
         if not alpha:
             return
         prices = self.state.get_latest_prices()
-        score = 0.0
-        direction = 1
         regime = self.state.get("regime_label", "unknown")
         threshold = self.state.get("threshold", 0.58)
-        result = self.thinker.think(
-            alpha, score, direction, regime, prices, prices, prices, threshold
-        )
-        self.state.update(
-            thinker_modifier=result.modifier,
+        result = self.thinker.think(alpha, 0.0, 1, regime, prices, prices,
+                                   prices, threshold)
+        self.state.update(thinker_modifier=result.modifier,
             thinker_confidence_mod=result.confidence_mod,
             thinker_risk_scalar=result.risk_scalar,
         )

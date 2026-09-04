@@ -3,13 +3,10 @@ Places bracket orders, trails stops/targets, monitors IB orders.
 IB is the HANDS — executes what the brain decides.
 """
 from __future__ import annotations
-
 import logging
 import time
 from typing import Any
-
 import numpy as np
-
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from ._protect import protect_position, sweep_zombies
 from ._telegram import trade_closed, trade_opened
@@ -18,7 +15,6 @@ from .hippocampus import Hippocampus
 from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
 from .types import Position
-
 log = logging.getLogger(__name__)
 def _find_stop_target(children: Any) -> tuple[float, float]:
     """Extract stop and target prices from bracket children."""

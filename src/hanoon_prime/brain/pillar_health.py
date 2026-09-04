@@ -38,26 +38,29 @@ class PillarHealthChecker:
 
     def check_all(self, pillars: dict[str, object]) -> list[PillarResult]:
         """Run synthetic test through each pillar."""
-        results = []
-        for name, pillar in pillars.items():
-            start = time.monotonic()
-            try:
-                if hasattr(pillar, "modify"):
-                    mod = pillar.modify(
-                        _TEST_ALPHA, 0.5, 1, "normal", _TEST_ALPHA, _TEST_ALPHA, 0.58
-                    )
-                elif hasattr(pillar, "compute"):
-                    result = pillar.compute(_TEST_ALPHA)
-                    mod = result.modifier if hasattr(result, "modifier") else 0.0
-                else:
-                    mod = 0.0
-                elapsed = (time.monotonic() - start) * 1000
-                results.append(PillarResult(name, mod, abs(mod) > 0.0001, elapsed))
-            except Exception as exc:
-                elapsed = (time.monotonic() - start) * 1000
-                log.warning("Pillar %s failed: %s", name, exc)
-                results.append(PillarResult(name, 0.0, False, elapsed))
-        return results
+        return [self._test_one(name, p) for name, p in pillars.items()]
+
+    def _test_one(self, name: str, pillar: object) -> PillarResult:
+        """Test a single pillar."""
+        start = time.monotonic()
+        try:
+            mod = self._call_pillar(pillar)
+            elapsed = (time.monotonic() - start) * 1000
+            return PillarResult(name, mod, abs(mod) > 0.0001, elapsed)
+        except Exception as exc:
+            elapsed = (time.monotonic() - start) * 1000
+            log.warning("Pillar %s failed: %s", name, exc)
+            return PillarResult(name, 0.0, False, elapsed)
+
+    def _call_pillar(self, pillar: object) -> float:
+        """Call a pillar with test data."""
+        if hasattr(pillar, "modify"):
+            return pillar.modify(_TEST_ALPHA, 0.5, 1, "normal",
+                                _TEST_ALPHA, _TEST_ALPHA, 0.58)
+        if hasattr(pillar, "compute"):
+            result = pillar.compute(_TEST_ALPHA)
+            return result.modifier if hasattr(result, "modifier") else 0.0
+        return 0.0
 
     def get_failures(self, results: list[PillarResult]) -> list[str]:
         """Return names of failed pillars."""

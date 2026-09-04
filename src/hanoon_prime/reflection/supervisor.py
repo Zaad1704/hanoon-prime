@@ -160,13 +160,18 @@ class LearningSupervisor:
         if not items or self._memory is None:
             return
         for item in items:
-            if "Decay weight for" in item:
-                try:
-                    indicator = item.split("Decay weight for ")[1].split(" ")[0]
-                    self._memory.micro_adjust_weight(indicator, -0.05)
-                except (IndexError, AttributeError) as exc:
-                    log.debug("Skip decay: %s", exc)
+            self._apply_one(item)
         log.info("Review applied: %d action items", len(items))
+
+    def _apply_one(self, item: str) -> None:
+        """Apply a single action item."""
+        if "Decay weight for" not in item:
+            return
+        try:
+            indicator = item.split("Decay weight for ")[1].split(" ")[0]
+            self._memory.micro_adjust_weight(indicator, -0.05)
+        except (IndexError, AttributeError) as exc:
+            log.debug("Skip decay: %s", exc)
 
     def snapshot(self) -> dict[str, Any]:
         """Telemetry snapshot."""

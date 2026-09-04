@@ -72,21 +72,19 @@ class TradeReview:
 
     def review(self, trade: Any, alpha: Optional[dict] = None) -> TradePostmortem:
         """Generate postmortem for a closed trade."""
-        lessons = []
         won = trade.win if hasattr(trade, "win") else trade.pnl > 0
-        if won:
-            lessons.append(f"Won with pnl={trade.pnl:.2f}")
-        else:
-            lessons.append(f"Lost with pnl={trade.pnl:.2f}")
-            if alpha:
-                # Check which indicators were wrong
-                for k, v in alpha.items():
-                    if abs(v) > 0.7:
-                        lessons.append(f"Strong {k}={v:.2f} but lost")
-        return TradePostmortem(
-            ticker=trade.ticker if hasattr(trade, "ticker") else "?",
-            won=won,
-            entry_score=0.0,
-            exit_reason="closed",
-            lessons=lessons,
-        )
+        lessons = self._build_lessons(trade, won, alpha)
+        ticker = trade.ticker if hasattr(trade, "ticker") else "?"
+        return TradePostmortem(ticker=ticker, won=won, entry_score=0.0,
+            exit_reason="closed", lessons=lessons)
+
+    def _build_lessons(self, trade: Any, won: bool,
+                       alpha: Optional[dict]) -> list[str]:
+        """Build lesson list from trade outcome."""
+        pnl = trade.pnl if hasattr(trade, "pnl") else 0
+        lessons = [f"{'Won' if won else 'Lost'} with pnl={pnl:.2f}"]
+        if not won and alpha:
+            for k, v in alpha.items():
+                if abs(v) > 0.7:
+                    lessons.append(f"Strong {k}={v:.2f} but lost")
+        return lessons

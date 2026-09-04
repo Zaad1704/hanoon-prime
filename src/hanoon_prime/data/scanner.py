@@ -67,65 +67,68 @@ class IBScanner:
         """Start scanner subscriptions. 'all' subscribes to all 4 codes."""
         try:
             from ib_insync import ScannerSubscription
+        except ImportError:
+            return 0
+        self._cancel_scan()
+        configs = SCAN_CONFIGS if config_name == "all" else {
+            config_name: SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])}
+        for name, config in configs.items():
+            self._start_sub(name, config)
+        self._scan_started = time.time()
+        self._last_scan = time.time()
+        log.info("Scanner started: %d codes", len(self._scan_lists))
+        return 0
 
-            self._cancel_scan()
-            configs = (
-                SCAN_CONFIGS
-                if config_name == "all"
-                else {
-                    config_name: SCAN_CONFIGS.get(
-                        config_name, SCAN_CONFIGS["most_active"]
-                    )
-                }
-            )
-            for name, config in configs.items():
-                try:
-                    sub = ScannerSubscription(
-                        numberOfRows=50,
-                        instrument=config["instrument"],
-                        locationCode=config["locationCode"],
-                        scanCode=config["scanCode"],
-                    )
-                    self._scan_lists[name] = self.ib.reqScannerSubscription(sub)
-                except Exception as e:
-                    log.debug("Scanner subscribe failed for %s: %s", name, e)
-            self._scan_started = time.time()
-            self._last_scan = time.time()
-            log.info("Scanner started: %d codes", len(self._scan_lists))
-            return 0
+    def _start_sub(self, name: str, config: dict) -> None:
+        """Start a single scanner subscription."""
+        try:
+            from ib_insync import ScannerSubscription
+            sub = ScannerSubscription(numberOfRows=50,
+                instrument=config["instrument"],
+                locationCode=config["locationCode"],
+                scanCode=config["scanCode"])
+            self._scan_lists[name] = self.ib.reqScannerSubscription(sub)
         except Exception as e:
-            log.warning("Scanner failed: %s", e)
-            self._last_scan = time.time()
-            return 0
+            log.debug("Scanner subscribe failed for %s: %s", name, e)
 
     def collect(self) -> list[ScanResult]:
         """Poll all scanner subscriptions, dedup by best rank."""
         if not self._scan_lists:
             return self.get_candidates()
+        self._drain_scan_lists()
+        self._maybe_finalize()
+        return self.get_candidates()
+
+    def _drain_scan_lists(self) -> None:
+        """Drain scan results into deduped dict."""
         try:
             for name, scan_list in list(self._scan_lists.items()):
                 for item in scan_list:
-                    cd = getattr(item, "contractDetails", None)
-                    c = getattr(cd, "contract", None)
-                    if c is None:
-                        continue
-                    sym = getattr(c, "symbol", "")
-                    if not sym or len(sym) > 6:
-                        continue
-                    existing = self._results.get(sym)
-                    if existing is None or item.rank < existing.rank:
-                        self._results[sym] = ScanResult(
-                            symbol=sym, contract=c, rank=item.rank
-                        )
+                    self._ingest_item(item)
         except Exception as e:
             log.debug("Scan collect error: %s", e)
+
+    def _ingest_item(self, item: Any) -> None:
+        """Ingest a single scan item."""
+        cd = getattr(item, "contractDetails", None)
+        c = getattr(cd, "contract", None)
+        if c is None:
+            return
+        sym = getattr(c, "symbol", "")
+        if not sym or len(sym) > 6:
+            return
+        existing = self._results.get(sym)
+        if existing is None or item.rank < existing.rank:
+            self._results[sym] = ScanResult(symbol=sym, contract=c,
+                                            rank=item.rank)
+
+    def _maybe_finalize(self) -> None:
+        """Clear scan lists after timeout."""
         elapsed = time.time() - self._scan_started
         if elapsed > 10.0 and self._scan_lists:
-            count = len(self._results)
-            if count > 0:
-                log.info("Scanner collected: %d candidates", count)
+            if self._results:
+                log.info("Scanner collected: %d candidates", len(self._results))
             self._scan_lists.clear()
-        return self.get_candidates()
 
     def get_candidates(self) -> list[ScanResult]:
         """Return current scan results sorted by rank."""
