@@ -47,7 +47,7 @@ class IBStreamingBot:
         self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.brain, self.journal)
-        self._running, self._last_beat = False, 0.0
+        self._running, self._last_beat, self._closing = False, 0.0, set()
         self._setup_signals()
     def _setup_signals(self) -> None:
         def _h(s: int, _: Any) -> None:
@@ -83,8 +83,7 @@ class IBStreamingBot:
         self._cleanup(pnl)
     def _start_pnl_stream(self) -> Any:
         try:
-            if self.account == "PAPER":
-                self.account = self.ib.managedAccounts()[0]
+            if self.account == "PAPER": self.account = self.ib.managedAccounts()[0]
             return self.ib.reqPnL(self.account, "")
         except Exception as e:
             log.error("PnL subscription failed: %s", e)
@@ -125,8 +124,11 @@ class IBStreamingBot:
                 if self.streamer.update_bar(s):
                     bars += 1
             for exit_sig in exit_signals:
-                self.executor.close_position(exit_sig["ticker"], self.streamer)
-                log.info("BRAIN EXIT %s: %s", exit_sig["ticker"], exit_sig["reason"])
+                t = exit_sig["ticker"]
+                if t not in self._closing:
+                    self._closing.add(t)
+                    self.executor.close_position(t, self.streamer)
+                    log.info("BRAIN EXIT %s: %s", t, exit_sig.get("reason", ""))
             for dec in decisions:
                 self._execute_decision(dec)
             self._process_closed_trades()
@@ -139,17 +141,15 @@ class IBStreamingBot:
             log.info("CYCLE bars=%d open=%d decisions=%d exits=%d",
                      bars, len(self.brain._open_positions), len(decisions), len(exit_signals))
         except Exception as e:
-            log.error("Cycle error: %s", e)
+            log.error("Cycle error: %s", e, exc_info=True)
     def _sync_subscriptions(self) -> None:
         tracked = self.juli.budget.get_all_tracked()
         scanner_syms = {c.symbol for c in self.juli._candidates[:20]}
         all_needed = tracked | scanner_syms | set(self.brain._open_positions.keys())
         self.executor.tracked_tickers = tracked
         for sym in [s for s in all_needed if s not in self.streamer.ticker_subs][:5]:
-            self._subscribe_one(sym)
-    def _subscribe_one(self, sym: str) -> None:
-        try: self.streamer.subscribe(sym); self.streamer.seed_history(sym)
-        except Exception as e: log.warning("Sub %s fail: %s", sym, e)
+            try: self.streamer.subscribe(sym); self.streamer.seed_history(sym)
+            except Exception as e: log.warning("Sub %s fail: %s", sym, e)
     def _execute_decision(self, dec: dict[str, Any]) -> None:
         ticker, thought = dec["ticker"], dec["thought"]
         tk = self.streamer.ticker_subs.get(ticker)
@@ -169,6 +169,7 @@ class IBStreamingBot:
             won = trade["pnl"] > 0
             self.juli.on_trade_close(ticker=trade["ticker"], won=won,
                 pnl_pct=trade["return_pct"], direction=trade["direction"])
+            self._closing.discard(trade["ticker"])
             log.info("REFLECT %s %s pnl=%.4f", trade["ticker"], "WIN" if won else "LOSS", trade["pnl"])
     def _heartbeat(self) -> None:
         now = time.monotonic()
@@ -183,8 +184,7 @@ class IBStreamingBot:
             log.critical("SAFETY NET: IB daily P&L $%.2f", float(pnl.dailyPnL)); self._halt_bot("daily_loss_limit"); return
         if self.brain._consecutive_losses >= 3: self._halt_bot("consecutive_losses")
     def _halt_bot(self, reason: str) -> None:
-        self.journal.append({"event": "halt", "reason": reason, "ts": time.time()})
-        safety_halt(reason); self._running = False
+        self.journal.append({"event": "halt", "reason": reason, "ts": time.time()}); safety_halt(reason); self._running = False
     def _cleanup(self, pnl: Any) -> None:
         self.streamer.cancel_all(); self.executor.cancel_all(); self.juli.scanner.cancel_all()
         if pnl: self.ib.cancelPnL(self.account)
