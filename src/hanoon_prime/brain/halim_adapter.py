@@ -179,3 +179,18 @@ class HalimAdapter:
         except Exception as e:
             log.debug("HALIM query failed: %s", e)
             return {"ok": False, "reason": str(e)}
+
+    def analyze_trade(self, trade_data: dict[str, Any]) -> dict[str, Any]:
+        """Post-trade analysis - returns insights for learning."""
+        from .halim_analysis import analyze_trade as _analyze
+        return _analyze(self._base_url, trade_data)
+
+    def get_improvement_recommendations(self) -> list[dict[str, Any]]:
+        """Get HALIM's tactical recommendations for improvement."""
+        from .halim_analysis import get_improvement_recommendations as _get_recs
+        return _get_recs(self._base_url)
+
+    def get_health_advice(self) -> dict[str, Any]:
+        """Get HALIM's health assessment and recommendations."""
+        from .halim_analysis import get_health_advice as _get_health
+        return _get_health(self._base_url)
