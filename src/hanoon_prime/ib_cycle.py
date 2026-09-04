@@ -84,6 +84,10 @@ class BotCycleMixin:
             self.executor.sync_from_ib(self.streamer)
             self._check_safety(pnl)
             self._sync_subs()
+            # Manual flatten request from webapp
+            if self._check_manual_flatten():
+                self._finish_cycle([], [], poll, started, pnl, False)
+                return
             # EOD flatten: force-close all positions in last N minutes of RTH
             if self._check_eod_flatten():
                 self._finish_cycle([], [], poll, started, pnl, False)
@@ -148,6 +152,22 @@ class BotCycleMixin:
                 self.streamer.seed_history(s)
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
+
+    def _check_manual_flatten(self) -> bool:
+        """Check if webapp requested a manual flatten."""
+        from .telemetry import _FLATTEN_REQUESTED
+
+        if not _FLATTEN_REQUESTED:
+            return False
+        _FLATTEN_REQUESTED.clear()
+        pos_count = len(self.hippocampus._open_positions)
+        if pos_count == 0:
+            log.info("MANUAL FLATTEN: no positions to flatten")
+            return False
+        log.warning("MANUAL FLATTEN: closing %d positions", pos_count)
+        closed = self.executor.close_all_positions(self.streamer)
+        log.warning("MANUAL FLATTEN: sent orders for %d positions", closed)
+        return True
 
     def _check_eod_flatten(self) -> bool:
         """If EOD window, Juli tries to flatten. If she fails, we force it."""

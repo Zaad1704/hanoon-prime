@@ -15,6 +15,9 @@ from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
 
+# Shared flag: main cycle checks this and flattens when non-empty
+_FLATTEN_REQUESTED: list[int] = []  # [position_count] when pending
+
 ROUTES_GET = {
     "/health": "_health",
     "/journal": "_journal",
@@ -240,7 +243,7 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _handle_flatten(self) -> None:
-        """Flatten all positions via limit orders (post-market safe)."""
+        """Request flatten — set flag for main cycle to execute."""
         bot = self.bot
         if bot is None:
             self._r(503, {"error": "bot not running"})
@@ -249,28 +252,20 @@ class _H(BaseHTTPRequestHandler):
         if ib is None or not ib.isConnected():
             self._r(503, {"error": "IB not connected"})
             return
-        closed = 0
-        for pos in self._ib_positions():
-            sym = pos.contract.symbol
-            qty = abs(int(pos.position))
-            mp = float(getattr(pos, "marketPrice", pos.avgCost))
-            action = "SELL" if pos.position > 0 else "BUY"
-            try:
-                from ib_insync import LimitOrder
-
-                limit_price = round(mp, 2)
-                order = LimitOrder(action, qty, limit_price, tif="DAY")
-                ib.placeOrder(pos.contract, order)
-                log.info("FLATTEN %s %s %d @ %.2f", action, sym, qty, limit_price)
-                closed += 1
-            except Exception as e:
-                log.warning("FLATTEN failed %s: %s", sym, e)
-        # Also cancel all pending orders
-        try:
-            getattr(ib, "cancelAllOrders", ib.reqGlobalCancel)()
-        except Exception:
-            pass
-        self._r(200, {"flattened": closed, "action": "flatten_all"})
+        pos_count = len(self._ib_positions())
+        # Set flag — main cycle thread will execute flatten
+        _FLATTEN_REQUESTED.clear()
+        _FLATTEN_REQUESTED.append(pos_count)
+        log.warning("FLATTEN requested: %d positions", pos_count)
+        self._r(
+            200,
+            {
+                "flattened": 0,
+                "pending": True,
+                "action": "flatten_all",
+                "positions": pos_count,
+            },
+        )
 
     def _config(self) -> dict[str, Any]:
         """Return current trading config + live EOD status."""
