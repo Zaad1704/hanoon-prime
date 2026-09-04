@@ -90,6 +90,15 @@ class _H(BaseHTTPRequestHandler):
             if dm in ("both", "long_only", "short_only"):
                 TRADING_CONFIG.direction_mode = dm
                 log.info("Direction mode -> %s", dm)
+        if "eod_flatten_enabled" in body:
+            TRADING_CONFIG.eod_flatten_enabled = bool(body["eod_flatten_enabled"])
+            log.info(
+                "EOD flatten -> %s",
+                "ON" if TRADING_CONFIG.eod_flatten_enabled else "OFF",
+            )
+        if "eod_flatten_minutes" in body:
+            TRADING_CONFIG.eod_flatten_minutes = float(body["eod_flatten_minutes"])
+            log.info("EOD window -> %.1f min", TRADING_CONFIG.eod_flatten_minutes)
         self._r(200, TRADING_CONFIG.to_dict())
 
     def _body(self) -> dict[str, Any]:
@@ -229,8 +238,15 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _config(self) -> dict[str, Any]:
-        """Return current trading config."""
-        return TRADING_CONFIG.to_dict()
+        """Return current trading config + live EOD status."""
+        from .monitor.sleep_manager import _SLEEP_MGR
+
+        d = TRADING_CONFIG.to_dict()
+        d["minutes_to_close"] = round(_SLEEP_MGR.minutes_to_close(), 1)
+        d["eod_window_active"] = _SLEEP_MGR.is_eod_window(
+            TRADING_CONFIG.eod_flatten_minutes
+        )
+        return d
 
     def _journal(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():

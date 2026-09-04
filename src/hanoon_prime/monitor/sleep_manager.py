@@ -35,6 +35,22 @@ class SleepManager:
         """Initialize with no forced override."""
         self._force_active: bool = False
 
+    def minutes_to_close(self) -> float:
+        """Minutes until RTH close (4:00 PM ET). Negative if past close."""
+        now = datetime.now(timezone.utc).astimezone(_ET)
+        close = now.replace(
+            hour=_RTH_END_HOUR, minute=_RTH_END_MIN, second=0, microsecond=0
+        )
+        return (close - now).total_seconds() / 60.0
+
+    def is_eod_window(self, minutes: float = 5.0) -> bool:
+        """True if within `minutes` of RTH close on a weekday."""
+        now = datetime.now(timezone.utc).astimezone(_ET)
+        if now.weekday() >= 5:
+            return False
+        remaining = self.minutes_to_close()
+        return 0 < remaining <= minutes
+
     def get_state(self, ib_connected: bool = True) -> SleepState:
         """Determine if bot should be active."""
         if self._force_active:

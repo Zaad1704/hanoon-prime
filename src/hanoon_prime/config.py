@@ -23,6 +23,10 @@ class TradingConfig:
     # Direction mode: "both", "long_only", "short_only"
     direction_mode: str = "both"
 
+    # EOD flatten
+    eod_flatten_enabled: bool = True
+    eod_flatten_minutes: float = 5.0  # minutes before close to flatten
+
     def is_session_active(self, session: str) -> bool:
         """Check if a session is enabled."""
         return getattr(self, f"session_{session}", True)
@@ -47,6 +51,8 @@ class TradingConfig:
                 "overnight": self.session_overnight,
             },
             "direction_mode": self.direction_mode,
+            "eod_flatten_enabled": self.eod_flatten_enabled,
+            "eod_flatten_minutes": self.eod_flatten_minutes,
         }
 
 

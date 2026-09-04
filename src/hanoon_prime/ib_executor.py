@@ -1,4 +1,5 @@
 """hanoon_prime.ib_executor — JULI's execution layer (Brackets, trails, monitors IB orders.)"""
+
 from __future__ import annotations
 
 import logging
@@ -21,7 +22,14 @@ log = logging.getLogger(__name__)
 
 class IBExecutor:
     """JULI's execution layer — monitors IB and manages all orders."""
-    def __init__(self, ib_client: Any, brain: Hippocampus, journal: Journal, tracked_tickers: set[str] | None = None) -> None:
+
+    def __init__(
+        self,
+        ib_client: Any,
+        brain: Hippocampus,
+        journal: Journal,
+        tracked_tickers: set[str] | None = None,
+    ) -> None:
         self.ib = ib_client
         self.brain = brain
         self.journal = journal
@@ -32,7 +40,9 @@ class IBExecutor:
         self._closed_trades: list[dict[str, Any]] = []
         self.last_thoughts: dict[str, Any] = {}
 
-    def place_bracket(self, ticker: str, thought: Any, price: float, streamer: Any) -> None:
+    def place_bracket(
+        self, ticker: str, thought: Any, price: float, streamer: Any
+    ) -> None:
         """Place atomic parent + TP + SL via IB's bracketOrder()."""
         atr = streamer.buffer_atr(ticker)
         if atr <= 0.0 or np.isnan(atr):
@@ -42,24 +52,42 @@ class IBExecutor:
         if shares <= 0:
             return
         d = thought.direction
-        stop, target = round(price - d * ATR_STOP_MULT * atr, 2), round(price + d * ATR_TARGET_MULT * atr, 2)
+        stop, target = round(price - d * ATR_STOP_MULT * atr, 2), round(
+            price + d * ATR_TARGET_MULT * atr, 2
+        )
         shares = max(1, int(shares))
         action = "BUY" if d > 0 else "SELL"
         contract = streamer.contracts[ticker]
-        for order in self.ib.bracketOrder(action, shares, round(price, 2), target, stop):
+        for order in self.ib.bracketOrder(
+            action, shares, round(price, 2), target, stop
+        ):
             order.tif = "DAY"
             order.outsideRth = ALLOW_EXTENDED_HOURS
             self.ib.placeOrder(contract, order)
         self._brackets[ticker] = (stop, target)
         self._pending_parent.add(ticker)
-        log.info("BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d", action, ticker, round(price, 2), stop, target, shares)
+        log.info(
+            "BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
+            action,
+            ticker,
+            round(price, 2),
+            stop,
+            target,
+            shares,
+        )
 
     def sync_from_ib(self, streamer: Any) -> None:
         """Sync everything from IB — IB is source of truth."""
         if not self.ib.isConnected():
             return
         sweep_zombies(self.ib)
-        protect_position(self.ib, self.tracked_tickers, self._brackets, self._pending_parent, streamer)
+        protect_position(
+            self.ib,
+            self.tracked_tickers,
+            self._brackets,
+            self._pending_parent,
+            streamer,
+        )
         _brackets_from_trades(self.ib, self.tracked_tickers, self._brackets)
         ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
         for t in set(self._brackets) - set(ib_positions):
@@ -86,9 +114,20 @@ class IBExecutor:
         pnl = get_ib_pnl(self.ib, ticker, pos)
         log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
         trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
-        self.brain.record_trade(ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction)
+        self.brain.record_trade(
+            ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
+        )
         journal_exit(self.journal, ticker, pnl, pos)
-        self._closed_trades.append({"ticker": ticker, "pnl": pnl, "return_pct": pnl, "direction": pos.direction, "entry_price": pos.entry_price, "shares": pos.shares})
+        self._closed_trades.append(
+            {
+                "ticker": ticker,
+                "pnl": pnl,
+                "return_pct": pnl,
+                "direction": pos.direction,
+                "entry_price": pos.entry_price,
+                "shares": pos.shares,
+            }
+        )
 
     def monitor_orders(self, ib_positions: dict[str, Any], streamer: Any) -> None:
         """Monitor ALL parent orders — cancel orphans, trail both."""
@@ -104,10 +143,21 @@ class IBExecutor:
         except Exception as e:
             log.warning("monitor orders failed: %s", e)
 
-    def _handle_parent(self, trade: Any, order: Any, sym: str, ib_positions: dict[str, Any], streamer: Any) -> None:
+    def _handle_parent(
+        self,
+        trade: Any,
+        order: Any,
+        sym: str,
+        ib_positions: dict[str, Any],
+        streamer: Any,
+    ) -> None:
         """Handle one parent order — cancel orphans, trail both."""
-        sp = [c.auxPrice for c in getattr(order, "children", []) if c.auxPrice is not None]
-        tp = [c.lmtPrice for c in getattr(order, "children", []) if c.lmtPrice is not None]
+        sp = [
+            c.auxPrice for c in getattr(order, "children", []) if c.auxPrice is not None
+        ]
+        tp = [
+            c.lmtPrice for c in getattr(order, "children", []) if c.lmtPrice is not None
+        ]
         stop, target = (float(max(sp)) if sp else 0.0), (float(max(tp)) if tp else 0.0)
         if sym in self._brackets:
             stored = self._brackets[sym]
@@ -117,7 +167,14 @@ class IBExecutor:
             if sym in ib_positions:
                 self._pending_parent.discard(sym)
                 pos = ib_positions[sym]
-                trade_opened(sym, "BUY" if pos.direction > 0 else "SELL", int(abs(pos.shares)), pos.entry_price, stop, target)
+                trade_opened(
+                    sym,
+                    "BUY" if pos.direction > 0 else "SELL",
+                    int(abs(pos.shares)),
+                    pos.entry_price,
+                    stop,
+                    target,
+                )
             else:
                 return
         elif sym not in ib_positions:
@@ -173,10 +230,37 @@ class IBExecutor:
         action = "SELL" if pos.direction > 0 else "BUY"
         try:
             from ib_insync import MarketOrder
-            self.ib.placeOrder(contract, MarketOrder(action, abs(pos.shares), tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS))
+
+            self.ib.placeOrder(
+                contract,
+                MarketOrder(
+                    action, abs(pos.shares), tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS
+                ),
+            )
             log.info("BRAIN EXIT %s %s %d", action, ticker, abs(pos.shares))
         except Exception as e:
             log.warning("close_position failed %s: %s", ticker, e)
+
+    def close_all_positions(self, streamer: Any) -> int:
+        """Market-flatten every open position. Returns count closed."""
+        count = 0
+        for ticker, pos in list(self.brain._open_positions.items()):
+            contract = streamer.contracts.get(ticker)
+            if contract is None:
+                continue
+            action = "SELL" if pos.direction > 0 else "BUY"
+            try:
+                from ib_insync import MarketOrder
+
+                self.ib.placeOrder(
+                    contract, MarketOrder(action, abs(pos.shares), tif="DAY")
+                )
+                log.info("EOD FLATTEN %s %s %d", action, ticker, abs(pos.shares))
+                count += 1
+            except Exception as e:
+                log.warning("EOD flatten failed %s: %s", ticker, e)
+        self.cancel_all()
+        return count
 
     def cancel_all(self) -> None:
         """Cancel all open orders in IB."""

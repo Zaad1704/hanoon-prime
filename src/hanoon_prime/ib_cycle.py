@@ -84,6 +84,10 @@ class BotCycleMixin:
             self.executor.sync_from_ib(self.streamer)
             self._check_safety(pnl)
             self._sync_subs()
+            # EOD flatten: force-close all positions in last N minutes of RTH
+            if self._check_eod_flatten():
+                self._finish_cycle([], [], poll, started, pnl, False)
+                return
             positions = set(self.hippocampus._open_positions.keys())
             market_open = _SLEEP_MGR.get_state().active
             exit_s, decisions = self.juli.tick(
@@ -144,6 +148,29 @@ class BotCycleMixin:
                 self.streamer.seed_history(s)
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
+
+    def _check_eod_flatten(self) -> bool:
+        """If EOD window, Juli tries to flatten. If she fails, we force it."""
+        from .config import TRADING_CONFIG
+
+        if not TRADING_CONFIG.eod_flatten_enabled:
+            return False
+        if not _SLEEP_MGR.is_eod_window(TRADING_CONFIG.eod_flatten_minutes):
+            return False
+        remaining = _SLEEP_MGR.minutes_to_close()
+        pos_count = len(self.hippocampus._open_positions)
+        if pos_count == 0:
+            log.info("EOD: no positions, all flat (%.1f min to close)", remaining)
+            return False
+        # Juli already closed some — check if any remain
+        log.warning(
+            "EOD FLATTEN: %.1f min to close, %d positions remain — forcing market close",
+            remaining,
+            pos_count,
+        )
+        closed = self.executor.close_all_positions(self.streamer)
+        log.warning("EOD FLATTEN: sent market orders for %d positions", closed)
+        return True
 
     def _can_trade(self, dec: dict[str, Any]) -> bool:
         """Check session and direction config before trading."""
