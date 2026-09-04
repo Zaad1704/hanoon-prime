@@ -4,11 +4,11 @@ Communicates with the external HALIM AI advisor service.
 Returns bounded modifier and rich regime classifications.
 Non-blocking: starts debate async, reads cached result instantly.
 """
-
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.request
 from typing import Any
@@ -28,25 +28,40 @@ _VALID_REGIMES = frozenset(
         "normal",
     }
 )
-_REGIME_PROMPT_TPL = (
-    "You are a market regime classifier for a trading bot.\n"
-    "Analyze the following data and classify the current market regime.\n\n"
-    "Recent prices: [{prices}]\nVolume: {volume:.0f}\nIndicators: {indicators}\n\n"
-    "Respond with EXACTLY this JSON format:\n"
-    '{"regime": "<one of: trending_bullish, trending_bearish, ranging, '
-    'volatile, breakout, consolidation, mean_reverting>",'
-    '"confidence": <0.0-1.0>, "multiplier": <0.5-1.5>,'
-    '"key_drivers": ["<what drove this>"],'
-    '"risk_adjustment": "<aggressive|normal|defensive>",'
-    '"description": "<one sentence summary>"}\n'
-    "Return ONLY the JSON object."
-)
 _FB = {
     "bull": ("trending_bullish", 1.2, "normal", ["ADX>25", "positive_momentum"]),
     "bear": ("trending_bearish", 0.8, "defensive", ["ADX>25", "negative_momentum"]),
     "range": ("ranging", 0.9, "defensive", ["ADX<20"]),
     "normal": ("normal", 1.0, "normal", ["fallback"]),
 }
+_REGIME_PROMPT_TPL = (
+    "You are a market regime classifier for a trading bot.\n"
+    "Analyze the following data and classify the current market regime.\n\n"
+    "Recent prices: [{prices}]\nVolume: {volume:.0f}\nIndicators: {indicators}\n\n"
+    "Respond with EXACTLY this JSON format:\n"
+    '{{"regime": "<one of: trending_bullish, trending_bearish, ranging, '
+    'volatile, breakout, consolidation, mean_reverting>",'
+    ' "confidence": <0.0-1.0>, "multiplier": <0.5-1.5>,'
+    ' "key_drivers": ["<what drove this>"],'
+    ' "risk_adjustment": "<aggressive|normal|defensive>",'
+    ' "description": "<one sentence summary>"}}'
+    "\nReturn ONLY the JSON object."
+)
+
+
+def _normalize_halim_json(text: str) -> dict[str, Any] | None:
+    """Parse HALIM's response, handling single quotes and trailing commas."""
+    try:
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        text = text.replace("'", '"')
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+        result: dict[str, Any] = json.loads(text)
+        return result
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log.debug("JSON normalize failed: %s", e)
+        return None
 
 
 class HalimAdapter:
@@ -56,7 +71,7 @@ class HalimAdapter:
         self._base_url = base_url
         self._cache: dict[str, dict[str, Any]] = {}
         self._cache_ttl: float = 60.0
-        self._regime_cache: dict[str, Any] = {}
+        self._regime_cache: dict[str, dict[str, Any]] = {}
         self._regime_ts: float = 0.0
         self._regime_ttl: float = 30.0
 
@@ -105,11 +120,11 @@ class HalimAdapter:
 
     def _parse_regime_response(self, text: str) -> dict[str, Any] | None:
         try:
-            text = text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            raw: dict[str, Any] = json.loads(text)
+            raw = _normalize_halim_json(text)
+            if raw is None:
+                return None
             if "regime" not in raw:
+                log.debug("Parsed JSON missing 'regime' key: %s", list(raw.keys()))
                 return None
             if raw["regime"] not in _VALID_REGIMES:
                 raw["regime"] = "normal"
@@ -118,14 +133,13 @@ class HalimAdapter:
             raw.setdefault("key_drivers", [])
             raw.setdefault("risk_adjustment", "normal")
             raw.setdefault("description", "")
-            result: dict[str, Any] = raw
-            return result
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return raw
+        except Exception as e:
+            log.debug("Regime parse error: %s: %s", type(e).__name__, e)
             return None
 
     def _fallback_regime(self, indicators: dict[str, float]) -> dict[str, Any]:
-        adx = indicators.get("adx", 20.0)
-        mom = indicators.get("momentum", 0.0)
+        adx, mom = indicators.get("adx", 20.0), indicators.get("momentum", 0.0)
         key = (
             "bull"
             if adx > 25 and mom > 0
@@ -183,14 +197,17 @@ class HalimAdapter:
     def analyze_trade(self, trade_data: dict[str, Any]) -> dict[str, Any]:
         """Post-trade analysis - returns insights for learning."""
         from .halim_analysis import analyze_trade as _analyze
+
         return _analyze(self._base_url, trade_data)
 
     def get_improvement_recommendations(self) -> list[dict[str, Any]]:
         """Get HALIM's tactical recommendations for improvement."""
         from .halim_analysis import get_improvement_recommendations as _get_recs
+
         return _get_recs(self._base_url)
 
     def get_health_advice(self) -> dict[str, Any]:
         """Get HALIM's health assessment and recommendations."""
         from .halim_analysis import get_health_advice as _get_health
+
         return _get_health(self._base_url)

@@ -42,7 +42,9 @@ class NetworkStepper:
 
         return spikes
 
-    def _extract_state(self, now: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _extract_state(
+        self, now: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Extract neuron states into numpy arrays."""
         neurons = self._network._neurons
         n = len(neurons)
@@ -113,7 +115,8 @@ class NetworkStepper:
         neurons = self._network._neurons
 
         fired = v_m >= thresholds
-        for i, fired_flag in enumerate(fired):
+        for i in range(len(fired)):
+            fired_flag = bool(fired[i])
             if not fired_flag:
                 continue
             nid = keys[i]
@@ -147,13 +150,14 @@ class NetworkStepper:
             syn_weights = weights.get(spike.neuron_id, {})
 
             for target_id in targets:
-                self._inject_to_target(
-                    network, target_id, syn_weights, spike.amplitude
-                )
+                self._inject_to_target(network, target_id, syn_weights, spike.amplitude)
 
     def _inject_to_target(
-        self, network: LIFNetwork, target_id: str,
-        syn_weights: dict[str, float], amplitude: float
+        self,
+        network: LIFNetwork,
+        target_id: str,
+        syn_weights: dict[str, float],
+        amplitude: float,
     ) -> None:
         """Inject charge to a single target neuron."""
         target = network._neurons.get(target_id)

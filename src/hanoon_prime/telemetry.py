@@ -1,14 +1,9 @@
-"""hanoon_prime.telemetry — lightweight HTTP health endpoint for cloudflared.
-
-Serves /health, /journal, /positions on :8080 so the Cloudflare
-named tunnel (api.hanoonweb.xyz → :8080) has a real endpoint.
-Runs in a background thread alongside the trading bot.
-"""
-
+"""hanoon_prime.telemetry — HTTP API for Juli webapp."""
 from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -18,163 +13,174 @@ from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
 
+ROUTES_GET = {
+    "/health": "_health", "/journal": "_journal", "/positions": "_positions",
+    "/safety-net": "_safety_net_status", "/brain": "_brain_state",
+    "/trades": "_recent_trades", "/system2": "_system2_state",
+}
 
-class _TelemetryHandler(BaseHTTPRequestHandler):
-    """HTTP handler for health checks and journal read-out."""
 
-    # Class-level references set by TelemetryAPI.start()
+class _H(BaseHTTPRequestHandler):
     bot: Any = None
     journal_path: Path | None = None
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        """Suppress default stderr logging — use structured logging instead."""
+    def log_message(self, *_a: Any) -> None:
+        """Suppress default stderr logging."""
 
     def do_GET(self) -> None:
-        """Handle GET requests for health/journal/positions/safety-net."""
-        routes = {
-            "/health": self._health,
-            "/journal": self._journal,
-            "/positions": self._positions,
-            "/safety-net": self._safety_net_status,
-        }
-        handler = routes.get(self.path)
-        if handler is None:
-            self._respond(404, {"error": "not found", "path": self.path})
+        """Route GET requests."""
+        name = ROUTES_GET.get(self.path)
+        if name is None:
+            self._r(404, {"error": "not found", "path": self.path})
         else:
-            self._respond(200, handler())
+            self._r(200, getattr(self, name)())
 
     def do_POST(self) -> None:
-        """Handle POST requests — toggle safety net on/off."""
+        """Handle POST requests — toggle safety net."""
         if self.path != "/safety-net":
-            self._respond(404, {"error": "not found", "path": self.path})
+            self._r(404, {"error": "not found", "path": self.path})
             return
-        action = self._read_body().get("action", "")
+        action = self._body().get("action", "")
         if action in ("enable", "disable"):
-            enabled = action == "enable"
-            self._set_safety_net(enabled)
-            self._respond(200, {"safety_net_enabled": enabled})
+            en = action == "enable"
+            hp = getattr(self.bot, "hippocampus", None) if self.bot else None
+            if hp is not None:
+                hp.safety_enabled = en
+                log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
+            self._r(200, {"safety_net_enabled": en})
         else:
-            self._respond(
-                400,
-                {"error": 'expected JSON {"action": "enable"|"disable"}'},
-            )
+            self._r(400, {"error": 'expected {"action": "enable"|"disable"}'})
 
-    def _read_body(self) -> dict[str, Any]:
-        """Parse JSON request body (empty dict if invalid)."""
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
+    def _body(self) -> dict[str, Any]:
+        n = int(self.headers.get("Content-Length", 0))
+        if n == 0:
             return {}
         try:
-            raw = json.loads(self.rfile.read(length))
-            if isinstance(raw, dict):
-                return dict(raw)
-            return {}
-        except (json.JSONDecodeError, ValueError) as e:
-            log.warning("Invalid JSON in POST body: %s", e)
+            raw = json.loads(self.rfile.read(n))
+            return dict(raw) if isinstance(raw, dict) else {}
+        except Exception as e:
+            log.warning("Bad POST body: %s", e)
             return {}
 
-    def _respond(self, code: int, payload: dict[str, Any]) -> None:
-        """Write JSON response with the given status code."""
-        body = json.dumps(payload).encode()
+    def _r(self, code: int, d: dict[str, Any]) -> None:
+        body = json.dumps(d, default=str).encode()
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError) as e:
-            log.debug("client disconnected mid-response: %s", e)
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            log.debug("Client disconnected: %s", exc.__class__.__name__)
 
-    @staticmethod
-    def _ib_positions(ib: Any) -> list[Any]:
-        """Read positions directly from IB (source of truth)."""
-        if not ib:
-            return []
-        try:
-            return list(ib.positions())
-        except Exception:
-            return []
+    def _ib(self) -> Any:
+        return getattr(self.bot, "ib", None) if self.bot else None
+
+    def _ib_positions(self) -> list[Any]:
+        ib = self._ib()
+        return list(ib.positions()) if ib else []
 
     def _health(self) -> dict[str, Any]:
-        """Return bot connection and position status."""
-        bot = self.bot
+        bot, ib = self.bot, self._ib()
         if bot is None:
             return {"status": "starting", "bot": False}
-        ib = getattr(bot, "ib", None)
-        connected = ib.isConnected() if ib else False
-        journal = getattr(bot, "journal", None)
-        return {
-            "status": "ok" if connected else "disconnected",
-            "connected": connected,
-            "tickers": [s for s in bot.streamer.ticker_subs] if bot else [],
-            "positions": [p.contract.symbol for p in self._ib_positions(ib)],
-            "journal_entries": journal.count() if journal else 0,
-            "safety_net_enabled": self._safety_net_status().get("enabled", False),
-        }
-
-    def _safety_net_status(self) -> dict[str, Any]:
-        """Return current safety net toggle status and limits."""
-        bot = self.bot
-        hp = getattr(bot, "hippocampus", None) if bot else None
-        enabled = getattr(hp, "safety_enabled", False) if hp else False
-        daily_pnl = getattr(hp, "_daily_pnl", 0.0) if hp else 0.0
-        return {
-            "enabled": enabled,
-            "daily_pnl": daily_pnl,
-            "limit": DAILY_LOSS_LIMIT,
-            "consecutive_losses": (getattr(hp, "_consecutive_losses", 0) if hp else 0),
-        }
-
-    def _set_safety_net(self, enabled: bool) -> None:
-        """Toggle safety net enforcement on the running bot."""
-        bot = self.bot
-        if bot is None:
-            return
+        con = ib.isConnected() if ib else False
+        j = getattr(bot, "journal", None)
         hp = getattr(bot, "hippocampus", None)
-        if hp is not None:
-            hp.safety_enabled = enabled
-            log.info("Safety net %s via webapp", "ENABLED" if enabled else "DISABLED")
-
-    def _journal(self) -> dict[str, Any]:
-        """Return the last 20 journal entries."""
-        if not self.journal_path or not self.journal_path.exists():
-            return {"entries": []}
-        entries = Journal(self.journal_path).tail(20)[::-1]
-        return {"entries": entries}
+        ts_keys = (list(bot.streamer.ticker_subs.keys())
+                   if bot and hasattr(bot.streamer.ticker_subs, "keys") else [])
+        return {
+            "status": "ok" if con else "disconnected",
+            "connected": con,
+            "tickers": ts_keys,
+            "positions": [p.contract.symbol for p in self._ib_positions()],
+            "position_count": len(self._ib_positions()),
+            "journal_entries": j.count() if j else 0,
+            "safety_net_enabled": getattr(hp, "safety_enabled", False) if hp else False,
+            "uptime": time.time(),
+        }
 
     def _positions(self) -> dict[str, Any]:
-        """Return open positions from IB (source of truth)."""
-        bot = self.bot
-        if bot is None:
-            return {"positions": []}
-        ib = getattr(bot, "ib", None)
-        positions = [
-            {
-                "ticker": p.contract.symbol,
-                "entry_price": p.avgCost,
-                "shares": abs(p.position),
-                "direction": 1 if p.position > 0 else -1,
-                "pnl_pct": 0,
-            }
-            for p in self._ib_positions(ib)
-        ]
-        return {"positions": positions}
+        out = []
+        for p in self._ib_positions():
+            sym = p.contract.symbol
+            mp = round(float(getattr(p, "marketPrice", p.avgCost)), 2)
+            ep = round(p.avgCost, 2)
+            up = round(float(getattr(p, "unrealizedPnl", 0)), 2)
+            pp = round(((mp - ep) / ep) * 100, 2) if ep > 0 else 0.0
+            out.append({"ticker": sym, "entry_price": ep,
+                        "shares": abs(int(p.position)),
+                        "direction": "LONG" if p.position > 0 else "SHORT",
+                        "market_price": mp, "unrealized_pnl": up, "pnl_pct": pp})
+        return {"positions": out,
+                "total_pnl": round(sum(p["unrealized_pnl"] for p in out), 2),
+                "count": len(out)}
+
+    def _recent_trades(self) -> dict[str, Any]:
+        if not self.journal_path or not self.journal_path.exists():
+            return {"trades": []}
+        es = Journal(self.journal_path).tail(50)[::-1]
+        closed = [e for e in es if e.get("event") in ("position_closed", "exit")]
+        return {"trades": closed[:20]}
+
+    def _brain_state(self) -> dict[str, Any]:
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        brain = getattr(juli, "brain", None) if juli else None
+        if brain is None:
+            return {}
+        s = brain.snapshot()
+        m = s.get("memory", {})
+        return {"threshold": round(s.get("threshold", 0.58), 4),
+                "decision_count": s.get("decision_count", 0),
+                "episodic_size": s.get("episodic_size", 0),
+                "weights": m.get("weights", {}),
+                "pred_error": m.get("pred_error", 0.0),
+                "brain_state": s.get("brain_state", {})}
+
+    def _system2_state(self) -> dict[str, Any]:
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        brain = getattr(juli, "brain", None) if juli else None
+        state = getattr(brain, "state", None) if brain else None
+        if state is None:
+            return {}
+        s = state.snapshot()
+        return {"regime_multiplier": s.get("regime_multiplier", 1.0),
+                "regime_label": s.get("regime_label", "unknown"),
+                "halim_modifier": s.get("halim_modifier", 0.0),
+                "thinker_modifier": s.get("thinker_modifier", 0.0),
+                "thinker_confidence": s.get("thinker_confidence_mod", 0.0),
+                "refractory": s.get("refractory_until", 0) > time.time()}
+
+    def _safety_net_status(self) -> dict[str, Any]:
+        hp = getattr(self.bot, "hippocampus", None) if self.bot else None
+        if hp is None:
+            return {"enabled": False, "daily_pnl": 0.0, "limit": DAILY_LOSS_LIMIT,
+                    "consecutive_losses": 0}
+        return {"enabled": getattr(hp, "safety_enabled", False),
+                "daily_pnl": round(getattr(hp, "_daily_pnl", 0.0), 2),
+                "limit": DAILY_LOSS_LIMIT,
+                "consecutive_losses": getattr(hp, "_consecutive_losses", 0)}
+
+    def _journal(self) -> dict[str, Any]:
+        if not self.journal_path or not self.journal_path.exists():
+            return {"entries": []}
+        return {"entries": Journal(self.journal_path).tail(20)[::-1]}
 
 
 class TelemetryAPI:
-    """Background HTTP server on --health port for cloudflared tunnel."""
+    """Background HTTP server for Juli webapp."""
 
     def __init__(self, bot: Any, journal_path: Path) -> None:
-        self._bot = bot
-        self._journal_path = journal_path
+        self._bot, self._jp = bot, journal_path
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
-        _TelemetryHandler.bot = bot
-        _TelemetryHandler.journal_path = journal_path
+        _H.bot = bot
+        _H.journal_path = journal_path
 
     def start(self) -> None:
         """Start the HTTP server in a background thread."""
-        self._server = HTTPServer(("127.0.0.1", TELEMETRY_PORT), _TelemetryHandler)
+        self._server = HTTPServer(("127.0.0.1", TELEMETRY_PORT), _H)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         log.info("TelemetryAPI live on http://127.0.0.1:%s", TELEMETRY_PORT)

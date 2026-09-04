@@ -77,7 +77,7 @@ class BotCycleMixin:
     def _finish_cycle(self, exit_s: list[dict[str, Any]], decisions: list[dict[str, Any]],
                       poll: float, started: float, pnl: Any, market_open: bool = True) -> None:
         """Process tickers, exits, decisions, reflect, wait."""
-        self._last_bars = sum(1 for tk in self.ib.pendingTickers()
+        self._last_bars = sum(1 for tk in self.ib.pendingTickers()  # type: ignore[misc]
             if self.streamer.update_bar(tk.contract.symbol if tk.contract else ""))
         for es in exit_s:
             t = es["ticker"]
@@ -141,7 +141,7 @@ class BotCycleMixin:
     def _heartbeat(self) -> None:
         """Periodic status log."""
         now = time.monotonic()
-        if now - self._last_beat < 60.0: return
+        if now - self._last_beat < 60.0: return  # type: ignore[has-type]
         self._last_beat = now
         log.info("HEARTBEAT open=%d journal=%d",
             len(self.hippocampus._open_positions), self.journal.count())

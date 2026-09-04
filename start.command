@@ -17,7 +17,7 @@
 set -uo pipefail
 
 BOT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-REBUILD_ROOT="$HOME/Downloads/hanoon_rebuild"
+REBUILD_ROOT="$BOT_ROOT"
 PID_DIR="$BOT_ROOT/runtime/pids"
 LOG_DIR="$BOT_ROOT/logs"
 TUNNEL_URL_FILE="$BOT_ROOT/runtime/tunnel_url.txt"
@@ -207,7 +207,7 @@ fi
 _OM_PID_FILE="$PID_DIR/overnight_monitor.pid"
 _OM_SCRIPT="$REBUILD_ROOT/scripts/overnight_monitor.py"
 if [[ -f "$_OM_SCRIPT" ]] && ! _check_running "$_OM_PID_FILE" "Overnight"; then
-  nohup "$PYTHON_BIN" "$_OM_SCRIPT" --interval 60 >> "$LOG_DIR/overnight_monitor.log" 2>&1 &
+  PYTHONUNBUFFERED=1 nohup "$PYTHON_BIN" "$_OM_SCRIPT" --interval 60 >> "$LOG_DIR/overnight_monitor.log" 2>&1 &
   echo $! > "$_OM_PID_FILE"
   sleep 2
   ok "Overnight monitor started"

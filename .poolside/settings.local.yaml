@@ -11,3 +11,10 @@ tools:
             - pre-commit run *
             - git diff *
             - wc *
+            - find *
+            - ls *
+            - ps aux
+            - tail *
+            - python3 *
+            - curl *
+            - cat *

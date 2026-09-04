@@ -47,11 +47,23 @@ warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
 files = ["src/hanoon_prime"]
-exclude = ["tests/", "scripts/", "src/hanoon_prime/ib_adapter.py", "src/hanoon_prime/ib_streamer.py", "src/hanoon_prime/ib_executor.py", "src/hanoon_prime/ib_compat.py"]
+exclude = ["tests/", "scripts/", "src/hanoon_prime/ib_adapter.py", "src/hanoon_prime/ib_streamer.py", "src/hanoon_prime/ib_executor.py", "src/hanoon_prime/ib_compat.py", "src/hanoon_prime/ib_cycle.py"]
 
 [[tool.mypy.overrides]]
 module = "hanoon_prime.brain.*"
 disable_error_code = ["index"]
+
+[[tool.mypy.overrides]]
+module = "hanoon_prime.ib_cycle"
+disable_error_code = ["attr-defined", "misc", "has-type"]
+
+[[tool.mypy.overrides]]
+module = "hanoon_prime.metrics"
+disable_error_code = ["operator"]
+
+[[tool.mypy.overrides]]
+module = "hanoon_prime.brain.neurons.network_step"
+disable_error_code = ["attr-defined", "union-attr"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

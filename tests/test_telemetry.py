@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from hanoon_prime.immune import DAILY_LOSS_LIMIT
-from hanoon_prime.telemetry import TelemetryAPI, _TelemetryHandler
+from hanoon_prime.telemetry import _H, TelemetryAPI
 
 
 class _FakeBrain:
@@ -69,7 +69,7 @@ def server(tmp_path: Path) -> int:
     journal_path = tmp_path / "journal_live.jsonl"
     journal_path.write_text("")
     TelemetryAPI(bot, journal_path)
-    srv = HTTPServer(("127.0.0.1", 0), _TelemetryHandler)
+    srv = HTTPServer(("127.0.0.1", 0), _H)
     port = srv.server_address[1]
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()

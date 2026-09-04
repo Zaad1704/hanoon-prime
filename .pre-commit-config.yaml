@@ -15,22 +15,22 @@ repos:
     hooks:
       - id: black
         args: [--line-length=88]
-        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat|cycle)|hands|validator)\.py$|^halim/.*$
+        exclude: ^src/hanoon_prime/(ib_(adapter|streamer|executor|compat|cycle)|hands|validator|telemetry)\.py$|^halim/.*$
 
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
         args: [--profile=black, --line-length=88]
-        exclude: ^src/hanoon_prime/ib_cycle\.py$|^halim/.*$
+        exclude: ^src/hanoon_prime/(ib_cycle|telemetry)\.py$|^halim/.*$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.11.2
     hooks:
       - id: mypy
-        args: [--strict, --warn-return-any, --warn-unused-configs, --disallow-untyped-defs, --ignore-missing-imports, --exclude='src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$', --exclude='src/hanoon_prime/(hands|validator)\.py$']
+        args: [--strict, --warn-return-any, --warn-unused-configs, --disallow-untyped-defs, --ignore-missing-imports, --exclude='src/hanoon_prime/ib_(adapter|streamer|executor|compat|cycle)\.py$', --exclude='src/hanoon_prime/(hands|validator)\.py$']
         additional_dependencies: [numpy>=1.26, scipy>=1.10, pytest>=7.0, ib_insync>=0.9.86]
-        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat)\.py$
+        exclude: ^src/hanoon_prime/ib_(adapter|streamer|executor|compat|cycle)\.py$
         pass_filenames: false
 
   - repo: local

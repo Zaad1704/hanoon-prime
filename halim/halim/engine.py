@@ -177,6 +177,7 @@ _TRADE_PURPOSES = frozenset({"trade_decision", "verdict", "supervision", "evalua
 _JSON_PURPOSES = frozenset({
     "entry_decision", "exit_decision", "trade_decision", "verdict",
     "supervision", "evaluation", "model_eval", "winrate_guard",
+    "regime",  # Added for market regime classification JSON output
 })
 
 
