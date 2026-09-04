@@ -252,7 +252,7 @@ class IBExecutor:
             sym = pos.contract.symbol
             qty = abs(int(pos.position))
             if qty == 0:
-            continue
+                continue
             action = "SELL" if pos.position > 0 else "BUY"
             # Use market price with small offset for limit fill
             mp = float(getattr(pos, "marketPrice", pos.avgCost))
