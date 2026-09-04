@@ -160,8 +160,8 @@ class SlowCortex:
             log.warning("State persist failed: %s", e)
 
     def _get_latest_alpha(self) -> dict[str, float] | None:
-        """Read latest alpha from System 1's last evaluation."""
-        return None
+        """Read latest alpha from System 1 via shared state."""
+        return self.state.get_latest_alpha()
 
     def on_trade_close(
         self, ticker: str, won: bool, pnl_pct: float, direction: int = 1

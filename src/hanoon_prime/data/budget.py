@@ -8,6 +8,7 @@ IB Limits:
 - DOM (Level 2): 5-60 tickers
 - L1 (reqMktData): 100 tickers default
 """
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,7 @@ class DataBudget:
                 l1_count += 1
 
         to_sub, to_unsub = self._diff(target)
-        self._apply(target)
+        self._apply(target, positions)
         return to_sub, to_unsub
 
     def _diff(self, target: dict[str, str]) -> tuple[dict[str, str], set[str]]:
@@ -86,16 +87,15 @@ class DataBudget:
                 to_sub[sym] = tier
         return to_sub, to_unsub
 
-    def _apply(self, target: dict[str, str]) -> None:
-        """Update internal slot state."""
+    def _apply(self, target: dict[str, str], positions: set[str]) -> None:
+        """Update internal slot state, preserving existing non-changing slots."""
         new_slots: dict[str, SubSlot] = {}
         for sym, tier in target.items():
-            is_pos = sym in {s.ticker for s in self.slots.values() if s.is_position}
-            new_slots[sym] = SubSlot(
-                ticker=sym,
-                tier=tier,
-                is_position=is_pos,
-            )
+            is_pos = sym in positions
+            if sym in self.slots and self.slots[sym].tier == tier:
+                new_slots[sym] = self.slots[sym]
+            else:
+                new_slots[sym] = SubSlot(ticker=sym, tier=tier, is_position=is_pos)
         self.slots = new_slots
         self._last_alloc = time.time()
 

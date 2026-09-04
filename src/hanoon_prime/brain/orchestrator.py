@@ -97,6 +97,7 @@ class JuliBrain:
         self._last_alpha[ticker] = alpha
         self._last_score[ticker] = stabilized
         self.memory.record_score(ticker, stabilized)
+        self.state.set_latest_alpha(alpha)
         return {
             "ticker": ticker,
             "verdict": base.verdict,

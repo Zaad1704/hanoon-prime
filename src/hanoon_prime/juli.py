@@ -39,16 +39,20 @@ class JuliBrain:
         self.slow_cortex.start()
 
     def tick(
-        self, positions: set[str], get_snapshot: Any, streamer: Any
+        self,
+        positions: set[str],
+        get_snapshot: Any,
+        streamer: Any,
+        closing: set[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """One full brain cycle. Returns (entry_decisions, exit_signals)."""
         self._open_positions = dict.fromkeys(positions, True)
         self._maybe_scan()
         self._maybe_screen(get_snapshot)
         self._maybe_allocate(positions)
-        return self._evaluate_exits(positions, get_snapshot), self._evaluate_entries(
-            positions, get_snapshot
-        )
+        exits = self._evaluate_exits(positions, get_snapshot, closing or set())
+        entries = self._evaluate_entries(positions, get_snapshot)
+        return exits, entries
 
     def _maybe_scan(self) -> None:
         """Start scanner and collect results every 5 minutes."""
@@ -81,20 +85,22 @@ class JuliBrain:
         )
 
     def _evaluate_exits(
-        self, positions: set[str], get_snapshot: Any
+        self, positions: set[str], get_snapshot: Any, closing: set[str]
     ) -> list[dict[str, Any]]:
         """Check brain exit signals for open positions."""
         exits: list[dict[str, Any]] = []
-        for ticker in positions:
-            snap = get_snapshot(ticker)
+        for t in positions:
+            if t in closing:
+                continue
+            snap = get_snapshot(t)
             if snap is None or snap.get("last", 0) <= 0:
                 continue
-            sig = self.brain.check_exit(ticker, snap["last"], direction=1)
+            sig = self.brain.check_exit(t, snap["last"], direction=1)
             if sig.should_exit:
                 exits.append(
-                    {"ticker": ticker, "reason": sig.reason, "exit_type": sig.exit_type}
+                    {"ticker": t, "reason": sig.reason, "exit_type": sig.exit_type}
                 )
-                log.info("EXIT SIGNAL %s: %s", ticker, sig.reason)
+                log.info("EXIT SIGNAL %s: %s", t, sig.reason)
         return exits
 
     def _evaluate_entries(
@@ -113,26 +119,21 @@ class JuliBrain:
 
     def _compute_alpha(self, snap: dict[str, Any]) -> dict[str, float]:
         """Compute all indicators from snapshot arrays."""
-        alpha = compute_all_alpha(
-            close=snap.get("close_arr"),
-            high=snap.get("high_arr"),
-            low=snap.get("low_arr"),
-            volume=snap.get("vol_arr"),
-            buy_volume=snap.get("buy_vol_arr"),
-            bid_sizes=snap.get("bid_sizes"),
-            ask_sizes=snap.get("ask_sizes"),
-        )
+        kw = {
+            k: snap.get(v)
+            for k, v in [
+                ("close", "close_arr"),
+                ("high", "high_arr"),
+                ("low", "low_arr"),
+                ("volume", "vol_arr"),
+                ("buy_volume", "buy_vol_arr"),
+                ("bid_sizes", "bid_sizes"),
+                ("ask_sizes", "ask_sizes"),
+            ]
+        }
+        alpha = compute_all_alpha(**kw)
         if not alpha:
-            alpha = (
-                compute_alpha(
-                    close=snap.get("close_arr"),
-                    volume=snap.get("vol_arr"),
-                    buy_volume=snap.get("buy_vol_arr"),
-                    bid_sizes=snap.get("bid_sizes"),
-                    ask_sizes=snap.get("ask_sizes"),
-                )
-                or {}
-            )
+            alpha = compute_alpha(**kw) or {}
         return alpha
 
     def _build_decision(

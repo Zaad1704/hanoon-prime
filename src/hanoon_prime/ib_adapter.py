@@ -47,7 +47,8 @@ class IBStreamingBot:
         self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.brain, self.journal)
-        self._running, self._last_beat, self._closing = False, 0.0, set()
+        self._running, self._last_beat = False, 0.0
+        self._closing: set[str] = set()
         self._setup_signals()
     def _setup_signals(self) -> None:
         def _h(s: int, _: Any) -> None:
@@ -117,7 +118,7 @@ class IBStreamingBot:
             self._check_safety_nets(pnl)
             self._sync_subscriptions()
             positions = set(self.brain._open_positions.keys())
-            decisions, exit_signals = self.juli.tick(positions, self._get_snapshot, self.streamer)
+            decisions, exit_signals = self.juli.tick(positions, self._get_snapshot, self.streamer, self._closing)
             bars = 0
             for tk in self.ib.pendingTickers():
                 s = tk.contract.symbol if tk.contract else ""

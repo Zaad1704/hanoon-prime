@@ -56,3 +56,14 @@ class BrainState:
         """Set refractory period after a trade event."""
         with self._lock:
             self._state["refractory_until"] = time.time() + duration
+
+    def set_latest_alpha(self, alpha: dict[str, float]) -> None:
+        """Store latest alpha from System 1 for System 2 to read."""
+        with self._lock:
+            self._state["latest_alpha"] = dict(alpha)
+
+    def get_latest_alpha(self) -> dict[str, float] | None:
+        """Read latest alpha computed by System 1."""
+        with self._lock:
+            a = self._state.get("latest_alpha")
+            return dict(a) if a else None

@@ -6,7 +6,6 @@ Replaces hardcoded ticker lists with dynamic discovery.
 Scanner returns ScanDataList that auto-populates via events.
 We poll the list to extract results. Max 50 results per scan.
 """
-
 from __future__ import annotations
 
 import logging
@@ -61,34 +60,39 @@ class IBScanner:
         try:
             from ib_insync import ScannerSubscription
 
-            self.cancel_all()
-            sub = ScannerSubscription()
-            sub.instrument = config["instrument"]
-            sub.locationCode = config["locationCode"]
-            sub.scanCode = config["scanCode"]
-            sub.numberOfRows = 50
-            self._scan_list = self.ib.reqScannerSubscription(sub, [], [])
+            self._cancel_scan()
+            sub = ScannerSubscription(
+                numberOfRows=50,
+                instrument=config["instrument"],
+                locationCode=config["locationCode"],
+                scanCode=config["scanCode"],
+            )
+            self._scan_list = self.ib.reqScannerSubscription(sub)
             self._scan_started = time.time()
             self._last_scan = time.time()
             log.info("Scanner started: %s", config_name)
             return 0
         except Exception as e:
-            log.warning("Scanner start failed: %s", e)
+            log.warning("Scanner failed: %s", e)
             self._last_scan = time.time()
             return 0
 
     def collect(self) -> list[ScanResult]:
         """Poll the live ScanDataList for new results. Call each cycle."""
         if self._scan_list is None:
-            return []
+            return self.get_candidates()
         try:
             for item in self._scan_list:
-                sym = item.contractDetails.contract.symbol
+                cd = getattr(item, "contractDetails", None)
+                c = getattr(cd, "contract", None)
+                if c is None:
+                    continue
+                sym = getattr(c, "symbol", "")
+                if not sym or len(sym) > 6:
+                    continue
                 if sym not in self._results:
                     self._results[sym] = ScanResult(
-                        symbol=sym,
-                        contract=item.contractDetails.contract,
-                        rank=item.rank,
+                        symbol=sym, contract=c, rank=item.rank
                     )
         except Exception as e:
             log.debug("Scan collect error: %s", e)
@@ -106,14 +110,18 @@ class IBScanner:
         results.sort(key=lambda r: r.rank)
         return results
 
-    def cancel_all(self) -> None:
-        """Cancel all active scanner subscriptions."""
+    def _cancel_scan(self) -> None:
+        """Cancel active scanner subscription without clearing results."""
         if self._scan_list is not None:
             try:
                 self.ib.cancelScannerSubscription(self._scan_list)
             except Exception as e:
-                log.debug("cancel scan skip: %s", e)
+                log.debug("Scanner cancel error: %s", e)
             self._scan_list = None
+
+    def cancel_all(self) -> None:
+        """Cancel all active scanner subscriptions and clear results."""
+        self._cancel_scan()
         self._results.clear()
 
     def should_scan(self) -> bool:
