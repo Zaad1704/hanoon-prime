@@ -332,3 +332,90 @@ class TestGetIbPnl:
         pos = make_pos(direction=1, shares=10, entry_price=100.0)
         pnl = get_ib_pnl(fake_ib, "TSLA", pos)
         assert pnl == 0.0
+
+
+# ---------------------------------------------------------------------------
+# TestOutsideRth — extended-hours trading (pre-market / post-market)
+# ---------------------------------------------------------------------------
+# R6: ALLOW_EXTENDED_HOURS enables outsideRth=True on ALL order types so
+# that JULI can enter, exit, and protect positions during pre-market
+# (4:00-9:30 AM ET) and post-market (4:00-8:00 PM ET) sessions.
+
+
+class TestOutsideRth:
+    """All order placement paths must set outsideRth=True for extended hours."""
+
+    def test_place_bracket_sets_outsideRth(self):
+        """place_bracket must set outsideRth=True on all bracket order legs."""
+        exc = make_executor(tracked={"TSLA"})
+        exc.brain.size_position.return_value = 100
+        exc.brain.score_to_win_prob = MagicMock(return_value=0.7)
+        thought = MagicMock()
+        thought.score = 0.7
+        thought.direction = 1
+        streamer = MagicMock()
+        streamer.buffer_atr.return_value = 2.0
+        streamer.contracts = {"TSLA": MagicMock()}
+        placed_orders = []
+        exc.ib.bracketOrder.return_value = [MagicMock(), MagicMock(), MagicMock()]
+        exc.ib.placeOrder.side_effect = lambda c, o: placed_orders.append(o)
+        exc.place_bracket("TSLA", thought, 150.0, streamer)
+        assert len(placed_orders) >= 1
+        for order in placed_orders:
+            assert order.outsideRth is True
+            assert order.tif == "DAY"
+
+    def test_close_position_sets_outsideRth(self):
+        """close_position must create a MarketOrder with outsideRth=True."""
+        from hanoon_prime.immune import ALLOW_EXTENDED_HOURS
+
+        assert ALLOW_EXTENDED_HOURS is True
+        exc = make_executor(tracked={"TSLA"})
+        exc.brain._open_positions = {
+            "TSLA": make_pos(direction=1, shares=10, entry_price=100.0)
+        }
+        streamer = MagicMock()
+        streamer.contracts = {"TSLA": MagicMock()}
+        # ib_insync can't be imported on py3.14 (eventkit issue);
+        # inject a mock so close_position's local import resolves.
+        mock_ib_mod = MagicMock()
+        with patch.dict("sys.modules", {"ib_insync": mock_ib_mod}):
+            exc.close_position("TSLA", streamer)
+        mock_ib_mod.MarketOrder.assert_called_once()
+        kwargs = mock_ib_mod.MarketOrder.call_args.kwargs
+        assert kwargs["outsideRth"] is True
+        assert kwargs["tif"] == "DAY"
+
+
+# ---------------------------------------------------------------------------
+# TestPlaceOca — tests _place_oca sets outsideRth on OCA legs
+# ---------------------------------------------------------------------------
+
+
+class TestPlaceOca:
+    """_place_oca must set outsideRth=True on both STP and LMT legs."""
+
+    def test_place_oca_sets_outsideRth(self):
+        """_place_oca must pass outsideRth=True to Order constructor."""
+        from hanoon_prime.immune import ALLOW_EXTENDED_HOURS
+
+        assert ALLOW_EXTENDED_HOURS is True
+        fake_ib = MagicMock()
+        contract = MagicMock()
+        placed = []
+        fake_ib.placeOrder.side_effect = lambda c, o: placed.append(o)
+
+        # Make mock Order() create objects whose .outsideRth reflects the kwarg
+        def _make_order(**kw):
+            m = MagicMock()
+            m.outsideRth = kw.get("outsideRth")
+            return m
+
+        mock_order_cls = MagicMock(side_effect=_make_order)
+        with patch("hanoon_prime._protect._ib", MagicMock(Order=mock_order_cls)):
+            from hanoon_prime._protect import _place_oca
+
+            _place_oca(fake_ib, contract, "SELL", 100, 95.0, 110.0, "JULI_TSLA")
+        assert len(placed) == 2
+        for order in placed:
+            assert order.outsideRth is True

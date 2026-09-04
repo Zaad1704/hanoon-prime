@@ -1,4 +1,5 @@
 """hanoon_prime.telemetry — HTTP API for Juli webapp."""
+
 from __future__ import annotations
 
 import json
@@ -8,16 +9,23 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
+from .config import TRADING_CONFIG
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
 from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
 
 ROUTES_GET = {
-    "/health": "_health", "/journal": "_journal", "/positions": "_positions",
-    "/safety-net": "_safety_net_status", "/brain": "_brain_state",
-    "/trades": "_recent_trades", "/system2": "_system2_state",
+    "/health": "_health",
+    "/journal": "_journal",
+    "/positions": "_positions",
+    "/safety-net": "_safety_net_status",
+    "/brain": "_brain_state",
+    "/trades": "_recent_trades",
+    "/system2": "_system2_state",
+    "/config": "_config",
 }
+POST_ROUTES = {"/safety-net", "/config"}
 
 
 class _H(BaseHTTPRequestHandler):
@@ -35,11 +43,25 @@ class _H(BaseHTTPRequestHandler):
         else:
             self._r(200, getattr(self, name)())
 
+    def do_OPTIONS(self) -> None:
+        """Handle CORS preflight."""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_POST(self) -> None:
-        """Handle POST requests — toggle safety net."""
-        if self.path != "/safety-net":
+        """Handle POST requests."""
+        if self.path == "/safety-net":
+            self._handle_safety_net()
+        elif self.path == "/config":
+            self._handle_config()
+        else:
             self._r(404, {"error": "not found", "path": self.path})
-            return
+
+    def _handle_safety_net(self) -> None:
+        """Toggle safety net on/off."""
         action = self._body().get("action", "")
         if action in ("enable", "disable"):
             en = action == "enable"
@@ -50,6 +72,25 @@ class _H(BaseHTTPRequestHandler):
             self._r(200, {"safety_net_enabled": en})
         else:
             self._r(400, {"error": 'expected {"action": "enable"|"disable"}'})
+
+    def _handle_config(self) -> None:
+        """GET: return config. POST: update config fields."""
+        body = self._body()
+        if not body:
+            self._r(200, TRADING_CONFIG.to_dict())
+            return
+        if "sessions" in body:
+            for k, v in body["sessions"].items():
+                attr = f"session_{k}"
+                if hasattr(TRADING_CONFIG, attr) and isinstance(v, bool):
+                    setattr(TRADING_CONFIG, attr, v)
+                    log.info("Session %s -> %s", k, "ON" if v else "OFF")
+        if "direction_mode" in body:
+            dm = body["direction_mode"]
+            if dm in ("both", "long_only", "short_only"):
+                TRADING_CONFIG.direction_mode = dm
+                log.info("Direction mode -> %s", dm)
+        self._r(200, TRADING_CONFIG.to_dict())
 
     def _body(self) -> dict[str, Any]:
         n = int(self.headers.get("Content-Length", 0))
@@ -88,8 +129,11 @@ class _H(BaseHTTPRequestHandler):
         con = ib.isConnected() if ib else False
         j = getattr(bot, "journal", None)
         hp = getattr(bot, "hippocampus", None)
-        ts_keys = (list(bot.streamer.ticker_subs.keys())
-                   if bot and hasattr(bot.streamer.ticker_subs, "keys") else [])
+        ts_keys = (
+            list(bot.streamer.ticker_subs.keys())
+            if bot and hasattr(bot.streamer.ticker_subs, "keys")
+            else []
+        )
         return {
             "status": "ok" if con else "disconnected",
             "connected": con,
@@ -109,20 +153,32 @@ class _H(BaseHTTPRequestHandler):
             ep = round(p.avgCost, 2)
             up = round(float(getattr(p, "unrealizedPnl", 0)), 2)
             pp = round(((mp - ep) / ep) * 100, 2) if ep > 0 else 0.0
-            out.append({"ticker": sym, "entry_price": ep,
-                        "shares": abs(int(p.position)),
-                        "direction": "LONG" if p.position > 0 else "SHORT",
-                        "market_price": mp, "unrealized_pnl": up, "pnl_pct": pp})
-        return {"positions": out,
-                "total_pnl": round(sum(p["unrealized_pnl"] for p in out), 2),
-                "count": len(out)}
+            out.append(
+                {
+                    "ticker": sym,
+                    "entry_price": ep,
+                    "shares": abs(int(p.position)),
+                    "direction": "LONG" if p.position > 0 else "SHORT",
+                    "market_price": mp,
+                    "unrealized_pnl": up,
+                    "pnl_pct": pp,
+                }
+            )
+        return {
+            "positions": out,
+            "total_pnl": round(sum(p["unrealized_pnl"] for p in out), 2),
+            "count": len(out),
+        }
 
     def _recent_trades(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():
             return {"trades": []}
         es = Journal(self.journal_path).tail(50)[::-1]
-        closed = [e for e in es if e.get("event") in ("position_closed", "exit")]
-        return {"trades": closed[:20]}
+        return {
+            "trades": [e for e in es if e.get("event") in ("position_closed", "exit")][
+                :20
+            ]
+        }
 
     def _brain_state(self) -> dict[str, Any]:
         juli = getattr(self.bot, "juli", None) if self.bot else None
@@ -131,12 +187,14 @@ class _H(BaseHTTPRequestHandler):
             return {}
         s = brain.snapshot()
         m = s.get("memory", {})
-        return {"threshold": round(s.get("threshold", 0.58), 4),
-                "decision_count": s.get("decision_count", 0),
-                "episodic_size": s.get("episodic_size", 0),
-                "weights": m.get("weights", {}),
-                "pred_error": m.get("pred_error", 0.0),
-                "brain_state": s.get("brain_state", {})}
+        return {
+            "threshold": round(s.get("threshold", 0.58), 4),
+            "decision_count": s.get("decision_count", 0),
+            "episodic_size": s.get("episodic_size", 0),
+            "weights": m.get("weights", {}),
+            "pred_error": m.get("pred_error", 0.0),
+            "brain_state": s.get("brain_state", {}),
+        }
 
     def _system2_state(self) -> dict[str, Any]:
         juli = getattr(self.bot, "juli", None) if self.bot else None
@@ -145,22 +203,34 @@ class _H(BaseHTTPRequestHandler):
         if state is None:
             return {}
         s = state.snapshot()
-        return {"regime_multiplier": s.get("regime_multiplier", 1.0),
-                "regime_label": s.get("regime_label", "unknown"),
-                "halim_modifier": s.get("halim_modifier", 0.0),
-                "thinker_modifier": s.get("thinker_modifier", 0.0),
-                "thinker_confidence": s.get("thinker_confidence_mod", 0.0),
-                "refractory": s.get("refractory_until", 0) > time.time()}
+        return {
+            "regime_multiplier": s.get("regime_multiplier", 1.0),
+            "regime_label": s.get("regime_label", "unknown"),
+            "halim_modifier": s.get("halim_modifier", 0.0),
+            "thinker_modifier": s.get("thinker_modifier", 0.0),
+            "thinker_confidence": s.get("thinker_confidence_mod", 0.0),
+            "refractory": s.get("refractory_until", 0) > time.time(),
+        }
 
     def _safety_net_status(self) -> dict[str, Any]:
         hp = getattr(self.bot, "hippocampus", None) if self.bot else None
         if hp is None:
-            return {"enabled": False, "daily_pnl": 0.0, "limit": DAILY_LOSS_LIMIT,
-                    "consecutive_losses": 0}
-        return {"enabled": getattr(hp, "safety_enabled", False),
-                "daily_pnl": round(getattr(hp, "_daily_pnl", 0.0), 2),
+            return {
+                "enabled": False,
+                "daily_pnl": 0.0,
                 "limit": DAILY_LOSS_LIMIT,
-                "consecutive_losses": getattr(hp, "_consecutive_losses", 0)}
+                "consecutive_losses": 0,
+            }
+        return {
+            "enabled": getattr(hp, "safety_enabled", False),
+            "daily_pnl": round(getattr(hp, "_daily_pnl", 0.0), 2),
+            "limit": DAILY_LOSS_LIMIT,
+            "consecutive_losses": getattr(hp, "_consecutive_losses", 0),
+        }
+
+    def _config(self) -> dict[str, Any]:
+        """Return current trading config."""
+        return TRADING_CONFIG.to_dict()
 
     def _journal(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():

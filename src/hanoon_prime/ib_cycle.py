@@ -4,6 +4,7 @@ Extracted from ib_adapter to keep files under R3 limit (200 lines).
 Contains BotCycleMixin with cycle, sync, execution, and safety methods
 that IBStreamingBot mixes in. Also provides connect helpers.
 """
+
 from __future__ import annotations
 
 import logging
@@ -11,6 +12,7 @@ import time
 from typing import Any
 
 from ._telegram import safety_halt, shutdown
+from .config import TRADING_CONFIG
 from .hippocampus import Hippocampus
 from .ib_executor import IBExecutor
 from .ib_streamer import IBStreamer
@@ -45,17 +47,32 @@ def try_connect(ib_client: Any, host: str, port: int, cid: int) -> bool:
 
 class BotCycleMixin:
     """Mixin providing cycle loop, execution, and safety for IBStreamingBot."""
+
     def _snapshot(self, sym: str) -> dict[str, Any] | None:
         """Build snapshot dict from live ticker data."""
         tk = self.streamer.ticker_subs.get(sym)
-        if tk is None or not tk.hasBidAsk: return None
-        base: dict[str, Any] = {"bid": float(tk.bid), "ask": float(tk.ask),
-            "last": float(tk.last or tk.close or 0), "volume": float(tk.volume or 0),
-            "daily_volume": float(tk.volume or 0)}
-        if not self.streamer.ready(sym): return base
+        if tk is None or not tk.hasBidAsk:
+            return None
+        base: dict[str, Any] = {
+            "bid": float(tk.bid),
+            "ask": float(tk.ask),
+            "last": float(tk.last or tk.close or 0),
+            "volume": float(tk.volume or 0),
+            "daily_volume": float(tk.volume or 0),
+        }
+        if not self.streamer.ready(sym):
+            return base
         a = self.streamer.get_arrays(sym)
         base["atr"] = self.streamer.buffer_atr(sym)
-        for k in ("close", "volume", "high", "low", "buy_volume", "bid_sizes", "ask_sizes"):
+        for k in (
+            "close",
+            "volume",
+            "high",
+            "low",
+            "buy_volume",
+            "bid_sizes",
+            "ask_sizes",
+        ):
             base[f"{k}_arr"] = a[k]
         base["prices"], base["volumes"] = list(a["close"]), list(a["volume"])
         return base
@@ -69,16 +86,28 @@ class BotCycleMixin:
             self._sync_subs()
             positions = set(self.hippocampus._open_positions.keys())
             market_open = _SLEEP_MGR.get_state().active
-            exit_s, decisions = self.juli.tick(positions, self._snapshot, self.streamer, self._closing)
+            exit_s, decisions = self.juli.tick(
+                positions, self._snapshot, self.streamer, self._closing
+            )
             self._finish_cycle(exit_s, decisions, poll, started, pnl, market_open)
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
 
-    def _finish_cycle(self, exit_s: list[dict[str, Any]], decisions: list[dict[str, Any]],
-                      poll: float, started: float, pnl: Any, market_open: bool = True) -> None:
+    def _finish_cycle(
+        self,
+        exit_s: list[dict[str, Any]],
+        decisions: list[dict[str, Any]],
+        poll: float,
+        started: float,
+        pnl: Any,
+        market_open: bool = True,
+    ) -> None:
         """Process tickers, exits, decisions, reflect, wait."""
-        self._last_bars = sum(1 for tk in self.ib.pendingTickers()  # type: ignore[misc]
-            if self.streamer.update_bar(tk.contract.symbol if tk.contract else ""))
+        self._last_bars = sum(
+            1
+            for tk in self.ib.pendingTickers()
+            if self.streamer.update_bar(tk.contract.symbol if tk.contract else "")
+        )
         for es in exit_s:
             t = es["ticker"]
             if t not in self._closing:
@@ -86,14 +115,22 @@ class BotCycleMixin:
                 self.executor.close_position(t, self.streamer)
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
         for dec in decisions:
-            if market_open: self._exec_decision(dec)
+            if market_open and self._can_trade(dec):
+                self._exec_decision(dec)
         self._reflect_closed()
-        if pnl is not None: self.hippocampus._daily_pnl = float(pnl.dailyPnL)
+        if pnl is not None:
+            self.hippocampus._daily_pnl = float(pnl.dailyPnL)
         elapsed = time.monotonic() - started
-        if elapsed < poll: time.sleep(poll - elapsed)
+        if elapsed < poll:
+            time.sleep(poll - elapsed)
         self._heartbeat()
-        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars,
-            len(self.hippocampus._open_positions), len(decisions), len(exit_s))
+        log.info(
+            "CYCLE bars=%d open=%d d=%d x=%d",
+            self._last_bars,
+            len(self.hippocampus._open_positions),
+            len(decisions),
+            len(exit_s),
+        )
 
     def _sync_subs(self) -> None:
         """Sync subscriptions with scanner and open positions."""
@@ -108,10 +145,30 @@ class BotCycleMixin:
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
 
+    def _can_trade(self, dec: dict[str, Any]) -> bool:
+        """Check session and direction config before trading."""
+        # Check direction mode
+        side = dec.get("thought", {}).get("verdict", "BUY")
+        if not TRADING_CONFIG.is_direction_allowed(side):
+            log.debug(
+                "SKIP %s direction=%s mode=%s",
+                dec["ticker"],
+                side,
+                TRADING_CONFIG.direction_mode,
+            )
+            return False
+        # Check session (sleep_manager already gates overall, but double-check)
+        state = _SLEEP_MGR.get_state()
+        if not TRADING_CONFIG.is_session_active(state.session):
+            log.debug("SKIP %s session=%s disabled", dec["ticker"], state.session)
+            return False
+        return True
+
     def _exec_decision(self, dec: dict[str, Any]) -> None:
         """Execute an entry decision through IB."""
         tk = self.streamer.ticker_subs.get(dec["ticker"])
-        if tk is None or not tk.hasBidAsk: return
+        if tk is None or not tk.hasBidAsk:
+            return
         t = dec["ticker"]
         if not self.hippocampus.check_entry_allowed():
             log.info("SKIP %s safety", t)
@@ -132,23 +189,36 @@ class BotCycleMixin:
         """Route closed trades to neuromorphic brain for learning."""
         for trade in self.executor.get_newly_closed_trades():
             won = trade["pnl"] > 0
-            self.juli.brain.on_trade_close(ticker=trade["ticker"], won=won,
-                pnl_pct=trade["return_pct"], direction=trade["direction"])
+            self.juli.brain.on_trade_close(
+                ticker=trade["ticker"],
+                won=won,
+                pnl_pct=trade["return_pct"],
+                direction=trade["direction"],
+            )
             self._closing.discard(trade["ticker"])
-            log.info("REFLECT %s %s pnl=%.4f", trade["ticker"],
-                "WIN" if won else "LOSS", trade["pnl"])
+            log.info(
+                "REFLECT %s %s pnl=%.4f",
+                trade["ticker"],
+                "WIN" if won else "LOSS",
+                trade["pnl"],
+            )
 
     def _heartbeat(self) -> None:
         """Periodic status log."""
         now = time.monotonic()
-        if now - self._last_beat < 60.0: return  # type: ignore[has-type]
+        if now - self._last_beat < 60.0:
+            return
         self._last_beat = now
-        log.info("HEARTBEAT open=%d journal=%d",
-            len(self.hippocampus._open_positions), self.journal.count())
+        log.info(
+            "HEARTBEAT open=%d journal=%d",
+            len(self.hippocampus._open_positions),
+            self.journal.count(),
+        )
 
     def _check_safety(self, pnl: Any) -> None:
         """Check safety nets before trading."""
-        if not self.hippocampus.safety_enabled: return
+        if not self.hippocampus.safety_enabled:
+            return
         n = count_open_positions(self.ib, self.executor.tracked_tickers)
         if n > 3:
             log.critical("SAFETY: %d > 3", n)
@@ -173,8 +243,10 @@ class BotCycleMixin:
         self.streamer.cancel_all()
         self.executor.cancel_all()
         self.juli.scanner.cancel_all()
-        if pnl: self.ib.cancelPnL(self.account)
-        if self.ib.isConnected(): self.ib.disconnect()
+        if pnl:
+            self.ib.cancelPnL(self.account)
+        if self.ib.isConnected():
+            self.ib.disconnect()
         shutdown()
 
 

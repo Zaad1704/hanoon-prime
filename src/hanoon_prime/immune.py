@@ -126,3 +126,6 @@ LIQUID_US_SEED: tuple[str, ...] = (
     "KO",
 )
 TELEMETRY_PORT: int = 8080  # HTTP health endpoint for cloudflared tunnel
+
+# ── Extended hours (pre-market 4-9:30AM ET, post-market 4-8PM ET) ──────
+ALLOW_EXTENDED_HOURS: bool = True  # enable outsideRth on all IB orders

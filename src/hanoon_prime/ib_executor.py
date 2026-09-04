@@ -8,12 +8,12 @@ from typing import Any
 import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
-from ._protect import sweep_zombies, protect_position
+from ._protect import protect_position, sweep_zombies
 from ._telegram import trade_closed, trade_opened
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
-from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
 from .ib_bracket import _brackets_from_trades
+from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ class IBExecutor:
         contract = streamer.contracts[ticker]
         for order in self.ib.bracketOrder(action, shares, round(price, 2), target, stop):
             order.tif = "DAY"
+            order.outsideRth = ALLOW_EXTENDED_HOURS
             self.ib.placeOrder(contract, order)
         self._brackets[ticker] = (stop, target)
         self._pending_parent.add(ticker)
@@ -172,7 +173,7 @@ class IBExecutor:
         action = "SELL" if pos.direction > 0 else "BUY"
         try:
             from ib_insync import MarketOrder
-            self.ib.placeOrder(contract, MarketOrder(action, abs(pos.shares), tif="DAY"))
+            self.ib.placeOrder(contract, MarketOrder(action, abs(pos.shares), tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS))
             log.info("BRAIN EXIT %s %s %d", action, ticker, abs(pos.shares))
         except Exception as e:
             log.warning("close_position failed %s: %s", ticker, e)

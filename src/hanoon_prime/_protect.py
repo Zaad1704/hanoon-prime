@@ -11,7 +11,7 @@ import math
 from typing import Any
 
 from .ib_compat import ib as _ib
-from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
+from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ def _place_oca(
         ocaGroup=oca,
         ocaType=1,
         transmit=True,
+        outsideRth=ALLOW_EXTENDED_HOURS,
     )
     ib_client.placeOrder(contract, _ib.Order(orderType="STP", auxPrice=stop, **kw))
     ib_client.placeOrder(contract, _ib.Order(orderType="LMT", lmtPrice=target, **kw))
@@ -111,7 +112,7 @@ def protect_position(
     streamer: Any,
 ) -> None:
     """Validate and fix OCA protection for all tracked positions."""
-    from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
+    from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 
     for pos in ib_client.positions():
         sym = pos.contract.symbol if pos.contract else ""
