@@ -160,13 +160,17 @@ class BotCycleMixin:
         if not _FLATTEN_REQUESTED:
             return False
         _FLATTEN_REQUESTED.clear()
-        pos_count = len(self.hippocampus._open_positions)
-        if pos_count == 0:
-            log.info("MANUAL FLATTEN: no positions to flatten")
+        # Count actual IB positions, not just Juli-tracked ones
+        try:
+            ib_count = len([p for p in self.ib.positions() if abs(int(p.position)) > 0])
+        except Exception:
+            ib_count = 0
+        if ib_count == 0:
+            log.info("MANUAL FLATTEN: no IB positions to flatten")
             return False
-        log.warning("MANUAL FLATTEN: closing %d positions", pos_count)
+        log.warning("MANUAL FLATTEN: closing %d IB positions", ib_count)
         closed = self.executor.close_all_positions(self.streamer)
-        log.warning("MANUAL FLATTEN: sent orders for %d positions", closed)
+        log.warning("MANUAL FLATTEN: sent market orders for %d positions", closed)
         return True
 
     def _check_eod_flatten(self) -> bool:
