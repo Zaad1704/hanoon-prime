@@ -136,12 +136,13 @@ class NeuromorphicBrain:
         neuro_result = self._process_alpha(alpha, ticker)
         neuro_score = neuro_result.get("score", 0.0)
         blended = (1 - self.NEURO_BLEND) * base.score + self.NEURO_BLEND * neuro_score
-        score = blended * r + hm + eb
-        # EOD awareness: kill entries in last N minutes of RTH
-        from ..monitor.sleep_manager import _SLEEP_MGR
+        score = (
+            blended * r + hm + eb
+        )  # EOD awareness: kill entries in last N minutes of RTH
         from ..config import TRADING_CONFIG
+        from ..monitor.sleep_manager import SleepManager
 
-        remaining = _SLEEP_MGR.minutes_to_close()
+        remaining = SleepManager().minutes_to_close()
         if 0 < remaining <= TRADING_CONFIG.eod_flatten_minutes:
             score = 0.0  # No new entries near close
             log.debug("EOD penalty: score zeroed (%.1f min to close)", remaining)

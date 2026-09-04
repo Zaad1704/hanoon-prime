@@ -57,6 +57,8 @@ class _H(BaseHTTPRequestHandler):
             self._handle_safety_net()
         elif self.path == "/config":
             self._handle_config()
+        elif self.path == "/flatten":
+            self._handle_flatten()
         else:
             self._r(404, {"error": "not found", "path": self.path})
 
@@ -237,15 +239,47 @@ class _H(BaseHTTPRequestHandler):
             "consecutive_losses": getattr(hp, "_consecutive_losses", 0),
         }
 
+    def _handle_flatten(self) -> None:
+        """Flatten all positions via limit orders (post-market safe)."""
+        bot = self.bot
+        if bot is None:
+            self._r(503, {"error": "bot not running"})
+            return
+        ib = self._ib()
+        if ib is None or not ib.isConnected():
+            self._r(503, {"error": "IB not connected"})
+            return
+        closed = 0
+        for pos in self._ib_positions():
+            sym = pos.contract.symbol
+            qty = abs(int(pos.position))
+            mp = float(getattr(pos, "marketPrice", pos.avgCost))
+            action = "SELL" if pos.position > 0 else "BUY"
+            try:
+                from ib_insync import LimitOrder
+
+                limit_price = round(mp, 2)
+                order = LimitOrder(action, qty, limit_price, tif="DAY")
+                ib.placeOrder(pos.contract, order)
+                log.info("FLATTEN %s %s %d @ %.2f", action, sym, qty, limit_price)
+                closed += 1
+            except Exception as e:
+                log.warning("FLATTEN failed %s: %s", sym, e)
+        # Also cancel all pending orders
+        try:
+            getattr(ib, "cancelAllOrders", ib.reqGlobalCancel)()
+        except Exception:
+            pass
+        self._r(200, {"flattened": closed, "action": "flatten_all"})
+
     def _config(self) -> dict[str, Any]:
         """Return current trading config + live EOD status."""
-        from .monitor.sleep_manager import _SLEEP_MGR
+        from .monitor.sleep_manager import SleepManager
 
+        sm = SleepManager()
         d = TRADING_CONFIG.to_dict()
-        d["minutes_to_close"] = round(_SLEEP_MGR.minutes_to_close(), 1)
-        d["eod_window_active"] = _SLEEP_MGR.is_eod_window(
-            TRADING_CONFIG.eod_flatten_minutes
-        )
+        d["minutes_to_close"] = round(sm.minutes_to_close(), 1)
+        d["eod_window_active"] = sm.is_eod_window(TRADING_CONFIG.eod_flatten_minutes)
         return d
 
     def _journal(self) -> dict[str, Any]:
