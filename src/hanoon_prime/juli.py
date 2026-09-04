@@ -1,5 +1,8 @@
-"""hanoon_prime.juli — Biological brain orchestrator.
-Scanner discovery + cognitive pipeline; returns (decisions, exit_signals).
+"""hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain.
+
+Discovers tickers via scanner, routes IB data to the NeuromorphicBrain.
+The NeuromorphicBrain is the LOCAL SOURCE OF TRUTH for all decisions.
+IB is the source of truth for trade data (positions, P&L, fills).
 """
 
 from __future__ import annotations
@@ -10,9 +13,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from .brain.indicators import compute_all_alpha
-from .brain.orchestrator import JuliBrain as BrainPipeline
+from .brain.orchestrator import NeuromorphicBrain
 from .brain.shared_state import BrainState
-from .brain.slow_cortex import SlowCortex
 from .cerebellum import compute_alpha
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
@@ -29,22 +31,21 @@ ATTRS = (
     ("ask_sizes", "ask_sizes"),
 )
 
-# fmt: off
+
 class JuliBrain:
-    """Biological brain: scanner discovery + full cognitive pipeline."""
+    """Scanner + router. NeuromorphicBrain makes all decisions."""
 
     def __init__(self, ib_client: Any) -> None:
         self.ib = ib_client
         self.scanner = IBScanner(ib_client)
         self.budget = DataBudget()
         self._state = BrainState()
-        self.brain = BrainPipeline(brain_state=self._state)
-        self.slow_cortex = SlowCortex(brain_state=self._state)
+        self.brain = NeuromorphicBrain(brain_state=self._state)
         self._candidates: list[ScanResult] = []
         self._last_alloc: float = 0.0
         self._open_positions: dict[str, Any] = {}
-        log.info("System 1 (JuliBrain) fast-path initialized")
-        self.slow_cortex.start()
+        log.info("JuliBrain initialized — NeuromorphicBrain is local source of truth")
+        self.brain.start()
 
     def tick(
         self,
@@ -161,8 +162,5 @@ class JuliBrain:
     def on_trade_close(
         self, ticker: str, won: bool, pnl_pct: float, direction: int = 1
     ) -> None:
-        """Route trade close to System 2 reflection."""
-        self.slow_cortex.on_trade_close(ticker, won, pnl_pct, direction)
+        """Route trade close to NeuromorphicBrain — all learning here."""
         self.brain.on_trade_close(ticker, won, pnl_pct, direction)
-
-# fmt: on
