@@ -17,11 +17,12 @@ from typing import Any, Optional
 
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
+from ..types import BarSeries, FillInfo
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .shared_state import BrainState
-from .thinker import Thinker
+from .thinker import Signal, Thinker
 
 log = logging.getLogger(__name__)
 HALIM_URL: str = "http://127.0.0.1:8765"
@@ -43,7 +44,6 @@ class ConsolidationEngine:
         self.memory = JuliMemory()
         self.halim = HalimAdapter(base_url=halim_url)
         self.thinker = Thinker()
-        from ..reflection.buffer import BUY, SELL
 
         self.buffer = TradeBuffer(on_trade_closed=self._on_trade_closed)
         self.supervisor = LearningSupervisor(self.buffer, self.memory)
@@ -139,7 +139,10 @@ class ConsolidationEngine:
         prices = self.state.get_latest_prices()
         regime = self.state.get("regime_label", "unknown")
         threshold = self.state.get("threshold", 0.58)
-        r = self.thinker.think(alpha, 0.0, 1, regime, prices, prices, prices, threshold)
+        bars = BarSeries(prices, prices, prices, prices)
+        r = self.thinker.think(
+            alpha, 0.0, 1, Signal(regime=regime, bars=bars, threshold=threshold)
+        )
         self.state.update(
             thinker_modifier=r.modifier,
             thinker_confidence_mod=r.confidence_mod,
@@ -179,9 +182,7 @@ class ConsolidationEngine:
         won: bool,
         pnl_pct: float,
         direction: int = 1,
-        qty: float = 1.0,
-        avg_price: float = 0.0,
-        fees: float = 0.0,
+        fill: FillInfo | None = None,
     ) -> None:
         """Route trade close to thinker + buffer (slow path learning)."""
         from ..reflection.buffer import BUY, SELL
@@ -191,12 +192,15 @@ class ConsolidationEngine:
         self.thinker.emotion.update(won, pnl_pct)
         self.state.set_refractory(2.0)
         side = BUY if direction > 0 else SELL
+        qty = fill.qty if fill is not None else 0.0
+        price = fill.avg_price if fill is not None else 0.0
+        fees = fill.fees if fill is not None else 0.0
         self.buffer.on_fill(
             Fill(
                 ticker=ticker,
                 side=side,
                 qty=qty,
-                price=avg_price,
+                price=price,
                 time=time.time(),
                 commission=fees,
             )

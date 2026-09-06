@@ -11,7 +11,8 @@ import math
 from typing import Any
 
 from .ib_compat import ib as _ib
-from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
+from .immune import ALLOW_EXTENDED_HOURS
+from .types import BracketOrder
 
 log = logging.getLogger(__name__)
 
@@ -81,27 +82,23 @@ def _validate_protection(
     return True
 
 
-def _place_oca(
-    ib_client: Any,
-    contract: Any,
-    action: str,
-    qty: int,
-    stop: float,
-    target: float,
-    oca: str,
-) -> None:
+def _place_oca(ib_client: Any, contract: Any, order: BracketOrder) -> None:
     """Place OCA STP+LMT pair as position protection."""
     kw = dict(
-        action=action,
-        totalQuantity=qty,
+        action=order.action,
+        totalQuantity=order.qty,
         tif="GTC",
-        ocaGroup=oca,
+        ocaGroup=order.oca,
         ocaType=1,
         transmit=True,
         outsideRth=ALLOW_EXTENDED_HOURS,
     )
-    ib_client.placeOrder(contract, _ib.Order(orderType="STP", auxPrice=stop, **kw))
-    ib_client.placeOrder(contract, _ib.Order(orderType="LMT", lmtPrice=target, **kw))
+    ib_client.placeOrder(
+        contract, _ib.Order(orderType="STP", auxPrice=order.stop, **kw)
+    )
+    ib_client.placeOrder(
+        contract, _ib.Order(orderType="LMT", lmtPrice=order.target, **kw)
+    )
 
 
 def protect_position(
@@ -112,35 +109,57 @@ def protect_position(
     streamer: Any,
 ) -> None:
     """Validate and fix OCA protection for all tracked positions."""
-    from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
-
     for pos in ib_client.positions():
         sym = pos.contract.symbol if pos.contract else ""
         if sym not in tracked or sym in pending or sym in brackets:
             continue
-        d = 1 if pos.position > 0 else -1
-        expected_qty, expected_action = abs(pos.position), "SELL" if d > 0 else "BUY"
-        trades = _get_oca_orders(ib_client, sym)
-        if _validate_protection(trades, expected_qty, expected_action):
-            continue
-        if trades:
-            _cancel_oca(ib_client, trades)
-            log.info(f"HEAL {sym}: {len(trades)} broken orders cancelled")
-        px = streamer.get_last_price(sym)
-        atr = streamer.buffer_atr(sym)
-        if not px or atr <= 0.0 or math.isnan(atr):
-            continue
-        try:
-            c = ib_client.qualifyContracts(_ib.Stock(sym, "SMART", "USD"))[0]
-        except Exception:
-            continue
-        stop = round(px - d * ATR_STOP_MULT * atr, 2)
-        target = round(px + d * ATR_TARGET_MULT * atr, 2)
-        oca = f"JULI_{sym}"
-        try:
-            _place_oca(ib_client, c, expected_action, expected_qty, stop, target, oca)
-            brackets[sym] = (stop, target)
-            tag = "L" if d > 0 else "S"
-            log.info(f"ADOPT {tag} {sym} q={expected_qty} s={stop} t={target}")
-        except Exception as e:
-            log.warning("ADOPT fail %s: %s", sym, e)
+        _reprotect_position(ib_client, sym, pos, streamer, brackets)
+
+
+def _atr_levels(px: float, atr: float, d: int) -> tuple[float, float]:
+    """Compute ATR stop/target for the position direction."""
+    from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
+
+    return (
+        round(px - d * ATR_STOP_MULT * atr, 2),
+        round(px + d * ATR_TARGET_MULT * atr, 2),
+    )
+
+
+def _reprotect_position(
+    ib_client: Any,
+    sym: str,
+    pos: Any,
+    streamer: Any,
+    brackets: dict[str, tuple[float, float]],
+) -> None:
+    """Heal or adopt OCA protection for one tracked position."""
+    d = 1 if pos.position > 0 else -1
+    expected_qty, expected_action = abs(pos.position), "SELL" if d > 0 else "BUY"
+    trades = _get_oca_orders(ib_client, sym)
+    if _validate_protection(trades, expected_qty, expected_action):
+        return
+    if trades:
+        _cancel_oca(ib_client, trades)
+        log.info(f"HEAL {sym}: {len(trades)} broken orders cancelled")
+    px = streamer.get_last_price(sym)
+    atr = streamer.buffer_atr(sym)
+    if not px or atr <= 0.0 or math.isnan(atr):
+        return
+    try:
+        c = ib_client.qualifyContracts(_ib.Stock(sym, "SMART", "USD"))[0]
+    except Exception as exc:
+        log.debug("qualify skip %s: %s", sym, exc)
+        return
+    stop, target = _atr_levels(px, atr, d)
+    try:
+        _place_oca(
+            ib_client,
+            c,
+            BracketOrder(expected_action, expected_qty, stop, target, f"JULI_{sym}"),
+        )
+        brackets[sym] = (stop, target)
+        tag = "L" if d > 0 else "S"
+        log.info(f"ADOPT {tag} {sym} q={expected_qty} s={stop} t={target}")
+    except Exception as e:
+        log.warning("ADOPT fail %s: %s", sym, e)

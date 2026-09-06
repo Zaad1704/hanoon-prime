@@ -19,6 +19,7 @@ from hanoon_prime.cortex import Cortex
 from hanoon_prime.edge import compute_ev, kelly_fraction, score_to_win_prob
 from hanoon_prime.eyes import compute_buy_volume, estimate_bid_ask, load_ohlcv
 from hanoon_prime.immune import EDGE_LOOKBACK
+from hanoon_prime.types import BarSeries
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "market_data"
 
@@ -48,10 +49,7 @@ def test_single_ticker_backtest(ticker):
 
     metrics = backtest_ticker(
         ticker,
-        data["close"],
-        data["high"],
-        data["low"],
-        data["volume"],
+        BarSeries(data["close"], data["high"], data["low"], data["volume"]),
         window=EDGE_LOOKBACK,
     )
 

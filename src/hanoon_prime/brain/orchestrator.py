@@ -7,27 +7,48 @@ Slow path: ConsolidationEngine for background work.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..cortex import Cortex
 from ..hippocampus import Hippocampus
+from ..types import FillInfo
 from .affective import Affective
-from .cognitive.nash import _GATE_WR as NASH_GATE_WR
 from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
 from .cognitive.nash import NashBrain, NashPrediction
+from .config import (
+    _IRONYCLADE,
+    DEFAULT_WEIGHTS,
+    GATE_CLOSED_SIZE_SCALAR,
+    NASH_VETO_HIGH,
+    NASH_VETO_LOW,
+)
 from .consolidation import ConsolidationEngine
 from .deliberation import Deliberator
 from .dynamics import Dynamics
 from .episodic import EpisodicMemory
-from .exits import ExitPolicy, ExitSignal
+from .exit_checks import ExitSignal
+from .exits import ExitPolicy
+from .gate_advisor import GateAdvisor
 from .memory import JuliMemory
 from .neurons.bridge import NeuromorphicBridge
 from .neurons.sleep import SleepReplayEngine, SleepResult
+from .realized_ev import RealizedStats
+from .reflection import Reflector, TradeClose
 from .risk import RiskEngine, SizingResult
 from .shared_state import BrainState
 
 log = logging.getLogger(__name__)
 NEURO_BLEND: float = 0.3
+
+
+@dataclass
+class VerdictLabels:
+    """Context labels bundled into a tick result."""
+
+    regime_label: str
+    risk_label: str
+    halim: float
 
 
 class NeuromorphicBrain:
@@ -38,21 +59,29 @@ class NeuromorphicBrain:
     ) -> None:
         self.state = brain_state or BrainState()
         self.memory = JuliMemory()
+        self._last_alpha: dict[str, dict[str, float]] = {}
+        self._last_score: dict[str, float] = {}
+        self._last_conf: dict[str, float] = {}
+        self._realized: RealizedStats = RealizedStats()
+        self._decision_count: int = 0
         self.episodic = EpisodicMemory()
-        weights = self.memory.get_weights()
+        # The cortex scores ALL 27 weighted indicators; learned weights are
+        # overlaid on the structural defaults (the memory may hold a subset).
+        weights = dict(DEFAULT_WEIGHTS)
+        weights.update(self.memory.get_weights())
         self.cortex = Cortex(weights=weights)
         self.hippocampus = Hippocampus(cortex=self.cortex, safety_enabled=False)
         self.affective = Affective()
         self.deliberator = Deliberator(threshold=self.memory.threshold)
         self.dynamics = Dynamics(base_threshold=self.memory.threshold)
         self.nash = NashBrain()
-        self.risk = RiskEngine()
+        self.risk = RiskEngine(realized=self._realized)
         self.exits = ExitPolicy()
+        self._reflector = Reflector(self.memory, self.episodic)
+        self._advisor = GateAdvisor(realized=self._realized)
         self._neuromorphic: Optional[NeuromorphicBridge] = None
         self._sleep_engine: Optional[SleepReplayEngine] = None
         self._consolidation: Optional[ConsolidationEngine] = None
-        self._last_alpha: dict[str, dict[str, float]] = {}
-        self._decision_count: int = 0
         if enable_neuromorphic:
             self._init_neuromorphic()
 
@@ -132,12 +161,18 @@ class NeuromorphicBrain:
     def _apply_nash_gate(
         self, score: float, direction: int, nash_pred: NashPrediction
     ) -> float:
-        """Apply Nash veto gate if triggered."""
+        """Apply Nash veto gate if triggered.
+
+        gate_authority now fires on the VETO bands (pattern memory with
+        enough samples that historically loses < 45% or wins > 55%), so
+        this directional policy can actually veto: longs are refused when
+        the pattern says it loses; shorts when it says it wins.
+        """
         if not nash_pred.gate_authority:
             return score
-        if direction > 0 and nash_pred.win_prob < NASH_GATE_WR:
+        if direction > 0 and nash_pred.win_prob < NASH_VETO_LOW:
             return 0.0  # Bullish veto
-        if direction < 0 and nash_pred.win_prob > (1 - NASH_GATE_WR):
+        if direction < 0 and nash_pred.win_prob > NASH_VETO_HIGH:
             return 0.0  # Bearish veto
         return score
 
@@ -160,56 +195,114 @@ class NeuromorphicBrain:
         open_positions: int,
     ) -> dict[str, Any]:
         """Core fast evaluation — all decisions via neuromorphic brain."""
-        r, rl, rr, hm, eb, _ = self._get_regime_data()
+        _r, rl, rr, hm, eb, _ = self._get_regime_data()
+        ctx = self._score_pipeline(ticker, alpha, _r, hm, eb)
+        sizing = self._maybe_size(
+            ctx["stabilized"], ctx["confidence"], entry_price, atr, open_positions
+        )
+        # Gate advisor: realized-WR threshold raise + gate-closed size scalar.
+        # Advisory by construction — it tunes the entry bar and sizing, it
+        # never produces or flips a verdict.
+        if sizing.risk_pass:
+            if self._advisor.is_tightening():
+                sizing.shares = max(1, int(sizing.shares * GATE_CLOSED_SIZE_SCALAR))
+        self._store_decision(ticker, alpha, ctx["stabilized"], ctx["confidence"])
+        self.state.update(
+            nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
+        )
+        return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    def _score_pipeline(
+        self,
+        ticker: str,
+        alpha: dict[str, float],
+        regime_mul: float,
+        halim: float,
+        episodic: float,
+    ) -> dict[str, Any]:
+        """Compute the blended stabilized score and decision intermediates."""
         base = self.cortex.evaluate(alpha)
         nash_pred = self.nash.predict(alpha, base.score, base.direction)
         nash_op = self._compute_nash_mod(nash_pred)
         neuro_score = self._compute_neuro_score(alpha, ticker)
         blended = (1 - NEURO_BLEND) * base.score + NEURO_BLEND * neuro_score
-        score = blended * r + hm + eb + nash_op
+        # Gate advisor: learned threshold delta (tighten after losing streaks,
+        # relieve after winning ones). Advisory — folds into the score before
+        # the dynamics stabilize it.
+        advisor_delta = self._advisor.threshold_delta()
+        score = blended * regime_mul + halim + episodic + nash_op - advisor_delta
         direction = 1 if score > 0 else (-1 if score < 0 else 0)
         score = self._apply_nash_gate(score, direction, nash_pred)
         if self._check_eod_penalty() == 0.0:
             score = 0.0
         stabilized, dyn_reason = self.dynamics.process(score, direction)
         final_dir = 1 if stabilized > 0 else (-1 if stabilized < 0 else 0)
-        sizing = self._maybe_size(
-            stabilized, base.confidence, entry_price, atr, open_positions
-        )
-        self._store_decision(ticker, alpha, stabilized)
-        self.state.update(nash_modifier=nash_op, nash_win_prob=nash_pred.win_prob)
         return {
-            "ticker": ticker,
-            "verdict": base.verdict,
-            "score": stabilized,
-            "direction": final_dir,
+            "base": base,
+            "nash_pred": nash_pred,
+            "nash_op": nash_op,
+            "neuro_score": neuro_score,
             "confidence": base.confidence,
-            "sizing": sizing,
-            "regime": rl,
-            "risk": rr,
-            "trace": {
-                "base": base.score,
-                "neuro": {"score": neuro_score},
-                "nash": nash_op,
-                "halim": hm,
-            },
+            "raw_score": score,
+            "stabilized": stabilized,
+            "final_dir": final_dir,
             "dyn_reason": dyn_reason,
             "nash_win_prob": nash_pred.win_prob,
+            "advisor_delta": advisor_delta,
+        }
+
+    def _build_tick_result(
+        self,
+        ticker: str,
+        labels: VerdictLabels,
+        ctx: dict[str, Any],
+        sizing: SizingResult,
+    ) -> dict[str, Any]:
+        """Assemble the verdict dict returned by tick()."""
+        return {
+            "ticker": ticker,
+            "verdict": ctx["base"].verdict,
+            "score": ctx["stabilized"],
+            "direction": ctx["final_dir"],
+            "confidence": ctx["confidence"],
+            "sizing": sizing,
+            "regime": labels.regime_label,
+            "risk": labels.risk_label,
+            "trace": {
+                "base": ctx["base"].score,
+                "neuro": {"score": ctx["neuro_score"]},
+                "nash": ctx["nash_op"],
+                "halim": labels.halim,
+            },
+            "dyn_reason": ctx["dyn_reason"],
+            "nash_win_prob": ctx["nash_win_prob"],
         }
 
     def _store_decision(
-        self, ticker: str, alpha: dict[str, float], score: float
+        self, ticker: str, alpha: dict[str, float], score: float, confidence: float
     ) -> None:
         """Store decision data for learning + episodic memory."""
         self._last_alpha[ticker] = alpha
+        self._last_score[ticker] = score
+        self._last_conf[ticker] = confidence
         self.memory.record_score(ticker, score)
         self.state.set_latest_alpha(alpha)
         self._decision_count += 1
 
     def on_trade_close(
-        self, ticker: str, won: bool, pnl_pct: float, direction: int = 1
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int = 1,
+        source: str = "real_trade",
     ) -> None:
-        """All learning routes through neuromorphic brain."""
+        """All learning routes through neuromorphic brain — evolved per trade.
+
+        Single-writer guarantee: this method owns every learning write.
+        The consolidation buffer path (System 2) is telemetry/consolidation
+        only — it must NOT also write memory.
+        """
         self.dynamics.adapt_threshold(self.memory.pred_error)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
@@ -218,6 +311,45 @@ class NeuromorphicBrain:
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
         if self._neuromorphic is not None:
             self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
+        # IRONYCLADE: the realized-EV feedback loop only learns from real
+        # executions (real_trade/ib_fill/ib_paper). Paper & synthetic fills
+        # are excluded so the live gate isn't trained on backtest noise.
+        if source in _IRONYCLADE:
+            self._learn_from_real(ticker, won, pnl_pct, direction)
+
+    def _learn_from_real(
+        self, ticker: str, won: bool, pnl_pct: float, direction: int
+    ) -> None:
+        """The closed learning loop — runs once per REAL trade close.
+
+        (a) Weight gradient over ALL 27 indicators (loss-aversion 1.2x via
+        Reflector — the single writer for weights/episodes/calibration).
+        (b) Hot-swap learned weights into the cortex so the very next tick
+        scores with the updated brain.
+        (c) Realized band/RR/conf-bins + calibration (the realized-EV gate).
+        (d) Learned exits + gate advisor retune from the new sample.
+        """
+        conf = self._last_conf.get(ticker, 0.5)
+        score = self._last_score.get(ticker, 0.0)
+        self._reflector.on_trade_close(
+            TradeClose(
+                ticker=ticker,
+                won=won,
+                pnl_pct=pnl_pct,
+                direction=direction,
+                alpha=self._last_alpha.get(ticker, {}),
+                predicted_score=conf,
+            )
+        )
+        weights = dict(DEFAULT_WEIGHTS)
+        weights.update(self.memory.get_weights())
+        self.cortex.set_weights(weights)
+        self.memory.record_outcome(won)
+        self.memory.update_pred_error(conf, 1.0 if won else 0.0)
+        self._realized.add_outcome(score, won, pnl_pct, direction)
+        self._realized.add_confidence_outcome(conf, won)
+        self.exits.adapt_from_realized(self._realized)
+        self._advisor.record_outcome(won)
 
     def on_ib_fill(self, fill: dict[str, Any]) -> None:
         """Route IB fill data to consolidation engine."""
@@ -227,9 +359,11 @@ class NeuromorphicBrain:
                 fill.get("won", False),
                 fill.get("pnl_pct", 0.0),
                 fill.get("direction", 1),
-                fill.get("qty", 1.0),
-                fill.get("price", 0.0),
-                fill.get("fees", 0.0),
+                FillInfo(
+                    qty=fill.get("qty", 1.0),
+                    avg_price=fill.get("price", 0.0),
+                    fees=fill.get("fees", 0.0),
+                ),
             )
 
     def sleep_replay(self, is_market_open: bool = False) -> SleepResult:
@@ -271,12 +405,15 @@ class NeuromorphicBrain:
         """Full brain snapshot for telemetry."""
         result = {
             "memory": self.memory.snapshot(),
+            "realized": self._realized.snapshot(),
             "episodic_size": self.episodic.size,
             "threshold": self.dynamics.threshold,
             "brain_state": self.state.snapshot(),
             "decision_count": self._decision_count,
             "neuromorphic": self._neuromorphic.snapshot() if self._neuromorphic else {},
             "nash": self.nash.get_telemetry(),
+            "advisor": self._advisor.snapshot(),
+            "exits_adaptive": self.exits.telemetry(),
         }
         if self._sleep_engine is not None:
             result["sleep_engine"] = {

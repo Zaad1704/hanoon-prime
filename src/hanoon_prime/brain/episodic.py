@@ -8,7 +8,6 @@ The modifier is BOUNDED (±EPISODIC_MOD_BOUND) — a dampener, not a gate.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np

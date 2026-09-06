@@ -8,8 +8,8 @@ No single pillar can dominate. The thinker is stateless across ticks.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
+from ..types import BarSeries
 from .cognitive.emotion import EmotionState
 from .cognitive.episodic import EpisodicMemory
 from .cognitive.metacognition import Metacognition
@@ -30,6 +30,15 @@ class ThinkingResult:
     trace: dict[str, float] = field(default_factory=dict)
 
 
+@dataclass
+class Signal:
+    """Context bundled with a think call: regime, price series, threshold."""
+
+    regime: str = "unknown"
+    bars: BarSeries | None = None
+    threshold: float = 0.58
+
+
 class Thinker:
     """Bidirectional deliberation engine — fuses cognitive pillars."""
 
@@ -46,16 +55,11 @@ class Thinker:
         alpha: dict[str, float],
         score: float,
         direction: int,
-        regime: str = "unknown",
-        close: Any = None,
-        high: Any = None,
-        low: Any = None,
-        threshold: float = 0.58,
+        signal: Signal | None = None,
     ) -> ThinkingResult:
         """Run deliberation across all pillars."""
-        mods = self._compute_mods(
-            alpha, score, direction, regime, close, high, low, threshold
-        )
+        sig = signal or Signal()
+        mods = self._compute_mods(alpha, score, direction, sig)
         total = max(-TOTAL_MOD_BOUND, min(TOTAL_MOD_BOUND, sum(mods.values())))
         return ThinkingResult(
             modifier=round(total, 6),
@@ -69,21 +73,18 @@ class Thinker:
         alpha: dict[str, float],
         score: float,
         direction: int,
-        regime: str,
-        close: Any,
-        high: Any,
-        low: Any,
-        threshold: float,
+        signal: Signal,
     ) -> dict[str, float]:
         m: dict[str, float] = {}
-        m["semantic"] = self.semantic.evaluate(alpha, regime)
+        m["semantic"] = self.semantic.evaluate(alpha, signal.regime)
         epi = self.episodic.recall(alpha)
         m["episodic"] = epi if epi is not None else 0.0
+        bars = signal.bars
         m["planning"] = (
-            self.planning.simulate(close, high, low, direction)
-            if close is not None and direction != 0
+            self.planning.simulate(bars.close, bars.high, bars.low, direction)
+            if bars is not None and direction != 0
             else 0.0
         )
-        m["metacognition"] = self.metacognition.evaluate(score, threshold)
+        m["metacognition"] = self.metacognition.evaluate(score, signal.threshold)
         m["nash"] = self.nash.evaluate(alpha, direction)
         return m

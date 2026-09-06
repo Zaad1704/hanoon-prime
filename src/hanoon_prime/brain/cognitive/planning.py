@@ -7,18 +7,31 @@ target is reachable before the stop is hit. Modifier bounded ±0.03.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
+    pass
 
 MOD_BOUND: float = 0.03
 N_SIMS: int = 100
 HORIZON: int = 20
 TARGET_MULT: float = 6.0
 STOP_MULT: float = 2.0
+
+
+@dataclass
+class SimParams:
+    """Bundled parameters for a forward-simulation run."""
+
+    mu: float
+    sigma: float
+    current: float
+    stop_dist: float
+    target_dist: float
+    direction: int
 
 
 class PlanEngine:
@@ -31,7 +44,8 @@ class PlanEngine:
             return 0.0
         stop_dist = STOP_MULT * atr
         target_dist = TARGET_MULT * atr
-        wins = self._run_sims(mu, sigma, current, stop_dist, target_dist, direction)
+        params = SimParams(mu, sigma, current, stop_dist, target_dist, direction)
+        wins = self._run_sims(params)
         bias = (wins / N_SIMS - 0.5) * 2.0
         return max(-MOD_BOUND, min(MOD_BOUND, bias * 0.5))
 
@@ -48,23 +62,17 @@ class PlanEngine:
         return float(np.mean(returns)), float(np.std(returns)), float(c[-1]), atr
 
     @staticmethod
-    def _run_sims(
-        mu: float,
-        sigma: float,
-        current: float,
-        stop_dist: float,
-        target_dist: float,
-        direction: int,
-    ) -> int:
+    def _run_sims(params: SimParams) -> int:
+        mu, sigma, current = params.mu, params.sigma, params.current
         wins = 0
         for _ in range(N_SIMS):
             price = current
             for r in np.asarray(np.random.normal(mu, sigma, HORIZON)):
                 price *= np.exp(r)
-                move = (price - current) * direction
-                if move >= target_dist:
+                move = (price - current) * params.direction
+                if move >= params.target_dist:
                     wins += 1
                     break
-                if move <= -stop_dist:
+                if move <= -params.stop_dist:
                     break
         return wins

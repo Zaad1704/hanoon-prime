@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from halim.engine import checkpoint_path, complete_reasoning, collect_status  # noqa: E402
+from halim.engine import checkpoint_path, complete_reasoning, collect_status
 
 # Production-style prompt (matches SFT gold: ENTER | confidence=0.xx | reason)
 _TOKEN_PREFIX = (

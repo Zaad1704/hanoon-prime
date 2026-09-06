@@ -12,14 +12,14 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
+from ..types import BarSeries, FillInfo
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .shared_state import BrainState
-from .thinker import Thinker
+from .thinker import Signal, Thinker
 
 log = logging.getLogger(__name__)
 
@@ -127,8 +127,9 @@ class SlowCortex:
         prices = self.state.get_latest_prices()
         regime = self.state.get("regime_label", "unknown")
         threshold = self.state.get("threshold", 0.58)
+        bars = BarSeries(prices, prices, prices, prices)
         result = self.thinker.think(
-            alpha, 0.0, 1, regime, prices, prices, prices, threshold
+            alpha, 0.0, 1, Signal(regime=regime, bars=bars, threshold=threshold)
         )
         self.state.update(
             thinker_modifier=result.modifier,
@@ -170,9 +171,7 @@ class SlowCortex:
         won: bool,
         pnl_pct: float,
         direction: int = 1,
-        qty: float = 1.0,
-        avg_price: float = 0.0,
-        fees: float = 0.0,
+        fill: FillInfo | None = None,
     ) -> None:
         """Route trade close to thinker + buffer."""
         from ..reflection.buffer import BUY, SELL
@@ -181,15 +180,15 @@ class SlowCortex:
         self.thinker.episodic.add(alpha, won, pnl_pct)
         self.thinker.emotion.update(won, pnl_pct)
         self.state.set_refractory(2.0)
-        side = BUY if direction > 0 else SELL
+        fill = fill or FillInfo()
         self.buffer.on_fill(
             Fill(
                 ticker=ticker,
-                side=side,
-                qty=qty,
-                price=avg_price,
+                side=BUY if direction > 0 else SELL,
+                qty=fill.qty,
+                price=fill.avg_price,
                 time=time.time(),
-                commission=fees,
+                commission=fill.fees,
             )
         )
 

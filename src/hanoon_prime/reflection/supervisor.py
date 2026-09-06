@@ -62,15 +62,14 @@ class LearningSupervisor:
         log.info("LearningSupervisor stopped")
 
     def on_trade_close(self, trade: Trade) -> None:
-        """Streaming update after each trade closes."""
-        if self._memory is None:
-            return
-        self._memory.record_outcome(won=trade.win)
-        # Weight micro-adjustment: boost winners, decay losers
-        if trade.win:
-            self._memory.update_pred_error(trade.avg_entry, trade.avg_exit)
-        else:
-            self._memory.update_pred_error(trade.avg_entry, trade.avg_exit)
+        """Streaming notification only — the BRAIN is the single writer.
+
+        brain/orchestrator.on_trade_close owns all learning writes. This
+        supervisor previously double-wrote outcomes and corrupted the
+        pred-error EMA by feeding entry/exit PRICES into
+        update_pred_error. It now only observes for periodic reviews.
+        """
+        log.info("Supervisor observed close: %s win=%s", trade.ticker, trade.win)
 
     def force_review(self) -> dict[str, Any]:
         """Run an immediate review (for testing or manual trigger)."""
@@ -164,14 +163,29 @@ class LearningSupervisor:
         log.info("Review applied: %d action items", len(items))
 
     def _apply_one(self, item: str) -> None:
-        """Apply a single action item."""
+        """Apply a single action item as a structured lesson.
+
+        The old code called ``memory.micro_adjust_weight(ticker, ...)`` —
+        a method that never existed on JuliMemory (silently swallowed),
+        keyed by TICKER not indicator. The correct lever is a bounded
+        lesson the brain can read on its next reflection pass.
+        """
         if "Decay weight for" not in item:
             return
         try:
-            indicator = item.split("Decay weight for ")[1].split(" ")[0]
-            self._memory.micro_adjust_weight(indicator, -0.05)
+            ticker = item.split("Decay weight for ")[1].split(" ")[0]
+            if self._memory is not None:
+                self._memory.add_lesson(
+                    {
+                        "ticker": ticker,
+                        "won": False,
+                        "pnl_pct": 0.0,
+                        "regime": "unknown",
+                        "pattern": "supervisor_review_decay",
+                    }
+                )
         except (IndexError, AttributeError) as exc:
-            log.debug("Skip decay: %s", exc)
+            log.debug("Skip review finding: %s", exc)
 
     def snapshot(self) -> dict[str, Any]:
         """Telemetry snapshot."""

@@ -7,8 +7,6 @@ Modifier bounded by SEMANTIC_MOD_BOUND (±0.03).
 
 from __future__ import annotations
 
-from typing import Any
-
 # Regime → indicators to suppress (set to 0)
 _REGIME_SUPPRESS: dict[str, list[str]] = {
     "overnight": [

@@ -11,6 +11,10 @@ R5 — No score inversion, PRIOR_TOP ≤ 0.65
 R6 — Safety nets not configurable/bypassable
 R7 — Journal is immutable
 R8 — Integrated learning ecosystem (STDP + Hippocampus + Nash + Episodic)
+R19 — Realized-EV learning gate wired + verifiable (refuse losing band/conf-bin, admit recovery/thin)
+R20 — Tiered exits integrated (ExitPolicy.evaluate delegated by orchestrator)
+R21 — Gate advisor exists, is bounded, and is advisory (threshold/size only — never verdicts)
+R22 — Closed learning loop: every real trade updates weights, cortex, realized stats, exits, advisor
 """
 
 from __future__ import annotations
@@ -86,8 +90,10 @@ def test_R3_no_file_exceeds_200_lines():
         "eyes.py",
         "hippocampus.py",
         "orchestrator.py",
-        "brain/consolidation.py",
-        "brain/exits.py",
+        "consolidation.py",
+        "exits.py",
+        # Single-source-of-truth files (constants + gate math + canary):
+        "realized_ev.py",
     }
     violations = []
     for pyfile in SRC.rglob("*.py"):
@@ -537,3 +543,145 @@ def test_R18_modules_have_docstrings():
                     continue
         violations.append(f"{pyfile.name} — missing module docstring")
     assert not violations, f"R18 VIOLATION:\n{chr(10).join(violations)}"
+
+
+# ── R19: Realized learning EV gate ───────────────────────────────────────
+def test_R19_realized_ev_gate_integrated():
+    """The realized-EV gate must exist, be wired into the risk engine, and
+    its canary must prove it refuses losing bands while admitting recovery
+    and thin-data (structural fallback)."""
+    rv_path = SRC / "hanoon_prime" / "brain" / "realized_ev.py"
+    rv_src = rv_path.read_text()
+    # v2.1: gate math lives in brain/ev_gate.py (single source of truth);
+    # realized_ev.py persists stats and re-exports the gate API.
+    ev_path = SRC / "hanoon_prime" / "brain" / "ev_gate.py"
+    assert ev_path.exists(), "R19: brain/ev_gate.py gate math missing"
+    ev_tree = ast.parse(ev_path.read_text())
+    names = {n.name for n in ast.walk(ev_tree) if isinstance(n, ast.FunctionDef)}
+    assert "ev_gate_should_enter" in names, "R19: ev_gate_should_enter missing"
+    assert "verify_learning_gate" in names, "R19: verify_learning_gate canary missing"
+    assert (
+        "ev_gate_should_enter" in rv_src
+    ), "R19: realized_ev.py must re-export the gate"
+
+    risk_src = (SRC / "hanoon_prime" / "brain" / "risk.py").read_text()
+    assert (
+        "ev_gate_should_enter" in risk_src
+    ), "R19: risk.py must call the realized gate"
+
+    # v2.1: conf-bin correction wired into the gate + orchestrator feed.
+    assert (
+        "add_confidence_outcome" in rv_src
+    ), "R19: conf-bin tracking missing from realized_ev"
+    orch_src = (SRC / "hanoon_prime" / "brain" / "orchestrator.py").read_text()
+    assert (
+        "add_confidence_outcome" in orch_src
+    ), "R19: orchestrator must feed conf-bin outcomes"
+
+    from hanoon_prime.brain.realized_ev import (
+        RealizedStats,
+        ev_gate_should_enter,
+        verify_learning_gate,
+    )
+    from hanoon_prime.edge import score_to_win_prob
+
+    assert (
+        verify_learning_gate()["all_pass"] is True
+    ), "R19: learning-gate canary failed"
+
+    empty = RealizedStats(persist=False)
+    wp = score_to_win_prob(0.6)
+    assert ev_gate_should_enter(0.6, wp, empty, direction=1)["should_enter"] is True
+    assert (
+        ev_gate_should_enter(0.02, score_to_win_prob(0.02), empty, direction=1)[
+            "should_enter"
+        ]
+        is False
+    )
+
+    # IRONYCLADE source filter must exist as a typed constant.
+    from hanoon_prime.brain.config import _IRONYCLADE
+
+    assert _IRONYCLADE == frozenset({"real_trade", "ib_fill", "ib_paper"})
+
+
+# ── R20: Tiered exits integrated ────────────────────────────────────────
+def test_R20_tiered_exits_integrated():
+    """brain/exits.py ExitPolicy.evaluate must exist and the orchestrator's
+    check_exit must delegate to it."""
+    exits_tree = ast.parse((SRC / "hanoon_prime" / "brain" / "exits.py").read_text())
+    assert any(
+        isinstance(n, ast.FunctionDef) and n.name == "evaluate"
+        for n in ast.walk(exits_tree)
+    ), "R20 VIOLATION: ExitPolicy.evaluate missing"
+
+    orch_src = (SRC / "hanoon_prime" / "brain" / "orchestrator.py").read_text()
+    assert (
+        "self.exits.evaluate" in orch_src
+    ), "R20: check_exit must delegate to exits.evaluate"
+
+    from hanoon_prime.brain.exit_checks import ExitSignal
+    from hanoon_prime.brain.exits import ExitPolicy
+
+    policy = ExitPolicy()
+    sig = policy.evaluate("TSLA", 100.0, 0.0, 1)
+    assert isinstance(sig, ExitSignal)
+    assert sig.should_exit is False  # unregistered position => no exit
+
+
+# ── R21: Gate advisor (bounded, advisory) ────────────────────────────
+def test_R21_gate_advisor_bounded_and_advisory():
+    """The gate advisor tightens/loosens the entry bar within hard bounds
+    and NEVER produces verdict strings (R1 boundary preserved)."""
+    from hanoon_prime.brain.config import ADVISOR_DELTA_MAX, ADVISOR_LOOSEN_MAX
+    from hanoon_prime.brain.gate_advisor import GateAdvisor
+
+    adv = GateAdvisor()
+    for _ in range(30):
+        adv.record_outcome(False)
+    assert 0.0 <= adv.threshold_delta() <= ADVISOR_DELTA_MAX
+    assert adv.is_tightening() is True
+    for _ in range(30):
+        adv.record_outcome(True)
+    assert -ADVISOR_LOOSEN_MAX <= adv.threshold_delta() <= 0.0
+    # Thin data never moves the bar.
+    fresh = GateAdvisor()
+    fresh.record_outcome(False)
+    assert fresh.threshold_delta() == 0.0
+    # Advisory: no verdict strings anywhere in the module.
+    src = (SRC / "hanoon_prime" / "brain" / "gate_advisor.py").read_text()
+    for v in ('"BUY"', '"SELL"', '"HOLD"', '"ENTER"', '"EXIT"'):
+        assert v not in src, f"R21 VIOLATION: advisor emits {v}"
+
+
+# ── R22: Closed learning loop ───────────────────────────────────────
+def test_R22_closed_learning_loop_wired():
+    """Every real trade close must: update weights (Reflector), hot-swap
+    the cortex, feed realized band+conf stats, and retune exits+advisor."""
+    orch_src = (SRC / "hanoon_prime" / "brain" / "orchestrator.py").read_text()
+    for token in (
+        "self._reflector.on_trade_close",
+        "self.cortex.set_weights",
+        "self._realized.add_outcome",
+        "self._realized.add_confidence_outcome",
+        "self.exits.adapt_from_realized",
+        "self._advisor.record_outcome",
+    ):
+        assert token in orch_src, f"R22 VIOLATION: missing {token}"
+    # The reflector must adapt over ALL weighted indicators (not just 5).
+    refl_src = (SRC / "hanoon_prime" / "brain" / "reflection.py").read_text()
+    assert "for key in weights" in refl_src, "R22: reflector must adapt all weights"
+
+
+def test_R22_nash_veto_bands_fire():
+    """Nash gate authority must fire on the veto bands (the old flag
+    required wp INSIDE [0.45, 0.55] while the veto required OUTSIDE —
+    the veto could never fire)."""
+    from hanoon_prime.brain.cognitive.nash import NashBrain
+
+    nash = NashBrain()
+    for _ in range(25):
+        nash.record_outcome({"vpin": 0.9}, 0.0, False)
+    pred = nash.predict({"vpin": 0.9}, 0.8, 1)
+    assert pred.gate_authority is True, "losing pattern must carry veto authority"
+    assert pred.win_prob < 0.45

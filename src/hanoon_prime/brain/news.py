@@ -13,7 +13,6 @@ import logging
 import re
 import threading
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
@@ -64,7 +63,7 @@ class NewsLearner:
         self._load()
 
     def record_trade(
-        self, ticker: str, sentiment: float, horizon: str, won: bool, pnl: float
+        self, ticker: str, sentiment: float, horizon: str, won: bool, _pnl: float
     ) -> None:
         """Record trade outcome with sentiment context."""
         bucket = self._sentiment_bucket(sentiment)

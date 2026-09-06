@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any
 
 from ..brain.shared_state import BrainState
 from .exit_scoring import ExitScorer

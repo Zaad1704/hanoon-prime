@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -47,7 +46,7 @@ class PrefrontalCortex:
         self,
         ticker: str,
         prices: list[float],
-        volumes: list[float],
+        _volumes: list[float],
         atr: float,
     ) -> PFCVerdict:
         """Full PFC evaluation: regime + trend + multi-timeframe."""
@@ -69,7 +68,7 @@ class PrefrontalCortex:
             multi_tf_score=multi_tf,
         )
 
-    def _detect_regime(self, prices: np.ndarray, atr: float) -> str:
+    def _detect_regime(self, prices: np.ndarray, _atr: float) -> str:
         """Detect current market regime from price action."""
         c = [float(x) for x in prices]
         rets = [(c[i] - c[i - 1]) / max(c[i - 1], 0.01) for i in range(1, len(c))]

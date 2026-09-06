@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from ._protect import protect_position, sweep_zombies
 from ._telegram import trade_closed, trade_opened
+from .brain.risk import SizingResult
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_bracket import _brackets_from_trades
 from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
+from .types import ExitLevels
 
 log = logging.getLogger(__name__)
 
@@ -41,21 +43,38 @@ class IBExecutor:
         self.last_thoughts: dict[str, Any] = {}
 
     def place_bracket(
-        self, ticker: str, thought: Any, price: float, streamer: Any
+        self,
+        ticker: str,
+        thought: Any,
+        price: float,
+        streamer: Any,
+        sizing: Optional[SizingResult] = None,
     ) -> None:
-        """Place atomic parent + TP + SL via IB's bracketOrder()."""
+        """Place atomic parent + TP + SL via IB's bracketOrder().
+
+        When a ``SizingResult`` from the brain is supplied with
+        ``risk_pass=True`` its penny-cap'd stop/target/shares are used
+        directly (live sizing respects the realized-EV gate). Otherwise the
+        legacy hippocampus sizing is used as a fallback.
+        """
         atr = streamer.buffer_atr(ticker)
         if atr <= 0.0 or np.isnan(atr):
             log.warning("ATR invalid for %s", ticker)
             return
-        shares = self.brain.size_position(score_to_win_prob(thought.score), price, atr)
+        d = thought.direction
+        if sizing is not None and getattr(sizing, "risk_pass", False):
+            shares = int(sizing.shares)
+            stop = float(sizing.stop_price)
+            target = float(sizing.target_price)
+        else:
+            raw = self.brain.size_position(
+                score_to_win_prob(thought.score), price, atr
+            )
+            shares = max(1, int(raw))
+            stop = round(price - d * ATR_STOP_MULT * atr, 2)
+            target = round(price + d * ATR_TARGET_MULT * atr, 2)
         if shares <= 0:
             return
-        d = thought.direction
-        stop, target = round(price - d * ATR_STOP_MULT * atr, 2), round(
-            price + d * ATR_TARGET_MULT * atr, 2
-        )
-        shares = max(1, int(shares))
         action = "BUY" if d > 0 else "SELL"
         contract = streamer.contracts[ticker]
         for order in self.ib.bracketOrder(
@@ -105,7 +124,7 @@ class IBExecutor:
         except Exception:
             return False
 
-    def _record_exit(self, ticker: str, streamer: Any) -> None:
+    def _record_exit(self, ticker: str, _streamer: Any) -> None:
         """Record a closed position to journal and brain."""
         self._brackets.pop(ticker, None)
         pos = self.brain._open_positions.pop(ticker, None)
@@ -172,8 +191,7 @@ class IBExecutor:
                     "BUY" if pos.direction > 0 else "SELL",
                     int(abs(pos.shares)),
                     pos.entry_price,
-                    stop,
-                    target,
+                    ExitLevels(stop=stop, target=target),
                 )
             else:
                 return
@@ -241,7 +259,7 @@ class IBExecutor:
         except Exception as e:
             log.warning("close_position failed %s: %s", ticker, e)
 
-    def close_all_positions(self, streamer: Any) -> int:
+    def close_all_positions(self, _streamer: Any) -> int:
         """Flatten every open position via limit orders (post-market safe)."""
         count = 0
         try:

@@ -118,7 +118,7 @@ class CrossAssetEngine:
                     return lag_corr * 0.1  # bounded
         return 0.0
 
-    def _compute_divergence(self, ticker: str, ref_prices: dict[str, float]) -> float:
+    def _compute_divergence(self, _ticker: str, ref_prices: dict[str, float]) -> float:
         """Price divergence from reference average."""
         if not ref_prices:
             return 0.0
@@ -128,12 +128,12 @@ class CrossAssetEngine:
         return 0.0  # simplified — needs ticker price history
 
     def _compute_momentum_rotation(
-        self, ticker: str, ref_prices: dict[str, float]
+        self, _ticker: str, _ref_prices: dict[str, float]
     ) -> float:
         """Momentum rotation signal."""
         return 0.0  # simplified — needs multi-period returns
 
-    def _compute_modifier(self, corr: float, lead_lag: float, div: float) -> float:
+    def _compute_modifier(self, corr: float, lead_lag: float, _div: float) -> float:
         """Bounded modifier from cross-asset signals."""
         mod = 0.0
         if abs(corr) > 0.7:

@@ -19,6 +19,15 @@ _DEBATE_TTL: float = 30.0  # seconds
 
 
 @dataclass
+class VerdictContext:
+    """Market context carried into a debate verdict."""
+
+    regime: str = "normal"
+    ev: float = 0.0
+    rr: float = 3.0
+
+
+@dataclass
 class DebateVerdict:
     approved: bool
     confidence: float
@@ -39,9 +48,7 @@ class DebateLayer:
         ticker: str,
         alpha: dict[str, float],
         score: float,
-        regime: str = "normal",
-        ev: float = 0.0,
-        r_r: float = 3.0,
+        ctx: VerdictContext,
     ) -> DebateVerdict:
         """Run BULL/BEAR/ARBITER debate."""
         import time
@@ -51,9 +58,9 @@ class DebateLayer:
         if cached and now - cached[0] < _DEBATE_TTL:
             return cached[1]
 
-        bull = self._bull_case(alpha, score, ev, r_r)
-        bear = self._bear_case(alpha, score, regime)
-        verdict = self._arbitrate(bull, bear, score, regime)
+        bull = self._bull_case(alpha, score, ctx.ev, ctx.rr)
+        bear = self._bear_case(alpha, score, ctx.regime)
+        verdict = self._arbitrate(bull, bear, score, ctx.regime)
         self._cache[ticker] = (now, verdict)
         return verdict
 

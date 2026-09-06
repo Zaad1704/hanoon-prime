@@ -28,6 +28,7 @@ from hanoon_prime.calibrate import (
 )
 from hanoon_prime.eyes import load_ohlcv
 from hanoon_prime.immune import EDGE_LOOKBACK
+from hanoon_prime.types import BarSeries
 from hanoon_prime.validator import (
     calibrate_weights,
     evaluate_indicator_edge,
@@ -67,10 +68,12 @@ def test_backtest_ticker_with_output(aapl_data, tmp_path):
     _skip_if_no_data()
     metrics = backtest_ticker(
         "AAPL",
-        aapl_data["close"],
-        aapl_data["high"],
-        aapl_data["low"],
-        aapl_data["volume"],
+        BarSeries(
+            aapl_data["close"],
+            aapl_data["high"],
+            aapl_data["low"],
+            aapl_data["volume"],
+        ),
         window=EDGE_LOOKBACK,
         output_dir=tmp_path,
     )
@@ -85,10 +88,12 @@ def test_backtest_ticker_no_output(aapl_data):
     _skip_if_no_data()
     metrics = backtest_ticker(
         "AAPL",
-        aapl_data["close"],
-        aapl_data["high"],
-        aapl_data["low"],
-        aapl_data["volume"],
+        BarSeries(
+            aapl_data["close"],
+            aapl_data["high"],
+            aapl_data["low"],
+            aapl_data["volume"],
+        ),
         window=EDGE_LOOKBACK,
     )
     assert "ev_per_trade" in metrics
@@ -148,7 +153,7 @@ def test_print_results_empty():
     assert code == 0
 
 
-def test_run_backtest_with_errors(tmp_path):
+def test_run_backtest_with_errors():
     results, errors = run_backtest(
         ["NONEXIST"],
         DATA_DIR,
@@ -227,7 +232,7 @@ def test_all_tickers_excludes_corrupt(tmp_path):
     assert "BAD" not in result
 
 
-def test_check_profitability(aapl_data):
+def test_check_profitability():
     _skip_if_no_data()
     profitable, total = _check_profitability(["AAPL"], DATA_DIR)
     assert total >= 1

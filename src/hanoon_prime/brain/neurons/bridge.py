@@ -9,7 +9,7 @@ R1 COMPLIANT: Outputs scores only, never verdict strings.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .attractor import AttractorMemory
 from .bridge_scoring import InputEncoder, ScoreComputer
@@ -86,9 +86,9 @@ class NeuromorphicBridge:
             "trace": {"spikes": len(spikes), "evidence": dict(evidence)},
         }
 
-    def learn_from_outcome(self, ticker: str, won: bool, pnl: float) -> None:
-        """Apply STDP learning from trade outcome."""
-        reward = 1.0 if won else -1.0
+    def learn_from_outcome(self, _ticker: str, won: bool, pnl: float) -> None:
+        """Apply STDP learning from trade outcome, scaled by realized P&L."""
+        reward = (1.0 if won else -1.0) * (1.0 + min(1.0, abs(pnl)))
         self._stdp.apply_reward(reward)
         self._stdp.update_traces(dt=0.01)
 

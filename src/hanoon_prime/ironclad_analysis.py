@@ -6,7 +6,7 @@ HALIM-integrated post-trade analysis, health assessments, and self-correction.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class HalimAnalyzer:
             log.debug("HALIM trade analysis failed: %s", e)
             return {}
 
-    def get_postmortem(self, trades: list[Any], recent_n: int = 10) -> dict[str, Any]:
+    def get_postmortem(self, trades: list[Any], _recent_n: int = 10) -> dict[str, Any]:
         """Generate post-mortem analysis of recent trades."""
         wins = sum(1 for t in trades if getattr(t, "won", False))
         losses = len(trades) - wins

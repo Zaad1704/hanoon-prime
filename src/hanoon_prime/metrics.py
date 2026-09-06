@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from .types import TradeStats
+
 
 def _equity_stats(
     equity_curve: list[float],
@@ -51,8 +53,7 @@ def calculate_metrics(
     ev = wr * realized_rr - (1 - wr) if al > 0 else wr * 1.0
     total_return = sum(t.pnl_pct for t in trades)
     max_dd, sr = _equity_stats(equity_curve)
-    return _build_metrics(
-        ticker,
+    stats = TradeStats(
         total_trades,
         len(wins),
         len(losses),
@@ -65,38 +66,26 @@ def calculate_metrics(
         max_dd,
         sr,
     )
+    return _build_metrics(ticker, stats)
 
 
-def _build_metrics(
-    ticker: str,
-    n: int,
-    wins: int,
-    losses: int,
-    wr: float,
-    ev: float,
-    ret: float,
-    aw: float,
-    al: float,
-    rr: float,
-    dd: float,
-    sr: float,
-) -> dict[str, Any]:
-    """Assemble the metrics dict (helper to stay under 40 lines)."""
+def _build_metrics(ticker: str, stats: TradeStats) -> dict[str, Any]:
+    """Assemble the metrics dict from a TradeStats bundle."""
     return {
         "ticker": ticker,
-        "total_trades": n,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": round(wr, 4),
-        "expectancy": round(ev, 4),
-        "ev_per_trade": round(ev, 4),
-        "total_return_pct": round(ret * 100, 2),
-        "avg_win_pct": round(aw * 100, 4),
-        "avg_loss_pct": round(al * 100, 4),
-        "realized_rr": round(rr, 4),
-        "max_drawdown": round(dd, 4),
-        "sharpe_ratio": round(sr, 4),
-        "status": "PROFITABLE" if ev > 0 else "UNPROFITABLE",
+        "total_trades": stats.n,
+        "wins": stats.wins,
+        "losses": stats.losses,
+        "win_rate": round(stats.wr, 4),
+        "expectancy": round(stats.ev, 4),
+        "ev_per_trade": round(stats.ev, 4),
+        "total_return_pct": round(stats.ret * 100, 2),
+        "avg_win_pct": round(stats.aw * 100, 4),
+        "avg_loss_pct": round(stats.al * 100, 4),
+        "realized_rr": round(stats.rr, 4),
+        "max_drawdown": round(stats.dd, 4),
+        "sharpe_ratio": round(stats.sr, 4),
+        "status": "PROFITABLE" if stats.ev > 0 else "UNPROFITABLE",
     }
 
 

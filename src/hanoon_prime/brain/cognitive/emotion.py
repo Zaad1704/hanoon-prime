@@ -32,7 +32,6 @@ class EmotionState:
         """Bounded confidence nudge from affect [-CONF_BOUND, +CONF_BOUND]."""
         if len(self._outcomes) < MIN_SAMPLES:
             return 0.0
-        wr = sum(self._outcomes) / len(self._outcomes)
         recent_wr = sum(list(self._outcomes)[-5:]) / min(5, len(self._outcomes))
         mood = recent_wr - 0.5
         return max(-CONF_BOUND, min(CONF_BOUND, mood * 0.1))

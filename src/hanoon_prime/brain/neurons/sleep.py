@@ -8,15 +8,11 @@ from __future__ import annotations
 
 import random
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
 from .attractor import Attractor, AttractorMemory
-from .lif import LIFNeuron
 from .network import LIFNetwork
-from .spike import Spike
 from .stdp import STDPLearner
 
 
@@ -91,7 +87,6 @@ class SleepReplayEngine:
     def run_cycle(self, duration_sec: float = 60.0) -> SleepResult:
         """Run one sleep consolidation cycle."""
         start = time.time()
-        start_ms = start * 1000
 
         patterns = self.select_patterns()
         if not patterns:
@@ -100,8 +95,11 @@ class SleepReplayEngine:
         spikes_generated = 0
         weights_updated = 0
         total_change = 0.0
+        deadline = start + duration_sec
 
         for pattern, weight in patterns[: self.REPLAY_BATCH]:
+            if time.time() >= deadline:
+                break
             count, change = self._replay_pattern(pattern, weight)
             spikes_generated += count
             total_change += change

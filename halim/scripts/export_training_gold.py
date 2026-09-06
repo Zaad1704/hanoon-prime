@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from halim.dataset import count_raw_sources, repo_root  # noqa: E402
+from halim.dataset import count_raw_sources, repo_root
 
 
 def export_all(*, include_learn_cache: bool = True) -> dict:

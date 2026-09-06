@@ -5,24 +5,15 @@ Tests for the LIF network, STDP learning, attractor memory, and bridge.
 
 from __future__ import annotations
 
-import pytest
-
 from hanoon_prime.brain.neurons import (
-    Attractor,
     AttractorMemory,
     LIFNetwork,
     LIFNeuron,
     SleepReplayEngine,
     SleepResult,
     STDPLearner,
-    Synapse,
 )
 from hanoon_prime.brain.neurons.bridge import DECISION_THRESHOLD, NeuromorphicBridge
-from hanoon_prime.brain.neurons.constants import (
-    ALPHA_KEYS,
-    DECISION_NEURONS,
-    HIDDEN_NEURONS,
-)
 
 
 class TestLIFNeuron:
@@ -54,10 +45,9 @@ class TestLIFNeuron:
         neuron.set_input(10.0)
         spike = neuron.step(dt=0.05)
         assert spike is not None  # First spike should fire
-        # Second step during refractory should return None
-        result = neuron.step(dt=0.05)
-        # Due to refractory, might be None or another spike depending on timing
-        # The key is that it can spike again after refractory
+        # During the 1ms refractory window an immediate second step must not fire
+        assert neuron.is_refractory
+        assert neuron.step(dt=0.05) is None
 
 
 class TestLIFNetwork:

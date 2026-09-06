@@ -10,9 +10,7 @@ before the conscious mind (cortex) processes them.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -35,6 +33,16 @@ class ThreatLevel:
     reason: str = ""
 
 
+@dataclass
+class MarketQuote:
+    """Scalar market snapshot for threat screening."""
+
+    bid: float
+    ask: float
+    last: float
+    volume: float
+
+
 class Amygdala:
     """Threat detection engine — microsecond risk evaluation."""
 
@@ -45,10 +53,7 @@ class Amygdala:
     def evaluate(
         self,
         ticker: str,
-        bid: float,
-        ask: float,
-        last: float,
-        volume: float,
+        quote: MarketQuote,
         atr: float,
         prices: list[float] | None = None,
     ) -> ThreatLevel:
@@ -61,8 +66,8 @@ class Amygdala:
             fear += self._check_price_drop(prices, ticker, reasons)
             fear += self._check_volatility(prices, ticker, atr, reasons)
 
-        fear += self._check_volume_spike(volume, ticker, reasons)
-        fear += self._check_spread_widen(bid, ask, reasons)
+        fear += self._check_volume_spike(quote.volume, ticker, reasons)
+        fear += self._check_spread_widen(quote.bid, quote.ask, reasons)
 
         greed = self._check_greed(prices, reasons)
 
@@ -81,7 +86,7 @@ class Amygdala:
     def _check_price_drop(
         self,
         prices: list[float],
-        ticker: str,
+        _ticker: str,
         reasons: list[str],
     ) -> float:
         """Check for sudden price drops."""
@@ -97,7 +102,7 @@ class Amygdala:
     def _check_volatility(
         self,
         prices: list[float],
-        ticker: str,
+        _ticker: str,
         atr: float,
         reasons: list[str],
     ) -> float:

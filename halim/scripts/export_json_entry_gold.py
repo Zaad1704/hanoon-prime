@@ -15,8 +15,8 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from archive.zombie_modules.halim_json_entry_gold import export_json_entry_gold  # noqa: E402
-from halim.dataset import repo_root  # noqa: E402
+from archive.zombie_modules.halim_json_entry_gold import export_json_entry_gold
+from halim.dataset import repo_root
 
 
 def main() -> int:

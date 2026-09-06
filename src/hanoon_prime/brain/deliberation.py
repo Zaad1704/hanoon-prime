@@ -27,6 +27,17 @@ from .config import (
 
 
 @dataclass
+class Modifiers:
+    """Bounded signal modifiers fed into the deliberation verdict."""
+
+    episodic_mod: float = 0.0
+    affective_mod: float = 0.0
+    salience_atten: float = 1.0
+    regime_mult: float = 1.0
+    halim_mod: float = 0.0
+
+
+@dataclass
 class DeliberationResult:
     """Output of the deliberation engine."""
 
@@ -47,29 +58,25 @@ class Deliberator:
         self,
         base_score: float,
         base_confidence: float,
-        episodic_mod: float = 0.0,
-        affective_mod: float = 0.0,
-        salience_atten: float = 1.0,
-        regime_mult: float = 1.0,
-        halim_mod: float = 0.0,
+        mods: Modifiers,
     ) -> DeliberationResult:
         """Synthesize all modifiers into final decision."""
         trace: dict[str, float] = {
             "base_score": base_score,
-            "episodic_mod": episodic_mod,
-            "affective_mod": affective_mod,
-            "halim_mod": halim_mod,
-            "salience_atten": salience_atten,
-            "regime_mult": regime_mult,
+            "episodic_mod": mods.episodic_mod,
+            "affective_mod": mods.affective_mod,
+            "halim_mod": mods.halim_mod,
+            "salience_atten": mods.salience_atten,
+            "regime_mult": mods.regime_mult,
         }
         raw = base_score
-        raw += self._bound(episodic_mod, EPISODIC_MOD_BOUND)
-        raw += self._bound(affective_mod, AFFECTIVE_MOD_BOUND)
-        raw += self._bound(halim_mod, HALIM_MOD_BOUND)
-        raw *= regime_mult
-        raw *= salience_atten
+        raw += self._bound(mods.episodic_mod, EPISODIC_MOD_BOUND)
+        raw += self._bound(mods.affective_mod, AFFECTIVE_MOD_BOUND)
+        raw += self._bound(mods.halim_mod, HALIM_MOD_BOUND)
+        raw *= mods.regime_mult
+        raw *= mods.salience_atten
         raw = max(-1.0, min(1.0, raw))
-        confidence = base_confidence * salience_atten
+        confidence = base_confidence * mods.salience_atten
         confidence = max(CONFIDENCE_FLOOR, min(0.95, confidence))
         direction = self._direction(raw)
         verdict = self._verdict(raw, direction)

@@ -64,12 +64,23 @@ class WeightEnforcer:
         """Repair weights on memory load. Returns True if repair was needed."""
         if not weights:
             return False
+        repaired = self._repair_bounds_and_membership(weights)
+        total = sum(weights.values())
+        if total < 0.90 or total > 1.10:
+            self._normalize(weights)
+            repaired = True
+        if repaired:
+            log.info("Weight repair complete")
+        return repaired
+
+    def _repair_bounds_and_membership(self, weights: dict[str, float]) -> bool:
+        """Clamp out-of-range weights and reconcile the key set in one pass."""
         repaired = False
         for k in list(weights.keys()):
             if weights[k] > MAX_WEIGHT:
                 weights[k] = MAX_WEIGHT
                 repaired = True
-            if weights[k] < WEIGHT_FLOOR:
+            elif weights[k] < WEIGHT_FLOOR:
                 weights[k] = WEIGHT_FLOOR
                 repaired = True
         for k, v in DEFAULT_WEIGHTS.items():
@@ -80,12 +91,6 @@ class WeightEnforcer:
             if k not in DEFAULT_WEIGHTS:
                 del weights[k]
                 repaired = True
-        total = sum(weights.values())
-        if total < 0.90 or total > 1.10:
-            self._normalize(weights)
-            repaired = True
-        if repaired:
-            log.info("Weight repair complete")
         return repaired
 
     def check_integrity(self, weights: dict[str, float]) -> dict[str, Any]:

@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from .config import DEFAULT_WEIGHTS, LEARNING_RATE, WEIGHT_DECAY
 

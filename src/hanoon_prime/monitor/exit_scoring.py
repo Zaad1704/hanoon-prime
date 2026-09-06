@@ -8,9 +8,9 @@ This runs on the monitor daemon thread, not the main loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from ..brain.indicators import compute_all_alpha
+from ..types import BarSeries
 
 
 @dataclass
@@ -30,22 +30,19 @@ class ExitScorer:
 
     def score_exit(
         self,
-        ticker: str,
+        _ticker: str,
         entry_price: float,
         current_price: float,
         direction: int,
-        close: Any = None,
-        high: Any = None,
-        low: Any = None,
-        volume: Any = None,
+        bars: BarSeries | None = None,
     ) -> ExitHealth:
         """Re-score a position and decide if it should be exited."""
         STAY, EXIT = 0, 1
         if entry_price <= 0 or current_price <= 0:
             return ExitHealth(score=0.5, verdict=STAY, reason="no_price")
         score = 0.5
-        if close is not None and len(close) >= 10:
-            alpha = compute_all_alpha(close, high, low, volume)
+        if bars is not None and len(bars.close) >= 10:
+            alpha = compute_all_alpha(bars)
             vals = [abs(v) for v in alpha.values() if isinstance(v, (int, float))]
             score = sum(vals) / max(len(vals), 1)
         pnl_pct = (current_price - entry_price) / entry_price * direction

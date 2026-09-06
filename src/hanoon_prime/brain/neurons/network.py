@@ -6,7 +6,6 @@ coordination with NetworkStepper for vectorized stepping.
 
 from __future__ import annotations
 
-import time
 from collections import deque
 from typing import Dict, List, Optional
 
@@ -61,7 +60,6 @@ class LIFNetwork:
 
     def step_all(self, dt: float = 0.05) -> List[Spike]:
         """Advance all neurons one step. Returns all spikes produced."""
-        now = time.time()
         spikes: List[Spike] = []
         neurons = self._neurons
 

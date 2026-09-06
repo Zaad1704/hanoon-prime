@@ -6,9 +6,8 @@ with 22 higher-order indicators from indicators_core + indicators_core_tech.
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..cerebellum import compute_alpha as compute_core_alpha
+from ..types import BarSeries
 from .indicators_core import compute_osc_signals
 from .indicators_core_tech import compute_flow_signals
 
@@ -47,20 +46,18 @@ EXTRA_NAMES: tuple[str, ...] = (
 INDICATOR_NAMES: tuple[str, ...] = CORE_NAMES + EXTRA_NAMES
 
 
-def compute_all_alpha(
-    close: Any,
-    high: Any,
-    low: Any,
-    volume: Any,
-    buy_volume: Any | None = None,
-    bid_sizes: Any | None = None,
-    ask_sizes: Any | None = None,
-) -> dict[str, float]:
-    """Merge cerebellum's 5 core + 22 higher-order into one alpha dict."""
-    core = compute_core_alpha(close, volume, buy_volume, bid_sizes, ask_sizes)
+def compute_all_alpha(bars: BarSeries) -> dict[str, float]:
+    """Merge cerebellum's 5 core + 22 higher-order into one alpha dict.
+
+    ``BarSeries`` carries the OHLCV (+ depth) arrays; grouping them avoids
+    a wide positional signature while keeping every caller's data identical.
+    """
+    core = compute_core_alpha(
+        bars.close, bars.volume, bars.buy_volume, bars.bid_sizes, bars.ask_sizes
+    )
     alpha: dict[str, float] = {k: core.get(k, 0.0) for k in CORE_NAMES}
-    alpha.update(compute_osc_signals(close, high, low, volume))
-    alpha.update(compute_flow_signals(close, high, low, volume))
+    alpha.update(compute_osc_signals(bars.close, bars.high, bars.low, bars.volume))
+    alpha.update(compute_flow_signals(bars.close, bars.high, bars.low, bars.volume))
     alpha["volatility"] = core.get("volatility", 0.0)
     return alpha
 

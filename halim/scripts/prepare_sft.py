@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from halim.dataset import (  # noqa: E402
+from halim.dataset import (
     count_raw_sources,
     prepare_sft_dataset,
     repo_root,

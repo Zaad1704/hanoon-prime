@@ -16,9 +16,9 @@ for p in (str(ROOT / "halim"), str(ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from halim.dataset import prepare_sft_dataset, repo_root  # noqa: E402
-from halim.device import detect_profile, profile_spec  # noqa: E402
-from halim.scaffold import SCAFFOLD_MLX_4BIT  # noqa: E402
+from halim.dataset import prepare_sft_dataset, repo_root
+from halim.device import detect_profile, profile_spec
+from halim.scaffold import SCAFFOLD_MLX_4BIT
 
 DEFAULT_BASE = SCAFFOLD_MLX_4BIT
 DEFAULT_ITERS = 600
@@ -181,7 +181,7 @@ def main() -> int:
         return 1
 
     try:
-        import mlx_lm  # noqa: F401
+        import mlx_lm
     except ImportError:
         out = _print_gpu_instructions(root, profile)
         out["reason"] = "mlx_lm_not_installed"

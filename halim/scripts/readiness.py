@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from halim.dataset import count_raw_sources, repo_root, sft_pair_count  # noqa: E402
-from halim.device import detect_profile, profile_spec  # noqa: E402
-from halim.engine import checkpoint_path, collect_status  # noqa: E402
+from halim.dataset import count_raw_sources, repo_root, sft_pair_count
+from halim.device import detect_profile, profile_spec
+from halim.engine import checkpoint_path, collect_status
 
 TODDLER_MIN_PAIRS = int(__import__("os").getenv("HALIM_TODDLER_MIN_PAIRS", "2500"))
 COUNCIL_TARGET = int(__import__("os").getenv("HALIM_COUNCIL_TARGET", "5000"))

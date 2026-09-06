@@ -19,6 +19,7 @@ from typing import Any
 from .backtest import backtest_ticker
 from .eyes import load_ohlcv
 from .immune import EDGE_LOOKBACK, INDICATOR_NAMES
+from .types import BarSeries
 from .validator import calibrate_weights, evaluate_indicator_pooled
 
 log = logging.getLogger(__name__)
@@ -115,10 +116,7 @@ def _check_profitability(tickers: list[str], data_dir: Path) -> tuple[int, int]:
             continue
         m = backtest_ticker(
             ticker,
-            data["close"],
-            data["high"],
-            data["low"],
-            data["volume"],
+            BarSeries(data["close"], data["high"], data["low"], data["volume"]),
         )
         total += 1
         is_prof = m["ev_per_trade"] > 0

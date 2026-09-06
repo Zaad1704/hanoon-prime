@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "halim") not in sys.path:
     sys.path.insert(0, str(ROOT / "halim"))
 
-from halim.dataset import record_trained_from_sft, repo_root  # noqa: E402
+from halim.dataset import record_trained_from_sft, repo_root
 
 
 def main() -> int:

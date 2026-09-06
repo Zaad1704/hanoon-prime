@@ -5,10 +5,17 @@ All other modules compute indicators or probabilities. Validated by
 tests/test_contract.py.
 
 Architecture (simplified from the 880-line thinker.py):
-  1. Receive raw indicators from cerebellum (5 values, mixed scales)
+  1. Receive raw indicators (core 5 + tech set from cerebellum/indicators)
   2. Z-score normalize each against rolling history (scale-invariant)
   3. score = tanh(Σ w_i × z_i)  → symmetric [-1, +1]
   4. Verdict: BUY if score > +threshold, SELL if score < -threshold
+
+Learning integration (v2.1): the Cortex scores EVERY weighted indicator,
+not just the core 5. Weights are learned across all 27 keys by
+brain/reflection.py and hot-swapped here via ``set_weights`` after each
+trade close — the live tanh therefore evolves with every trade. Backtests
+keep the historical 5-core behavior via ``core_weights_only=True`` so the
+calibration pipeline and legacy backtests are unchanged.
 
 No modifiers, no gates, no percentile trickery. Just the math.
 """
@@ -18,7 +25,6 @@ from __future__ import annotations
 import math
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
@@ -32,6 +38,7 @@ from .immune import (
     Z_CLIP,
     Z_NORM_WINDOW,
 )
+from .types import BarSeries
 
 
 @dataclass
@@ -50,11 +57,11 @@ class Thought:
 class Cortex:
     """Z-score normalization + tanh scoring + dual-direction verdict.
 
-    Maintains rolling z-score history for each of the 5 indicators.
-    At each evaluation the raw indicator values are z-scored against
-    the rolling history (scale-invariant across tickers), then fed
-    through a tanh of weighted z-scores to produce a symmetric [-1, +1]
-    signal.
+    Z-score history is created LAZILY per indicator key (on first
+    ``evaluate``), so any alpha key set — the 5 core names, the 27-key
+    live set, or any subset — is scored correctly without pre-registering
+    keys. Weights are hot-swappable: the orchestrator refreshes them from
+    the learned memory after every trade close.
     """
 
     def __init__(
@@ -62,25 +69,33 @@ class Cortex:
         weights: dict[str, float] | None = None,
         threshold: float = ENTRY_THRESHOLD,
         z_window: int = Z_NORM_WINDOW,
+        core_weights_only: bool = False,
     ) -> None:
         self._weights: dict[str, float] = dict(weights or INDICATOR_WEIGHTS)
+        self._core_weights_only: bool = core_weights_only
         self._threshold: float = threshold
         self._z_window: int = z_window
         self._z_history: dict[str, deque[float]] = {
             name: deque(maxlen=z_window) for name in INDICATOR_NAMES
         }
 
+    def set_weights(self, weights: dict[str, float]) -> None:
+        """Hot-swap indicator weights (called by the orchestrator after learning)."""
+        self._weights = dict(weights)
+
     def evaluate(self, raw: dict[str, float]) -> Thought:
         """Z-score normalize raw indicators → tanh score → verdict."""
         z_scores: dict[str, float] = {}
-        for name in INDICATOR_NAMES:
-            raw_val = float(raw.get(name, 0.0))
-            hist = self._z_history[name]
+        for name, raw_val in raw.items():
+            hist = self._z_history.get(name)
+            if hist is None:
+                hist = deque(maxlen=self._z_window)
+                self._z_history[name] = hist
             z = self._z_score(raw_val, hist)
             z_scores[name] = z
             hist.append(raw_val)
 
-        score = self._tanh_score(z_scores)
+        score = self._tanh_score(z_scores, present=set(raw.keys()))
         verdict, direction = self._verdict(score)
         win_prob = score_to_win_prob(score)
         ev = compute_ev(win_prob)
@@ -114,10 +129,30 @@ class Cortex:
         z = (val - mean) / std
         return float(max(-Z_CLIP, min(Z_CLIP, z)))
 
-    def _tanh_score(self, z: dict[str, float]) -> float:
-        """score = tanh(Σ w_i × z_i) — symmetric around 0."""
-        weighted = sum(self._weights[name] * z[name] for name in INDICATOR_NAMES)
-        return float(math.tanh(weighted))
+    def _tanh_score(
+        self, z: dict[str, float], present: set[str] | None = None
+    ) -> float:
+        """score = tanh(Σ w_i × z_i / Σ w_i) over available indicators.
+
+        Iterates the WEIGHTS (not a hard-coded name list) so the 22 tech
+        indicators participate in the score and learned weight drift is
+        expressed. The sum is renormalized over indicators PRESENT in the
+        current alpha (a proper weighted average), so partial snapshots —
+        e.g. the 5-core fallback when tech indicators lack data — are not
+        diluted by absent keys. With the full core-5 weight set and all 5
+        present this reproduces the legacy sum exactly (Σw = 1.0).
+        In core_weights_only mode (backtests, calibration) only the
+        historical 5 core names contribute.
+        """
+        names = INDICATOR_NAMES if self._core_weights_only else tuple(self._weights)
+        keys = tuple(n for n in names if present is None or n in present)
+        if not keys:
+            return 0.0
+        weighted = sum(float(self._weights.get(n, 0.0)) * z.get(n, 0.0) for n in keys)
+        total_w = sum(float(self._weights.get(n, 0.0)) for n in keys)
+        if total_w <= 1e-12:
+            return 0.0
+        return float(math.tanh(weighted / total_w))
 
     def _verdict(self, score: float) -> tuple[str, int]:
         """Dual-direction verdict: BUY/SELL/HOLD."""
@@ -141,26 +176,18 @@ class Cortex:
         return f"score {score:.3f} below threshold"
 
 
-def deliberate(
-    cortex: Cortex,
-    close: Any,
-    volume: Any,
-    buy_volume: Any | None = None,
-    bid_sizes: Any | None = None,
-    ask_sizes: Any | None = None,
-) -> Thought:
+def deliberate(cortex: Cortex, bars: BarSeries) -> Thought:
     """Full pipeline: cerebellum → cortex.evaluate → Thought.
 
     This is the public entry point for the brain's verdict decision.
     It accepts raw market data (not pre-computed alpha) so callers
     don't need to know about cerebellum internals.
     """
-    raw = close
     alpha = compute_alpha(
-        close=raw,
-        volume=volume,
-        buy_volume=buy_volume,
-        bid_sizes=bid_sizes,
-        ask_sizes=ask_sizes,
+        close=bars.close,
+        volume=bars.volume,
+        buy_volume=bars.buy_volume,
+        bid_sizes=bars.bid_sizes,
+        ask_sizes=bars.ask_sizes,
     )
     return cortex.evaluate(alpha)

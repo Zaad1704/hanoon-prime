@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -33,61 +32,51 @@ class ThalamusVerdict:
     reason: str = ""
 
 
+@dataclass
+class MarketQuote:
+    """Scalar market snapshot for thalamic screening."""
+
+    bid: float
+    ask: float
+    last: float
+    volume: float
+    daily_volume: float
+
+
 class Thalamus:
     """Sensory gateway — filters and ranks candidates."""
 
     def __init__(self) -> None:
         self._seen: dict[str, float] = {}
 
-    def screen(
-        self,
-        ticker: str,
-        bid: float,
-        ask: float,
-        last: float,
-        volume: float,
-        daily_volume: float,
-    ) -> ThalamusVerdict:
+    def screen(self, ticker: str, quote: MarketQuote) -> ThalamusVerdict:
         """Screen a candidate through all filters."""
-        if last < MIN_PRICE:
+        if quote.last < MIN_PRICE:
             return ThalamusVerdict(ticker, False, reason="price_too_low")
-        if daily_volume < MIN_DAILY_VOLUME:
+        if quote.daily_volume < MIN_DAILY_VOLUME:
             return ThalamusVerdict(ticker, False, reason="low_volume")
-        if bid <= 0 or ask <= 0:
+        if quote.bid <= 0 or quote.ask <= 0:
             return ThalamusVerdict(ticker, False, reason="no_bid_ask")
-        mid = (bid + ask) / 2.0
+        mid = (quote.bid + quote.ask) / 2.0
         if mid <= 0:
             return ThalamusVerdict(ticker, False, reason="invalid_mid")
-        spread_pct = (ask - bid) / mid
+        spread_pct = (quote.ask - quote.bid) / mid
         if spread_pct > MAX_SPREAD_PCT:
             return ThalamusVerdict(
                 ticker,
                 False,
                 reason=f"spread_{spread_pct:.4f}",
             )
-        salience = self._compute_salience(
-            bid=bid,
-            ask=ask,
-            last=last,
-            volume=volume,
-            daily_volume=daily_volume,
-        )
+        salience = self._compute_salience(quote)
         self._seen[ticker] = time.time()
         return ThalamusVerdict(ticker, True, salience=salience)
 
-    def _compute_salience(
-        self,
-        bid: float,
-        ask: float,
-        last: float,
-        volume: float,
-        daily_volume: float,
-    ) -> float:
+    def _compute_salience(self, quote: MarketQuote) -> float:
         """Thalamic Salience Index — higher = more interesting."""
-        vol_norm = min(volume / max(daily_volume, 1.0), 1.0) * 0.4
-        mid = (bid + ask) / 2.0
-        spread_inv = (1.0 / max((ask - bid) / mid, 0.0001)) * 0.3
-        momentum = abs(last - bid) / max(mid, 0.01) * 0.3
+        vol_norm = min(quote.volume / max(quote.daily_volume, 1.0), 1.0) * 0.4
+        mid = (quote.bid + quote.ask) / 2.0
+        spread_inv = (1.0 / max((quote.ask - quote.bid) / mid, 0.0001)) * 0.3
+        momentum = abs(quote.last - quote.bid) / max(mid, 0.01) * 0.3
         return vol_norm + spread_inv + momentum
 
     def rank(

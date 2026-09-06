@@ -8,7 +8,7 @@ decision accordingly. Modifier bounded by EPISODIC_MOD_BOUND (±0.03).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 MOD_BOUND: float = 0.03

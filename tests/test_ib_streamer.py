@@ -11,58 +11,55 @@ IB client objects. Tests verify:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hanoon_prime.ib_streamer import IBStreamer, StreamBuffer
 from hanoon_prime.immune import EDGE_LOOKBACK, LOOKBACK_BARS
+from hanoon_prime.types import BarSeries
 
 
+@dataclass
 class FakeTicker:
     """Mimics ib_insync Ticker for testing."""
 
-    def __init__(
-        self,
-        close,
-        high,
-        low,
-        volume=100,
-        bid_size=10,
-        ask_size=10,
-        has_bidass=True,
-        ts=60_000.0,
-    ):
-        self._close = float(close)
-        self._high = float(high)
-        self._low = float(low)
-        self.volume = volume
-        self.bidSize = bid_size
-        self.askSize = ask_size
-        self._hb = has_bidass
-        self._ts = ts
-        self.last = float(close)
+    _close: float
+    _high: float
+    _low: float
+    volume: float = 100
+    bid_size: float = 10
+    ask_size: float = 10
+    has_bidass: bool = True
+    ts: float = 60_000.0
 
-    def hasBidAsk(self):
-        return self._hb
+    def __post_init__(self) -> None:
+        self.last = float(self._close)
+        self.bidSize = self.bid_size
+        self.askSize = self.ask_size
+        self._hb = self.has_bidass
 
     @property
-    def close(self):
+    def close(self) -> float:
         return self._close
 
     @property
-    def high(self):
+    def high(self) -> float:
         return self._high
 
     @property
-    def low(self):
+    def low(self) -> float:
         return self._low
 
     @property
     def time(self):
         m = MagicMock()
-        m.timestamp.return_value = self._ts
+        m.timestamp.return_value = self.ts
         return m
+
+    def hasBidAsk(self):
+        return self._hb
 
 
 @pytest.fixture
@@ -82,13 +79,15 @@ class TestStreamBuffer:
         buf = StreamBuffer("T")
         for i in range(LOOKBACK_BARS + 10):
             buf.append(
-                float(i),
-                float(i + 0.1),
-                float(i - 0.1),
-                1.0,
-                0.5,
-                1.0,
-                1.0,
+                BarSeries(
+                    float(i),
+                    float(i + 0.1),
+                    float(i - 0.1),
+                    1.0,
+                    0.5,
+                    1.0,
+                    1.0,
+                )
             )
         assert len(buf.close) == LOOKBACK_BARS
         assert len(buf.high) == LOOKBACK_BARS
@@ -98,18 +97,18 @@ class TestStreamBuffer:
         buf = StreamBuffer("T")
         assert not buf.ready()
         for _ in range(EDGE_LOOKBACK):
-            buf.append(1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0)
+            buf.append(BarSeries(1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0))
         assert buf.ready()
 
     def test_ready_false_after_edge_lookback_minus_1(self):
         buf = StreamBuffer("T")
         for _ in range(EDGE_LOOKBACK - 1):
-            buf.append(1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0)
+            buf.append(BarSeries(1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0))
         assert not buf.ready()
 
     def test_arrays_returns_numpy(self):
         buf = StreamBuffer("T")
-        buf.append(100.0, 101.0, 99.0, 1000.0, 500.0, 10.0, 10.0)
+        buf.append(BarSeries(100.0, 101.0, 99.0, 1000.0, 500.0, 10.0, 10.0))
         arrs = buf.arrays()
         assert "close" in arrs
         assert "high" in arrs

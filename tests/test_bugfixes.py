@@ -14,6 +14,7 @@ import pytest
 
 from hanoon_prime.brain.risk import RiskEngine, SizingResult
 from hanoon_prime.hippocampus import Hippocampus
+from hanoon_prime.ib_cycle import CycleMeta
 from hanoon_prime.immune import MAX_CONCURRENT_POSITIONS
 from hanoon_prime.monitor.sleep_manager import SleepManager, SleepState
 
@@ -146,7 +147,6 @@ class TestBug2SafetyNetEnabled:
 
     def test_ib_adapter_has_hippocampus(self):
         """IBStreamingBot must create a Hippocampus instance."""
-        import ast
         from pathlib import Path
 
         src = (
@@ -167,7 +167,6 @@ class TestBug3OffMarketGuard:
 
     def test_sleep_manager_uses_zoneinfo(self):
         """SleepManager must use zoneinfo (not hardcoded UTC offset)."""
-        import ast
         from pathlib import Path
 
         src = (
@@ -185,7 +184,7 @@ class TestBug3OffMarketGuard:
         """SleepManager returns active=False on weekends."""
         mgr = SleepManager()
         # Mock a Saturday in US/Eastern
-        from datetime import datetime, timezone
+        from datetime import datetime
         from zoneinfo import ZoneInfo
 
         et = ZoneInfo("America/New_York")
@@ -232,7 +231,6 @@ class TestBug3OffMarketGuard:
 
     def test_ib_cycle_imports_sleep_manager(self):
         """ib_cycle.py must import SleepManager for market hours check."""
-        import ast
         from pathlib import Path
 
         src = (
@@ -270,5 +268,7 @@ class TestBug3OffMarketGuard:
             "thought": SimpleNamespace(direction=1, score=0.65),
         }
         # market_open=False should skip all entries
-        mixin._finish_cycle([], [dec], 1.0, 0.0, None, market_open=False)
+        mixin._finish_cycle(
+            [], [dec], None, CycleMeta(poll=1.0, started=0.0, market_open=False)
+        )
         mixin.executor.place_bracket.assert_not_called()

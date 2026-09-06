@@ -7,6 +7,7 @@ pool → permute (p<0.05) → weight by |corr|.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,19 @@ __all__ = [
     "evaluate_indicator_edge",
     "pooled_signals",
     "calibrate_weights",
+    "EvalBatch",
 ]
+
+
+@dataclass
+class EvalBatch:
+    """Bundled per-indicator accumulators for a permutation sweep."""
+
+    n_perm: int
+    pvals: dict[str, list[float]]
+    corrs: dict[str, list[float]]
+    sig_counts: dict[str, int]
+    totals: dict[str, int]
 
 
 def _perm_pvalue(signals: np.ndarray, returns: np.ndarray, n_perm: int) -> float:
@@ -83,7 +96,7 @@ def pooled_signals(
 
 
 def _test_pooled_indicator(
-    name: str, sig_array: np.ndarray, ret_array: np.ndarray, n_perm: int
+    _name: str, sig_array: np.ndarray, ret_array: np.ndarray, n_perm: int
 ) -> dict[str, Any]:
     """Run permutation test for one indicator on pooled data."""
     if len(sig_array) < EDGE_MIN_SAMPLES:
@@ -126,19 +139,14 @@ def evaluate_indicator_edge(
     corrs: dict[str, list[float]] = {n: [] for n in INDICATOR_NAMES}
     sig_counts: dict[str, int] = {n: 0 for n in INDICATOR_NAMES}
     totals: dict[str, int] = {n: 0 for n in INDICATOR_NAMES}
+    batch = EvalBatch(n_perm, pvals, corrs, sig_counts, totals)
     for ticker in tickers:
-        _eval_ticker(ticker, data_dir, n_perm, pvals, corrs, sig_counts, totals)
-    return _aggregate_edges(pvals, corrs, sig_counts, totals)
+        _eval_ticker(ticker, data_dir, batch)
+    return _aggregate_edges(batch.pvals, batch.corrs, batch.sig_counts, batch.totals)
 
 
 def _eval_ticker(
-    ticker: str,
-    data_dir: Path,
-    n_perm: int,
-    pvals: dict[str, list[float]],
-    corrs: dict[str, list[float]],
-    sig_counts: dict[str, int],
-    total_counts: dict[str, int],
+    ticker: str, data_dir: Path, batch: EvalBatch
 ) -> None:
     """Evaluate all indicators for one ticker."""
     path = data_dir / f"{ticker}_1min.csv"
@@ -155,13 +163,13 @@ def _eval_ticker(
         sig = sigs[name]
         if len(sig) < 50:
             continue
-        p = _perm_pvalue(sig, rets, n_perm)
+        p = _perm_pvalue(sig, rets, batch.n_perm)
         c = np.corrcoef(sig, rets)[0, 1]
-        pvals[name].append(p)
-        corrs[name].append(abs(c) if not np.isnan(c) else 0.0)
-        total_counts[name] += 1
+        batch.pvals[name].append(p)
+        batch.corrs[name].append(abs(c) if not np.isnan(c) else 0.0)
+        batch.totals[name] += 1
         if p < EDGE_P_VALUE:
-            sig_counts[name] += 1
+            batch.sig_counts[name] += 1
 
 
 def _aggregate_edges(

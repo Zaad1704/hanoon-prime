@@ -10,13 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import (
-    CIRCUIT_BREAKER_THRESHOLD,
-    MIN_ACTIVE_INDICATORS,
-    WEIGHT_MAX,
-    WEIGHT_MIN,
-    MAX_WEIGHT_Drift,
-)
+from .config import CIRCUIT_BREAKER_THRESHOLD, MIN_ACTIVE_INDICATORS, MAX_WEIGHT_Drift
 
 
 @dataclass

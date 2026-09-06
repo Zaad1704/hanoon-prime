@@ -85,6 +85,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import time  # noqa: PLC0415 — imported here so fork timing is precise
+    import time
 
     sys.exit(main())

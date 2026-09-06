@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hanoon_prime._ib_sync import get_ib_pnl, journal_exit, read_ib_positions
+from hanoon_prime._ib_sync import get_ib_pnl, read_ib_positions
 from hanoon_prime.ib_executor import IBExecutor
 from hanoon_prime.types import Position
 
@@ -415,8 +415,13 @@ class TestPlaceOca:
         mock_order_cls = MagicMock(side_effect=_make_order)
         with patch("hanoon_prime._protect._ib", MagicMock(Order=mock_order_cls)):
             from hanoon_prime._protect import _place_oca
+            from hanoon_prime.types import BracketOrder
 
-            _place_oca(fake_ib, contract, "SELL", 100, 95.0, 110.0, "JULI_TSLA")
+            _place_oca(
+                fake_ib,
+                contract,
+                BracketOrder("SELL", 100, 95.0, 110.0, "JULI_TSLA"),
+            )
         assert len(placed) == 2
         for order in placed:
             assert order.outsideRth is True

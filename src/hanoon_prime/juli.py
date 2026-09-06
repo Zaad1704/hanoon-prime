@@ -1,8 +1,6 @@
 """hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain.
 
-Discovers tickers via scanner, routes IB data to the NeuromorphicBrain.
-The NeuromorphicBrain is the LOCAL SOURCE OF TRUTH for all decisions.
-IB is the source of truth for trade data (positions, P&L, fills).
+NeuromorphicBrain is the LOCAL SOURCE OF TRUTH for all decisions.
 """
 
 from __future__ import annotations
@@ -18,18 +16,17 @@ from .brain.shared_state import BrainState
 from .cerebellum import compute_alpha
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
+from .types import BarSeries
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
+# fmt: off
 ATTRS = (
-    ("close", "close_arr"),
-    ("high", "high_arr"),
-    ("low", "low_arr"),
-    ("volume", "vol_arr"),
-    ("buy_volume", "buy_vol_arr"),
-    ("bid_sizes", "bid_sizes"),
-    ("ask_sizes", "ask_sizes"),
+    ("close", "close_arr"), ("high", "high_arr"), ("low", "low_arr"),
+    ("volume", "vol_arr"), ("buy_volume", "buy_vol_arr"),
+    ("bid_sizes", "bid_sizes"), ("ask_sizes", "ask_sizes"),
 )
+# fmt: on
 
 
 class JuliBrain:
@@ -43,19 +40,16 @@ class JuliBrain:
         self.brain = NeuromorphicBrain(brain_state=self._state)
         self._candidates: list[ScanResult] = []
         self._last_alloc: float = 0.0
-        self._open_positions: dict[str, Any] = {}
-        log.info("JuliBrain initialized — NeuromorphicBrain is local source of truth")
         self.brain.start()
 
     def tick(
         self,
         positions: set[str],
         get_snapshot: Any,
-        streamer: Any,
+        _streamer: Any,
         closing: set[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """One full brain cycle. Returns (entry_decisions, exit_signals)."""
-        self._open_positions = dict.fromkeys(positions, True)
         self._sync_and_scan()
         self._maybe_screen(get_snapshot)
         self._maybe_allocate(positions)
@@ -143,18 +137,16 @@ class JuliBrain:
         }
         if len(kw["close"]) < 20:
             return {}
-        alpha = compute_all_alpha(**kw)
+        alpha = compute_all_alpha(BarSeries(**kw))
         return alpha if alpha else (compute_alpha(**kw) or {})
 
     def _build_decision(
         self, ticker: str, direction: int, result: dict[str, Any]
     ) -> dict[str, Any]:
         """Build decision dict from brain result."""
-        score, verdict, conf = (
-            result.get("score", 0),
-            result.get("verdict", ""),
-            result.get("confidence", 0.5),
-        )
+        score = result.get("score", 0)
+        verdict = result.get("verdict", "")
+        conf = result.get("confidence", 0.5)
         log.info(
             "THINK %s %s score=%.3f regime=%s risk=%s",
             ticker,

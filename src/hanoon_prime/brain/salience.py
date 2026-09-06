@@ -40,10 +40,14 @@ class Salience:
         self._vol_history.append(volatility)
 
     def evaluate(self, score: float, regime_mult: float = 1.0) -> SalienceState:
-        """Compute attention and uncertainty dampening."""
+        """Compute attention and uncertainty dampening.
+
+        ``score`` is the current signal strength; larger magnitudes command
+        higher attention (a weak score is ignored even when noise is low).
+        """
         noise = self._compute_noise()
         uncertainty = self._compute_uncertainty()
-        attention = self._compute_attention(noise, regime_mult)
+        attention = self._compute_attention(noise, regime_mult, score)
         conf_atten = self._compute_confidence_attenuation(uncertainty)
         return SalienceState(
             attention=attention,
@@ -69,10 +73,13 @@ class Salience:
         return min(1.0, vol_component * 0.6 + noise * 0.4)
 
     @staticmethod
-    def _compute_attention(noise: float, regime_mult: float) -> float:
-        """Higher noise → lower attention. [0.3, 1.0]."""
+    def _compute_attention(
+        noise: float, regime_mult: float, score: float = 0.0
+    ) -> float:
+        """Higher noise -> lower attention; strong signal scores boost attention."""
         base = 1.0 - noise * 0.5
-        adjusted = base * regime_mult
+        signal = 0.5 + 0.5 * min(1.0, abs(score))
+        adjusted = base * regime_mult * signal
         return float(max(0.3, min(1.0, adjusted)))
 
     @staticmethod

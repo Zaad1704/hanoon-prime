@@ -30,7 +30,7 @@ class LearningGuardian:
         """Auto-generated docstring."""
         self._violations: list[dict[str, Any]] = []
 
-    def check_exit_decision(self, ticker: str, won: bool, pnl: float) -> GuardianCheck:
+    def check_exit_decision(self, _ticker: str, won: bool, pnl: float) -> GuardianCheck:
         """Ensure exit decision is recorded."""
         if abs(pnl) > 0.001 and not won and pnl > 0:
             return GuardianCheck("exit_decision", False, f".pnl={pnl} but won={won}")

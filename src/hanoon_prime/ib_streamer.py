@@ -16,6 +16,7 @@ import numpy as np
 from .eyes import rolling_atr
 from .ib_compat import ib
 from .immune import DEPTH_ROWS, EDGE_LOOKBACK, LOOKBACK_BARS
+from .types import BarSeries
 
 log = logging.getLogger(__name__)
 
@@ -33,18 +34,17 @@ class StreamBuffer:
     bid_sizes: list[float] = field(default_factory=list)
     ask_sizes: list[float] = field(default_factory=list)
 
-    def append(
-        self,
-        close: float,
-        high: float,
-        low: float,
-        volume: float,
-        buy_vol: float,
-        bid_size: float,
-        ask_size: float,
-    ) -> None:
+    def append(self, bars: BarSeries) -> None:
         """Append one bar, trimming to LOOKBACK_BARS."""
-        vals = (close, high, low, volume, buy_vol, bid_size, ask_size)
+        vals = (
+            bars.close,
+            bars.high,
+            bars.low,
+            bars.volume,
+            bars.buy_volume,
+            bars.bid_sizes,
+            bars.ask_sizes,
+        )
         attrs = [
             self.close,
             self.high,
@@ -116,7 +116,7 @@ class IBStreamer:
         for bar in reversed(bars):
             bv = self._est_buy_vol(bar.close, bar.high, bar.low, bar.volume)
             buf.append(
-                bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume
+                BarSeries(bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume)
             )
 
     @staticmethod
@@ -176,7 +176,9 @@ class IBStreamer:
             a[7] = ask
             return False
         if a is not None:
-            self.buffers[ticker].append(a[3], a[1], a[2], a[4], a[5], a[6], a[7])
+            self.buffers[ticker].append(
+                BarSeries(a[3], a[1], a[2], a[4], a[5], a[6], a[7])
+            )
         self._minutely[ticker] = [m, high, low, close, vol, bv, bid, ask]
         return a is not None
 
@@ -196,7 +198,7 @@ class IBStreamer:
         atr = rolling_atr(np.array(buf.high), np.array(buf.low), np.array(buf.close))
         return max(atr, 1e-8) if not np.isnan(atr) else 1.0
 
-    def record_execution(self, trade: Any, fill: Any) -> None:
+    def record_execution(self, _trade: Any, fill: Any) -> None:
         """Record an IB execution (fill) for journal carbon copy."""
         try:
             e = fill.execution
@@ -212,7 +214,7 @@ class IBStreamer:
         except Exception:
             pass
 
-    def record_commission(self, trade: Any, fill: Any, report: Any) -> None:
+    def record_commission(self, _trade: Any, fill: Any, report: Any) -> None:
         """Record IB commission report for journal carbon copy."""
         try:
             sym = fill.contract.symbol if fill.contract else ""

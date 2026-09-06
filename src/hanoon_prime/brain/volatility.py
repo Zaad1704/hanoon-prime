@@ -8,7 +8,6 @@ Source: rebuild's volatility_predictor.py (simplified).
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from dataclasses import dataclass
 
@@ -72,7 +71,7 @@ class VolatilityPredictor:
             forecast = alpha * a + (1 - alpha) * forecast
         return forecast
 
-    def _detect_regime(self, current: float, forecast: float) -> str:
+    def _detect_regime(self, current: float, _forecast: float) -> str:
         """Auto-generated docstring."""
         if len(self._atr_history) < 20:
             return "normal"

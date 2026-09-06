@@ -117,6 +117,8 @@ impossible. If you can't commit, you can't break the main branch.
 | R16 | `test_R16_*` + `check_no_todo.py` | TODO/FIXME/HACK/XXX markers in source |
 | R17 | `test_R17_*` | mypy strict mode not enabled |
 | R18 | `test_R18_*` | Module missing module-level docstring |
+| R19 | `test_R19_*` | Realized-Band + Realized-R:R entry gate missing or not wired into risk engine |
+| R20 | `test_R20_*` | Tiered exit engine (ExitPolicy.evaluate) not integrated by orchestrator |
 
 ---
 
@@ -243,6 +245,34 @@ CSV (1-min OHLCV) → eyes.load_ohlcv() → numpy arrays
 
 Backtest mode exists ONLY to validate strategy before going live.
 The live system never touches CSV files.
+
+---
+
+## R19 — Realized Learning Gate (v2.0.0)
+
+Prime closes the one quantitative gap vs rebuild *Snowflake*: the entry gate
+now blends the structural EV with **realized** band win-rate and realized R:R, so
+the system evolves from every real trade instead of replaying a static prior.
+
+- `brain/realized_ev.py` — `RealizedStats` persists closed-trade outcomes to
+  `runtime/juli_realized.json` and exposes `band_wr`, `realized_rr`,
+  `is_gate_closed`, `compute_ev_and_entry`, `ev_gate_should_enter` and the
+  `verify_learning_gate` 3-probe canary (refuse losing band, admit recovery,
+  admit thin data).
+- `brain/risk.py` — `RiskEngine.evaluate(...)` calls `ev_gate_should_enter`;
+  structural fallback (no realized view) reproduces the original
+  `p·R − (1−p)` math so `test_safety_nets` is byte-for-byte stable.
+- `brain/orchestrator.py` — `on_trade_close(...)` feeds only IRONYCLADE
+  sources (`real_trade`, `ib_fill`, `ib_paper`) into `RealizedStats` +
+  `memory.record_outcome`/`update_pred_error`, closing the wiring gap where
+  rebuild updated dynamics/exits but never the realized band/RR.
+
+## R20 — Tiered Exits (v2.0.0)
+
+Live exits are no longer a single ATR bracket; `brain/exits.py` `ExitPolicy`
+drives profit-lock tiers, consolidation exit, staleness, and giveback.
+`NeuromorphicBrain.check_exit` delegates to `self.exits.evaluate(...)` and the
+resulting `ExitSignal` is consumed by `ib_executor` to close positions.
 
 ---
 

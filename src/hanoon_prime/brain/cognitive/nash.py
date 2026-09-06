@@ -18,10 +18,12 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ..config import NASH_VETO_HIGH, NASH_VETO_LOW
+
 MOD_BOUND: float = 0.03
 _MIN_SAMPLES: int = 10
 _GATE_MIN: int = 20
-_GATE_WR: float = 0.45
+_GATE_WR: float = NASH_VETO_LOW
 _KEYS = (
     "vpin",
     "orderbook_imbalance",
@@ -57,7 +59,7 @@ class NashBrain:
         self,
         alpha: dict[str, float],
         score: float,
-        direction: int,
+        _direction: int,
         prices: Optional[list[float]] = None,
         episodes: Optional[list[dict[str, Any]]] = None,
     ) -> NashPrediction:
@@ -65,7 +67,14 @@ class NashBrain:
         features = self._features(alpha, score, prices)
         wp, conf, n = self._match(features, episodes)
         opinion = self._opinion(wp, conf)
-        gate = n >= _GATE_MIN and _GATE_WR <= wp <= (1 - _GATE_WR)
+        # Gate authority fires on the VETO bands: with enough real samples,
+        # pattern memory that historically loses (< NASH_VETO_LOW) vetoes
+        # longs; that historically wins (> NASH_VETO_HIGH) vetoes shorts.
+        # Directional policy stays in orchestrator._apply_nash_gate — this
+        # flag only says "this pattern is strong enough to have an opinion".
+        # (Previously the flag required wp INSIDE [0.45, 0.55] while the
+        # veto required wp OUTSIDE it — mutually exclusive, veto dead.)
+        gate = n >= _GATE_MIN and (wp < NASH_VETO_LOW or wp > NASH_VETO_HIGH)
         pred = NashPrediction(wp, conf, opinion, gate, n)
         self._last = pred
         return pred
@@ -134,7 +143,11 @@ class NashBrain:
         wins = sum(1 for _, o in cands[:k] if o > 0.5)
         agr = max(wins, k - wins) / max(k, 1)
         sf = min(1.0, k / _MIN_SAMPLES)
-        return wp, agr * sf, len(cands[:k])
+        # n = TOTAL candidates available (history depth), not k — the old
+        # ``len(cands[:k])`` capped n at 7, so the ``n >= _GATE_MIN``
+        # authority check could never pass even with a full memory. The
+        # veto was doubly dead (band bug + sample-count bug).
+        return wp, agr * sf, len(cands)
 
     def _opinion(self, wp: float, conf: float) -> float:
         if conf < 0.2:

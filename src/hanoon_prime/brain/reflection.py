@@ -11,14 +11,11 @@ Merge of rebuild's self_reflection.py + performance_attribution.py + learning_mi
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 from .config import (
-    DEFAULT_WEIGHTS,
     LEARNING_RATE,
     PENALTY_SCALE,
-    PRED_ERR_EMA_ALPHA,
-    PRED_ERR_MIN_SAMPLES,
     REWARD_SCALE,
     WEIGHT_DECAY,
     WEIGHT_MAX,
@@ -28,6 +25,18 @@ from .episodic import EpisodicMemory
 from .memory import JuliMemory
 
 
+@dataclass
+class TradeClose:
+    """Bundle of data captured when a trade closes, for reflection."""
+
+    ticker: str
+    won: bool
+    pnl_pct: float
+    direction: int
+    alpha: dict[str, float]
+    predicted_score: float = 0.0
+
+
 class Reflector:
     """Post-trade reflection and learning."""
 
@@ -35,31 +44,29 @@ class Reflector:
         self._memory = memory
         self._episodic = episodic
 
-    def on_trade_close(
-        self,
-        ticker: str,
-        won: bool,
-        pnl_pct: float,
-        direction: int,
-        alpha: dict[str, float],
-        predicted_score: float = 0.0,
-    ) -> None:
+    def on_trade_close(self, trade: TradeClose) -> None:
         """Full reflection pipeline on trade close."""
+        tick = trade.ticker
+        won = trade.won
+        pnl_pct = trade.pnl_pct
+        direction = trade.direction
+        alpha = trade.alpha
+        predicted_score = trade.predicted_score
         self._adapt_weights(won, direction, alpha)
         outcome = pnl_pct if direction > 0 else -pnl_pct
         self._episodic.add(alpha, outcome)
         self._memory.add_episode(
             [alpha.get(k, 0.5) for k in list(alpha.keys())[:11]],
             outcome,
-            ticker,
+            tick,
         )
         self._memory.update_pred_error(predicted_score, 1.0 if won else 0.0)
         self._memory.record_outcome(won)
-        self._memory.record_score(ticker, predicted_score)
+        self._memory.record_score(tick, predicted_score)
         if abs(pnl_pct) > 0.05:
             self._memory.add_lesson(
                 {
-                    "ticker": ticker,
+                    "ticker": tick,
                     "won": won,
                     "pnl_pct": pnl_pct,
                     "regime": "unknown",

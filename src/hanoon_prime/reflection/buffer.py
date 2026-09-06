@@ -155,20 +155,16 @@ class TradeBuffer:
         """Persist trades to JSON."""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+            # fmt: off
             data = [
                 {
-                    "id": t.trade_id,
-                    "ticker": t.ticker,
-                    "entry": t.avg_entry,
-                    "exit": t.avg_exit,
-                    "pnl": t.pnl,
-                    "win": t.win,
-                    "fees": t.fees,
-                    "t0": t.entry_time,
-                    "t1": t.exit_time,
+                    "id": t.trade_id, "ticker": t.ticker, "entry": t.avg_entry,
+                    "exit": t.avg_exit, "pnl": t.pnl, "win": t.win, "fees": t.fees,
+                    "t0": t.entry_time, "t1": t.exit_time
                 }
                 for t in self._trades[-500:]
             ]
+            # fmt: on
             tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data))
             tmp.replace(self._path)
@@ -181,17 +177,12 @@ class TradeBuffer:
             return
         try:
             for d in json.loads(self._path.read_text()):
+                # fmt: off
                 t = Trade(
-                    d["id"],
-                    d["ticker"],
-                    d.get("t0", 0),
-                    d.get("t1", 0),
-                    d["entry"],
-                    d["exit"],
-                    0,
-                    d["pnl"],
-                    d.get("fees", 0),
+                    d["id"], d["ticker"], d.get("t0", 0), d.get("t1", 0),
+                    d["entry"], d["exit"], 0, d["pnl"], d.get("fees", 0)
                 )
+                # fmt: on
                 t.win = d.get("win", t.pnl > 0)
                 self._trades.append(t)
         except Exception as exc:

@@ -8,7 +8,7 @@ Adjusts neuron firing thresholds based on market conditions:
 from __future__ import annotations
 
 import hashlib
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 class DynamicThresholdAdapter:
@@ -64,7 +64,7 @@ class DynamicThresholdAdapter:
 
     def adapt_for_market(
         self,
-        ticker: str,
+        _ticker: str,
         regime: str,
         volatility: float,
     ) -> float:

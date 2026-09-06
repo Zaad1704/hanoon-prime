@@ -6,13 +6,11 @@ Uses numpy vectorization for O(n) stepping of all neurons.
 
 from __future__ import annotations
 
-import math
 import time
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 
-from .lif import LIFNeuron
 from .network import LIFNetwork
 from .spike import Spike
 
@@ -28,14 +26,13 @@ class NetworkStepper:
     def step_all(self, dt: float = 0.05) -> List[Spike]:
         """Advance all neurons one step. Returns all spikes produced."""
         now = time.time()
-        network = self._network
 
         # Phase 1: State extraction
         v_m, inputs, synaptic, refractory = self._extract_state(now)
 
         # Phase 2: Vectorized integration
         total_current = inputs + synaptic
-        spikes = self._integrate_and_spike(v_m, total_current, refractory, now)
+        spikes = self._integrate_and_spike(v_m, total_current, refractory, now, dt)
 
         # Phase 3: Post-spike propagation
         self._propagate_spikes(spikes)
@@ -72,6 +69,7 @@ class NetworkStepper:
         total_current: np.ndarray,
         refractory: np.ndarray,
         now: float,
+        dt: float = 0.05,
     ) -> List[Spike]:
         """Vectorized LIF integration and spike detection."""
         if len(v_m) == 0:
@@ -83,7 +81,6 @@ class NetworkStepper:
         thresholds = np.array([neurons[k].threshold for k in keys])
 
         # Substep integration
-        dt = 0.05
         tau = np.array([neurons[k].tau for k in keys])
         nsub = max(1, int(np.ceil(dt / (tau * 0.5)).max()))
         decay = np.exp(-dt / nsub / tau)

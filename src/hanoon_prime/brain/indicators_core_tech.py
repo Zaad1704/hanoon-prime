@@ -126,7 +126,7 @@ def compute_elliott_wave(close: Any, window: int = 30) -> float:
 
 
 def compute_institutional_wave(
-    close: Any, high: Any, low: Any, volume: Any, window: int = 20
+    close: Any, _high: Any, _low: Any, volume: Any, window: int = 20
 ) -> float:
     """Volume-confirmed directional flow [-1, 1]."""
     c, v = (np.asarray(x, dtype=float) for x in (close, volume))

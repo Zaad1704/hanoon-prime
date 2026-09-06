@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from importlib.util import find_spec
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -67,8 +68,9 @@ class IBScanner:
     def scan(self, config_name: str = "all") -> int:
         """Start scanner subscriptions. 'all' subscribes to all 4 codes."""
         try:
-            from ib_insync import ScannerSubscription
-        except ImportError:
+            if find_spec("ib_insync") is None:
+                return 0
+        except (ImportError, ValueError):
             return 0
         self._cancel_scan()
         configs = (

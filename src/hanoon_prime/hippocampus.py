@@ -54,6 +54,7 @@ class Hippocampus:
         self._consecutive_losses: int = 0
         self._open_positions: dict[str, Position] = {}
         self._pause_bars: int = 0
+        self._ticker_returns: dict[str, float] = {}
 
     def deliberate_entry(
         self,
@@ -144,6 +145,8 @@ class Hippocampus:
         self._consecutive_losses = 0 if won else self._consecutive_losses + 1
         if not self._learning_active:
             return
+        # Realized P&L feeds per-ticker learning statistics (R8).
+        self._ticker_returns[ticker] = self._ticker_returns.get(ticker, 0.0) + pnl_pct
         self._adapt_weights(z_scores or {}, won, direction)
 
     def _adapt_weights(

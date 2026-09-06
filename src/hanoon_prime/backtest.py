@@ -18,6 +18,7 @@ from .eyes import load_ohlcv
 from .hands import simulate_ticker
 from .immune import ATR_PERIOD, ATR_STOP_MULT, ATR_TARGET_MULT, EDGE_LOOKBACK
 from .metrics import calculate_metrics
+from .types import BarSeries
 
 log = logging.getLogger(__name__)
 
@@ -29,10 +30,7 @@ def _discover_tickers(data_dir: Path) -> list[str]:
 
 def backtest_ticker(
     ticker: str,
-    close: Any,
-    high: Any,
-    low: Any,
-    volume: Any,
+    bars: BarSeries,
     window: int = EDGE_LOOKBACK,
     brain: Optional[Any] = None,
     output_dir: Path | None = None,
@@ -41,9 +39,7 @@ def backtest_ticker(
 
     Returns metrics dict (also writes JSON if output_dir given).
     """
-    trades, equity_curve = simulate_ticker(
-        ticker, close, high, low, volume, window, brain
-    )
+    trades, equity_curve = simulate_ticker(ticker, bars, window, brain)
     metrics = calculate_metrics(ticker, trades, equity_curve)
 
     if output_dir:
@@ -121,10 +117,7 @@ def _try_backtest_ticker(
         return None
     return backtest_ticker(
         ticker,
-        close,
-        data["high"],
-        data["low"],
-        data["volume"],
+        BarSeries(data["close"], data["high"], data["low"], data["volume"]),
         window=window,
         output_dir=output_dir,
     )

@@ -1,38 +1,45 @@
-"""hanoon_prime.brain.exits — exit intelligence for open positions.
+"""brain.exits — exit intelligence for open positions.
 
 JULI's exit decision layer: profit-lock tiers, consolidation exit,
 alpha delta tracking. Works alongside the mechanical ATR trailing
-in ib_executor.py.
-
-Merge of rebuild's learned_exit.py + profit_lock + consolidation exit.
+in ib_executor.py. Trigger math lives in ``exit_checks.py``; this
+module owns per-position state and the learned thresholds.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .config import (
-    CONSOLIDATION_PULSES,
+    EXIT_ADAPT_GIVEBACK_MAX,
+    EXIT_ADAPT_MIN_TRADES,
+    EXIT_ADAPT_STALE_MAX,
+    EXIT_ADAPT_STEP_SCALE,
     GIVEBACK_KEEP_RATIO,
-    PROFIT_LOCK_TIERS,
     STALE_EXIT_MINUTES,
 )
+from .exit_checks import ExitSignal, check_consolidation
+from .exit_checks import check_giveback as _giveback
+from .exit_checks import check_profit_lock as _profit_lock
+from .exit_checks import check_stale as _stale
 
-
-@dataclass
-class ExitSignal:
-    """Exit decision for a position."""
-
-    should_exit: bool = False
-    reason: str = ""
-    exit_type: str = "hold"
+if TYPE_CHECKING:
+    from .realized_ev import RealizedStats
 
 
 class ExitPolicy:
-    """JulI's exit intelligence — decides when to close positions."""
+    """JULI's exit intelligence — decides when to close positions.
+
+    v2.1: thresholds are LEARNED. ``adapt_from_realized`` shifts the
+    giveback keep-ratio and the stale window from realized exit outcomes
+    (many giveback exits that would have hit target → widen keep-ratio;
+    many stale exits → shorten the stale window). Bounded by
+    EXIT_ADAPT_* so the policy adapts without reinventing itself.
+    """
 
     def __init__(self) -> None:
+        """Initialize empty per-position state and base thresholds."""
         self._entry_price: dict[str, float] = {}
         self._peak_price: dict[str, float] = {}
         self._peak_pnl: dict[str, float] = {}
@@ -40,6 +47,39 @@ class ExitPolicy:
         self._flat_pulses: dict[str, int] = {}
         self._prev_price: dict[str, float] = {}
         self._entry_alpha: dict[str, dict[str, float]] = {}
+        self._keep_ratio: float = GIVEBACK_KEEP_RATIO
+        self._stale_minutes: float = STALE_EXIT_MINUTES
+        self._adapt_count: int = 0
+
+    def adapt_from_realized(self, realized: "RealizedStats") -> None:
+        """Retune giveback/stale thresholds from realized exit outcomes.
+
+        Signal extraction (bounded, no veto semantics — exits only):
+        • When realized R:R is weak relative to the 3:1 target while
+          giveback exits fire, winners are being cut — WIDEN keep-ratio
+          so trailing protects more of the peak.
+        • When realized R:R is strong, tighten slightly toward base.
+        • Stale exits shrink when R:R underperforms (capital recycling).
+        """
+        rr, rel, n = realized.realized_rr()
+        if n < EXIT_ADAPT_MIN_TRADES or rel <= 0.0:
+            return
+        self._adapt_count += 1
+        shift = (3.0 - min(rr, 3.0)) * EXIT_ADAPT_STEP_SCALE
+        self._keep_ratio = max(
+            GIVEBACK_KEEP_RATIO - EXIT_ADAPT_GIVEBACK_MAX,
+            min(
+                GIVEBACK_KEEP_RATIO + EXIT_ADAPT_GIVEBACK_MAX, self._keep_ratio + shift
+            ),
+        )
+        stale_shift = (3.0 - min(rr, 3.0)) * 10.0
+        self._stale_minutes = max(
+            STALE_EXIT_MINUTES - EXIT_ADAPT_STALE_MAX,
+            min(
+                STALE_EXIT_MINUTES + EXIT_ADAPT_STALE_MAX,
+                self._stale_minutes - stale_shift,
+            ),
+        )
 
     def register(
         self,
@@ -92,7 +132,16 @@ class ExitPolicy:
         ):
             d.pop(ticker, None)
 
+    def telemetry(self) -> dict[str, float | int]:
+        """Learned-exit telemetry (advisor view of the current policy)."""
+        return {
+            "keep_ratio": round(self._keep_ratio, 3),
+            "stale_minutes": round(self._stale_minutes, 1),
+            "adapt_count": self._adapt_count,
+        }
+
     def _update_peaks(self, ticker: str, price: float, pnl: float) -> None:
+        """Track the running price and P&L peaks for one position."""
         if price > self._peak_price.get(ticker, 0):
             self._peak_price[ticker] = price
         if pnl > self._peak_pnl.get(ticker, 0):
@@ -102,72 +151,46 @@ class ExitPolicy:
         self,
         ticker: str,
         pnl: float,
-        direction: int,
-        price: float,
+        _direction: int,
+        _price: float,
     ) -> ExitSignal:
         """If peak gain reached a tier, lock in minimum profit."""
-        entry = self._entry_price.get(ticker, 0)
-        peak = self._peak_pnl.get(ticker, 0)
-        if entry <= 0 or peak <= 0:
-            return ExitSignal()
-        peak_gain_pct = abs(peak) / entry
-        current_gain_pct = abs(pnl) / entry if pnl > 0 else 0.0
-        for min_peak, min_lock in PROFIT_LOCK_TIERS:
-            if peak_gain_pct >= min_peak and current_gain_pct < min_lock:
-                return ExitSignal(
-                    True,
-                    f"profit_lock peak={peak_gain_pct:.1%} cur={current_gain_pct:.1%}",
-                    "profit_lock",
-                )
-        return ExitSignal()
+        return _profit_lock(
+            self._entry_price.get(ticker, 0),
+            self._peak_pnl.get(ticker, 0),
+            pnl,
+        )
 
     def _check_giveback(
         self,
         ticker: str,
         pnl: float,
-        direction: int = 1,
-        price: float = 0.0,
+        _direction: int = 1,
+        _price: float = 0.0,
     ) -> ExitSignal:
-        """Exit if unrealized P&L drops more than 45% from its peak."""
-        peak = self._peak_pnl.get(ticker, 0.0)
-        if peak <= 0:
-            return ExitSignal()
-        giveback = 1.0 - (pnl / peak if peak != 0 else 0)
-        if giveback > GIVEBACK_KEEP_RATIO:
-            return ExitSignal(True, f"giveback {giveback:.0%}", "giveback")
-        return ExitSignal()
+        """Exit when P&L drops more than the learned keep-ratio from its peak."""
+        return _giveback(pnl, self._peak_pnl.get(ticker, 0.0), self._keep_ratio)
 
     def _check_stale(
         self,
         ticker: str,
-        pnl: float = 0.0,
-        direction: int = 1,
-        price: float = 0.0,
+        _pnl: float = 0.0,
+        _direction: int = 1,
+        _price: float = 0.0,
     ) -> ExitSignal:
-        """Exit if held too long without significant progress."""
-        entry = self._entry_ts.get(ticker, time.time())
-        hold_min = (time.time() - entry) / 60.0
-        if hold_min > STALE_EXIT_MINUTES:
-            return ExitSignal(True, f"stale {hold_min:.0f}min", "stale")
-        return ExitSignal()
+        """Exit if held longer than the learned stale window."""
+        return _stale(self._entry_ts.get(ticker, time.time()), self._stale_minutes)
 
     def _check_consolidation(
         self,
         ticker: str,
-        pnl: float = 0.0,
-        direction: int = 1,
+        _pnl: float = 0.0,
+        _direction: int = 1,
         price: float = 0.0,
     ) -> ExitSignal:
         """Exit if price moves less than 0.1% for N consecutive pulses."""
         prev = self._prev_price.get(ticker, price)
-        threshold = abs(prev) * 0.001 if prev else 0.01
-        if abs(price - prev) < threshold:
-            self._flat_pulses[ticker] = self._flat_pulses.get(ticker, 0) + 1
-        else:
-            self._flat_pulses[ticker] = 0
+        sig, pulses = check_consolidation(price, prev, self._flat_pulses.get(ticker, 0))
+        self._flat_pulses[ticker] = pulses
         self._prev_price[ticker] = price
-        if self._flat_pulses.get(ticker, 0) >= CONSOLIDATION_PULSES:
-            return ExitSignal(
-                True, f"consolidation {self._flat_pulses[ticker]}p", "consolidation"
-            )
-        return ExitSignal()
+        return sig

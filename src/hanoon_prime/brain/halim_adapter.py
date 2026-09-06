@@ -14,8 +14,6 @@ import time
 import urllib.request
 from typing import Any
 
-from .config import HALIM_MOD_BOUND
-
 log = logging.getLogger(__name__)
 _VALID_REGIMES = frozenset(
     {

@@ -35,9 +35,9 @@ class RegimeDetector:
     def detect(
         self,
         close: list[float] | np.ndarray,
-        high: list[float] | np.ndarray | None = None,
-        low: list[float] | np.ndarray | None = None,
-        volume: list[float] | np.ndarray | None = None,
+        _high: list[float] | np.ndarray | None = None,
+        _low: list[float] | np.ndarray | None = None,
+        _volume: list[float] | np.ndarray | None = None,
     ) -> RegimeState:
         """Classify current regime from OHLCV arrays."""
         c = np.asarray(close, dtype=float)

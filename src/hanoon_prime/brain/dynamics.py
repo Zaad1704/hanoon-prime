@@ -108,7 +108,7 @@ class Dynamics:
         scores = list(self._score_history)
         return scores[-1] - scores[-2]
 
-    def _apply_hysteresis(self, score: float, direction: int) -> float:
+    def _apply_hysteresis(self, _score: float, direction: int) -> float:
         """Penalize direction changes (prevent flip-flopping)."""
         if direction == self._last_direction or self._last_direction == 0:
             return 0.0

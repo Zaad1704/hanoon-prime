@@ -6,7 +6,7 @@ ib_cycle read/write these. Thread-safe via simple attribute access.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 

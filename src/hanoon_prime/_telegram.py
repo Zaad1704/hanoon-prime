@@ -15,6 +15,8 @@ import time
 import urllib.request
 from typing import Optional
 
+from .types import ExitLevels
+
 log = logging.getLogger(__name__)
 
 _MAX_PER_MIN: int = 10
@@ -108,14 +110,13 @@ def trade_opened(
     side: str,
     qty: int,
     price: float,
-    stop: float,
-    target: float,
+    levels: ExitLevels,
 ) -> None:
     """Notify trade entry."""
     msg = (
         f"🟢 TRADE OPENED\n"
         f"{side} {qty} {ticker} @ ${price:.2f}\n"
-        f"Stop: ${stop:.2f} | Target: ${target:.2f}"
+        f"Stop: ${levels.stop:.2f} | Target: ${levels.target:.2f}"
     )
     send(msg)
     log.info(msg)
