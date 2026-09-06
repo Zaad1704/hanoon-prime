@@ -4,6 +4,7 @@ Holds conceptual knowledge about market regimes and indicator reliability.
 Regime masks suppress unreliable indicators; boost rules amplify reliable ones.
 Modifier bounded by SEMANTIC_MOD_BOUND (±0.03).
 """
+
 from __future__ import annotations
 
 from typing import Any

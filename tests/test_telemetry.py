@@ -3,6 +3,7 @@
 Tests the TelemetryAPI endpoints: /health, /safety-net (GET + POST),
 verifying the safety net toggle works via the webapp.
 """
+
 from __future__ import annotations
 
 import json

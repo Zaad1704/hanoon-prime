@@ -3,6 +3,7 @@
 IB is source of truth for: positions, P&L, fills, trade execution.
 NeuromorphicBrain (via JuliBrain) is local source of truth for decisions.
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,14 +49,20 @@ class IBStreamingBot(BotCycleMixin):
 
     def _setup_signals(self) -> None:
         """Handle SIGINT/SIGTERM for graceful shutdown."""
+
         def _h(s: int, _: Any) -> None:
             log.warning("Signal %s", s)
             self._running = False
+
         signal.signal(signal.SIGINT, _h)
         signal.signal(signal.SIGTERM, _h)
 
-    def connect(self, host: str = IB_HOST, port: int = IB_PAPER_PORT,
-                client_id: int = IB_CLIENT_ID) -> None:
+    def connect(
+        self,
+        host: str = IB_HOST,
+        port: int = IB_PAPER_PORT,
+        client_id: int = IB_CLIENT_ID,
+    ) -> None:
         """Connect to IB Gateway with retry logic."""
         for attempt in range(1, MAX_RECONNECT + 1):
             log.info("Connect %s:%s (attempt %d)", host, port, attempt)

@@ -149,4 +149,4 @@ class NashBrain:
         return t
 
 
-__all__ = ["NashBrain", "NashPrediction", "MOD_BOUND"]
+__all__ = ["NashBrain", "NashPrediction", "MOD_BOUND", "NASH_GATE_WR", "_GATE_WR"]

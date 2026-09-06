@@ -3,6 +3,7 @@ Pure functions that read state from IB. Used by ib_executor.py
 to keep that file under the 200-line R3 limit.
 IB is the single source of truth — these functions only READ from IB.
 """
+
 from __future__ import annotations
 
 import time

@@ -1,5 +1,7 @@
 """hanoon_prime.brain.halim_analysis — HALIM post-trade analysis utilities."""
+
 from __future__ import annotations
+
 import json
 import logging
 import urllib.request

@@ -4,6 +4,7 @@ Uses permutation tests to determine whether each indicator's
 correlation with next-bar returns is significant. Flow:
 pool → permute (p<0.05) → weight by |corr|.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,8 @@ def _perm_pvalue(signals: np.ndarray, returns: np.ndarray, n_perm: int) -> float
         return 1.0
     rng = np.random.default_rng(42)
     count = sum(
-        1 for _ in range(n_perm)
+        1
+        for _ in range(n_perm)
         if (lambda p: not np.isnan(p) and p >= observed)(
             abs(np.corrcoef(rng.permutation(signals), returns)[0, 1])
         )
@@ -85,11 +87,20 @@ def _test_pooled_indicator(
 ) -> dict[str, Any]:
     """Run permutation test for one indicator on pooled data."""
     if len(sig_array) < EDGE_MIN_SAMPLES:
-        return {"pvalue": 1.0, "corr": 0.0, "n_samples": len(sig_array), "significant": False}
+        return {
+            "pvalue": 1.0,
+            "corr": 0.0,
+            "n_samples": len(sig_array),
+            "significant": False,
+        }
     p = _perm_pvalue(sig_array, ret_array, n_perm)
     c = np.corrcoef(sig_array, ret_array)[0, 1]
-    return {"pvalue": p, "corr": float(c) if not np.isnan(c) else 0.0,
-            "n_samples": len(sig_array), "significant": p < EDGE_P_VALUE}
+    return {
+        "pvalue": p,
+        "corr": float(c) if not np.isnan(c) else 0.0,
+        "n_samples": len(sig_array),
+        "significant": p < EDGE_P_VALUE,
+    }
 
 
 def evaluate_indicator_pooled(
@@ -121,9 +132,13 @@ def evaluate_indicator_edge(
 
 
 def _eval_ticker(
-    ticker: str, data_dir: Path, n_perm: int,
-    pvals: dict[str, list[float]], corrs: dict[str, list[float]],
-    sig_counts: dict[str, int], total_counts: dict[str, int],
+    ticker: str,
+    data_dir: Path,
+    n_perm: int,
+    pvals: dict[str, list[float]],
+    corrs: dict[str, list[float]],
+    sig_counts: dict[str, int],
+    total_counts: dict[str, int],
 ) -> None:
     """Evaluate all indicators for one ticker."""
     path = data_dir / f"{ticker}_1min.csv"
@@ -150,8 +165,10 @@ def _eval_ticker(
 
 
 def _aggregate_edges(
-    pvals: dict[str, list[float]], corrs: dict[str, list[float]],
-    sig_counts: dict[str, int], total_counts: dict[str, int],
+    pvals: dict[str, list[float]],
+    corrs: dict[str, list[float]],
+    sig_counts: dict[str, int],
+    total_counts: dict[str, int],
 ) -> dict[str, dict[str, Any]]:
     """Build result dict from per-ticker accumulators."""
     results: dict[str, dict[str, Any]] = {}
@@ -159,7 +176,8 @@ def _aggregate_edges(
         avg_p = float(np.mean(pvals[name])) if pvals[name] else 1.0
         avg_c = float(np.mean(corrs[name])) if corrs[name] else 0.0
         results[name] = {
-            "pvalue": avg_p, "corr": avg_c,
+            "pvalue": avg_p,
+            "corr": avg_c,
             "tickers_significant": sig_counts[name],
             "tickers_total": total_counts[name],
         }

@@ -8,6 +8,7 @@ IB client objects. Tests verify:
 3. seed_history requests 1-min bars (not daily — the ATR collapse fix)
 4. buffer_atr returns realistic values from aggregated bars
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

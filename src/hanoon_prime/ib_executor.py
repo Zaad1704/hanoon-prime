@@ -263,6 +263,7 @@ class IBExecutor:
             limit_price = round(mp + offset, 2)
             try:
                 from ib_insync import LimitOrder
+
                 order = LimitOrder(action, qty, limit_price, tif="DAY", outsideRth=True)
                 self.ib.placeOrder(pos.contract, order)
                 log.info("FLATTEN %s %s %d @ %.2f", action, sym, qty, limit_price)

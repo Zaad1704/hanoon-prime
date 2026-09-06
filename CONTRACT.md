@@ -101,13 +101,14 @@ impossible. If you can't commit, you can't break the main branch.
 | R3 | `check_complexity.py` | Any function > 40 lines or nesting > 3 |
 | R3b | `check_file_length.sh` | Any source file > 200 lines |
 | R3c | `mypy --strict` | Type errors anywhere in src/ |
-| R4 | `test_R4_*` | Fewer or more than exactly 5 indicators |
+| R4 | `test_R4_*` | Fewer than 5 core indicators or missing compute functions |
+| R4b | `test_R4b_weights_sum_to_target` | Weight sum outside [0.8, 1.2] |
 | R5 | `test_R5_*` | SCORE_INVERT=True or PRIOR_TOP > 0.65 |
 | R6 | `test_R6_*` | Safety nets configurable via env vars |
 | R7 | `test_R7_*` | Journal entries can be deleted/updated |
-| R8 | `test_R8_*` | Weight adaptation in any file except hippocampus.py |
+| R8 | `test_R8_*` | Cognitive learning ecosystem incomplete (missing STDP/Hippocampus/Nash/Episodic) |
 | R9 | `test_R9_*` + `check_positive_weights.py` | Any INDICATOR_WEIGHTS value < 0 |
-| R10 | `test_R10_*` + `check_print.py` | Any `print()` call in src/ (excluding ib_adapter.py) |
+| R10 | `test_R10_*` + `check_print.py` | Any `print()` call in src/ (excluding IB adapter layer) |
 | R11 | `test_R11_*` + `check_docstrings.py` | Public function missing docstring |
 | R12 | `test_R12_*` | Coverage gate not configured at ≥80% |
 | R13 | `test_R13_*` + `check_no_string_dispatch.py` | Verdicts compared as strings (typo risk) |

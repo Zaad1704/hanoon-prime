@@ -6,6 +6,7 @@ historical data. If it doesn't, the test fails and the build breaks.
 These tests run the ACTUAL brain (not a placeholder) through ACTUAL
 historical CSV data.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

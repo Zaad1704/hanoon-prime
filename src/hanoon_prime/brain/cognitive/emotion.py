@@ -4,6 +4,7 @@ Computes fear, greed, frustration from recent trade outcomes.
 Modulates confidence by ±0.05 and risk scalar by [0.85, 1.25].
 Learned from JULI's own realized performance.
 """
+
 from __future__ import annotations
 
 from collections import deque

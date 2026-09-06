@@ -3,6 +3,7 @@
 Monitors tick freshness and triggers panic mode (auto-flatten) when
 ticks go stale for too long. Runs on the monitor daemon thread.
 """
+
 from __future__ import annotations
 
 import time

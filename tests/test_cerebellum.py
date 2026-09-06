@@ -5,6 +5,7 @@ Every indicator must be:
   - Directionally correct (positive signal → bullish, negative → bearish)
   - Bounded (never NaN, never infinity)
 """
+
 from __future__ import annotations
 
 import numpy as np

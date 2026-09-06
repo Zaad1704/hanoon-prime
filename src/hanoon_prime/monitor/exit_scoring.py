@@ -4,6 +4,7 @@ Re-scores each open position through JULI's live indicators to determine
 health. If health drops below threshold, an exit signal is generated.
 This runs on the monitor daemon thread, not the main loop.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

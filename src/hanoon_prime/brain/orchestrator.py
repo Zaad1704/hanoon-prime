@@ -5,11 +5,16 @@ Slow path: ConsolidationEngine for background work.
 """
 
 from __future__ import annotations
+
 import logging
 from typing import Any, Optional
-from ..cortex import Cortex, Thought
+
+from ..cortex import Cortex
 from ..hippocampus import Hippocampus
 from .affective import Affective
+from .cognitive.nash import _GATE_WR as NASH_GATE_WR
+from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
+from .cognitive.nash import NashBrain, NashPrediction
 from .consolidation import ConsolidationEngine
 from .deliberation import Deliberator
 from .dynamics import Dynamics
@@ -22,12 +27,11 @@ from .risk import RiskEngine, SizingResult
 from .shared_state import BrainState
 
 log = logging.getLogger(__name__)
+NEURO_BLEND: float = 0.3
 
 
 class NeuromorphicBrain:
     """Neuromorphic brain — LOCAL SOURCE OF TRUTH for all decisions."""
-
-    NEURO_BLEND: float = 0.3
 
     def __init__(
         self, brain_state: BrainState | None = None, enable_neuromorphic: bool = True
@@ -41,6 +45,7 @@ class NeuromorphicBrain:
         self.affective = Affective()
         self.deliberator = Deliberator(threshold=self.memory.threshold)
         self.dynamics = Dynamics(base_threshold=self.memory.threshold)
+        self.nash = NashBrain()
         self.risk = RiskEngine()
         self.exits = ExitPolicy()
         self._neuromorphic: Optional[NeuromorphicBridge] = None
@@ -100,27 +105,51 @@ class NeuromorphicBrain:
             "trace": {},
         }
 
-    def _get_regime_data(self) -> tuple[float, str, str, float, float]:
-        """Get regime modifiers from shared state (updated by slow path)."""
+    def _get_regime_data(self) -> tuple[float, str, str, float, float, float]:
+        """Get regime modifiers from shared state."""
         return (
             self.state.get("regime_multiplier", 1.0),
             self.state.get("regime_label", "unknown"),
             self.state.get("regime_risk", "normal"),
             self.state.get("halim_modifier", 0.0),
             self.state.get("episodic_bias", 0.0),
+            self.state.get("nash_modifier", 0.0),
         )
 
-    def _process_alpha(self, alpha: dict[str, float], ticker: str) -> dict[str, Any]:
-        """Process alpha through neuromorphic network."""
-        if self._neuromorphic is None:
-            return {"score": 0.0, "trace": {}}
-        r = self._neuromorphic.process_alpha(alpha, ticker)
-        t = r.get("trace", {})
-        return {
-            "score": r.get("score", 0.0),
-            "spikes": t.get("spikes", 0),
-            "evidence": t.get("evidence", {}),
-        }
+    def _compute_neuro_score(self, alpha: dict[str, float], ticker: str) -> float:
+        """Compute neuromorphic score."""
+        if not self._neuromorphic:
+            return 0.0
+        result: dict[str, Any] = self._neuromorphic.process_alpha(alpha, ticker)
+        return float(result.get("score", 0.0))
+
+    def _compute_nash_mod(self, nash_pred: NashPrediction) -> float:
+        """Compute Nash modifier from prediction."""
+        return float(
+            NASH_MOD_BOUND * 4 * (nash_pred.confidence * (nash_pred.win_prob - 0.5))
+        )
+
+    def _apply_nash_gate(
+        self, score: float, direction: int, nash_pred: NashPrediction
+    ) -> float:
+        """Apply Nash veto gate if triggered."""
+        if not nash_pred.gate_authority:
+            return score
+        if direction > 0 and nash_pred.win_prob < NASH_GATE_WR:
+            return 0.0  # Bullish veto
+        if direction < 0 and nash_pred.win_prob > (1 - NASH_GATE_WR):
+            return 0.0  # Bearish veto
+        return score
+
+    def _check_eod_penalty(self) -> float:
+        """Return score penalty multiplier (0 if EOD, else 1)."""
+        from ..config import TRADING_CONFIG
+        from ..monitor.sleep_manager import SleepManager
+
+        remaining = SleepManager().minutes_to_close()
+        if 0 < remaining <= TRADING_CONFIG.eod_flatten_minutes:
+            return 0.0
+        return 1.0
 
     def _evaluate_fast(
         self,
@@ -131,28 +160,24 @@ class NeuromorphicBrain:
         open_positions: int,
     ) -> dict[str, Any]:
         """Core fast evaluation — all decisions via neuromorphic brain."""
-        r, rl, rr, hm, eb = self._get_regime_data()
+        r, rl, rr, hm, eb, _ = self._get_regime_data()
         base = self.cortex.evaluate(alpha)
-        neuro_result = self._process_alpha(alpha, ticker)
-        neuro_score = neuro_result.get("score", 0.0)
-        blended = (1 - self.NEURO_BLEND) * base.score + self.NEURO_BLEND * neuro_score
-        score = (
-            blended * r + hm + eb
-        )  # EOD awareness: kill entries in last N minutes of RTH
-        from ..config import TRADING_CONFIG
-        from ..monitor.sleep_manager import SleepManager
-
-        remaining = SleepManager().minutes_to_close()
-        if 0 < remaining <= TRADING_CONFIG.eod_flatten_minutes:
-            score = 0.0  # No new entries near close
-            log.debug("EOD penalty: score zeroed (%.1f min to close)", remaining)
+        nash_pred = self.nash.predict(alpha, base.score, base.direction)
+        nash_op = self._compute_nash_mod(nash_pred)
+        neuro_score = self._compute_neuro_score(alpha, ticker)
+        blended = (1 - NEURO_BLEND) * base.score + NEURO_BLEND * neuro_score
+        score = blended * r + hm + eb + nash_op
         direction = 1 if score > 0 else (-1 if score < 0 else 0)
+        score = self._apply_nash_gate(score, direction, nash_pred)
+        if self._check_eod_penalty() == 0.0:
+            score = 0.0
         stabilized, dyn_reason = self.dynamics.process(score, direction)
         final_dir = 1 if stabilized > 0 else (-1 if stabilized < 0 else 0)
         sizing = self._maybe_size(
             stabilized, base.confidence, entry_price, atr, open_positions
         )
         self._store_decision(ticker, alpha, stabilized)
+        self.state.update(nash_modifier=nash_op, nash_win_prob=nash_pred.win_prob)
         return {
             "ticker": ticker,
             "verdict": base.verdict,
@@ -164,11 +189,12 @@ class NeuromorphicBrain:
             "risk": rr,
             "trace": {
                 "base": base.score,
-                "regime": r,
+                "neuro": {"score": neuro_score},
+                "nash": nash_op,
                 "halim": hm,
-                "neuro": neuro_result,
             },
             "dyn_reason": dyn_reason,
+            "nash_win_prob": nash_pred.win_prob,
         }
 
     def _store_decision(
@@ -188,6 +214,8 @@ class NeuromorphicBrain:
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
         self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)
+        if self._last_alpha.get(ticker):
+            self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
         if self._neuromorphic is not None:
             self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
 
@@ -248,6 +276,7 @@ class NeuromorphicBrain:
             "brain_state": self.state.snapshot(),
             "decision_count": self._decision_count,
             "neuromorphic": self._neuromorphic.snapshot() if self._neuromorphic else {},
+            "nash": self.nash.get_telemetry(),
         }
         if self._sleep_engine is not None:
             result["sleep_engine"] = {

@@ -4,6 +4,7 @@ Fuses the 5 cognitive pillars (semantic, episodic, emotion, planning,
 metacognition) + Nash arbitration into a single bounded modifier.
 No single pillar can dominate. The thinker is stateless across ticks.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

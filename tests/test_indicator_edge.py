@@ -9,6 +9,7 @@ system validates itself.
 An indicator "has edge" if the permutation test rejects the null
 hypothesis (p < 0.05) on the pooled dataset.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

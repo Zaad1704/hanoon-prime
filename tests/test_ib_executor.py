@@ -8,6 +8,7 @@ Tests verify:
 5. _record_exit reads IB trade P&L directly (no local journal write)
 6. _ping_ib verifies connection before sync
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

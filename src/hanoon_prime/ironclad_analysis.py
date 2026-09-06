@@ -2,7 +2,9 @@
 
 HALIM-integrated post-trade analysis, health assessments, and self-correction.
 """
+
 from __future__ import annotations
+
 import logging
 from typing import Any, Optional
 
@@ -15,10 +17,12 @@ class HalimAnalyzer:
     def __init__(self, halim: Any) -> None:
         self._halim = halim
 
-    def analyze_trade(self, ticker: str, won: bool, pnl: float,
-                      alpha: dict[str, float]) -> dict[str, Any]:
+    def analyze_trade(
+        self, ticker: str, won: bool, pnl: float, alpha: dict[str, float]
+    ) -> dict[str, Any]:
         """Deep post-trade analysis via HALIM API."""
-        if self._halim is None: return {}
+        if self._halim is None:
+            return {}
         try:
             result: dict[str, Any] = self._halim.analyze_trade(ticker, won, pnl, alpha)
             return result
@@ -32,16 +36,24 @@ class HalimAnalyzer:
         losses = len(trades) - wins
         total_pnl = sum(getattr(t, "pnl", 0) for t in trades)
         return {
-            "total_trades": len(trades), "win_rate": wins / max(len(trades), 1),
+            "total_trades": len(trades),
+            "win_rate": wins / max(len(trades), 1),
             "total_pnl": total_pnl,
-            "avg_win": sum(getattr(t, "pnl", 0) for t in trades if getattr(t, "won", False)) / max(wins, 1),
-            "avg_loss": sum(getattr(t, "pnl", 0) for t in trades if not getattr(t, "won", False)) / max(losses, 1),
+            "avg_win": sum(
+                getattr(t, "pnl", 0) for t in trades if getattr(t, "won", False)
+            )
+            / max(wins, 1),
+            "avg_loss": sum(
+                getattr(t, "pnl", 0) for t in trades if not getattr(t, "won", False)
+            )
+            / max(losses, 1),
             "halim_recommendations": self._get_halim_recs(),
         }
 
     def _get_halim_recs(self) -> list[dict[str, Any]]:
         """Get HALIM's recommendations for improvement."""
-        if self._halim is None: return []
+        if self._halim is None:
+            return []
         try:
             recs: list[dict[str, Any]] = self._halim.get_improvement_recommendations()
             return recs
@@ -50,7 +62,8 @@ class HalimAnalyzer:
 
     def get_health_advice(self) -> dict[str, Any]:
         """Get HALIM's health assessment and recommendations."""
-        if self._halim is None: return {}
+        if self._halim is None:
+            return {}
         try:
             advice: dict[str, Any] = self._halim.get_health_advice()
             return advice
@@ -65,11 +78,14 @@ def assess_neuromorphic_health(brain: Any) -> str:
     neuromorphic = snap.get("neuromorphic", {})
     net = neuromorphic.get("network", {})
     synapse_count = net.get("synapse_count", 0)
-    if synapse_count < 10: return "failing"
+    if synapse_count < 10:
+        return "failing"
     decision_count = snap.get("decision_count", 0)
-    if decision_count == 0: return "degrading"
+    if decision_count == 0:
+        return "degrading"
     episodic_size = snap.get("episodic_size", 0)
-    if episodic_size > 10000: return "degrading"
+    if episodic_size > 10000:
+        return "degrading"
     return "optimal"
 
 
@@ -80,7 +96,8 @@ def apply_corrections(brain: Any, degradation: str) -> list[str]:
         log.warning("NEUROMORPHIC FAILURE DETECTED - INITIATING RECOVERY")
         brain._neuromorphic = None
         brain._sleep_engine = None
-        if hasattr(brain, "_init_neuromorphic"): brain._init_neuromorphic()
+        if hasattr(brain, "_init_neuromorphic"):
+            brain._init_neuromorphic()
         actions.append("neuromorphic_reset")
     elif degradation == "degrading":
         actions.append("threshold_adjust")
@@ -99,4 +116,9 @@ def apply_halim_advice(advice: dict[str, Any]) -> list[str]:
     return actions
 
 
-__all__ = ["HalimAnalyzer", "assess_neuromorphic_health", "apply_corrections", "apply_halim_advice"]
+__all__ = [
+    "HalimAnalyzer",
+    "assess_neuromorphic_health",
+    "apply_corrections",
+    "apply_halim_advice",
+]

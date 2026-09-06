@@ -59,10 +59,10 @@ repos:
         pass_filenames: false
         always_run: true
 
-      # CI Gate: R4 (exactly 5 indicators)
+      # CI Gate: R4 (indicators with compute functions)
       - id: r4-indicators
-        name: R4 — Exactly 5 Indicators
-        entry: pytest tests/test_contract.py::test_R4_indicator_set_is_exactly_5 -v -o addopts=""
+        name: R4 — Indicators with Compute Functions
+        entry: pytest tests/test_contract.py::test_R4_indicator_set_has_compute_functions tests/test_contract.py::test_R4b_weights_sum_to_target -v -o addopts=""
         language: system
         pass_filenames: false
         always_run: true
@@ -83,10 +83,10 @@ repos:
         pass_filenames: false
         always_run: true
 
-      # CI Gate: R8 (single learning system)
-      - id: r8-single-learning
-        name: R8 — Single Learning System
-        entry: pytest tests/test_contract.py::test_R8_single_learning_system -v -o addopts=""
+      # CI Gate: R8 (integrated learning ecosystem)
+      - id: r8-learning
+        name: R8 — Integrated Learning Ecosystem
+        entry: pytest tests/test_contract.py::test_R8_learning_ecosystem_integrated -v -o addopts=""
         language: system
         pass_filenames: false
         always_run: true

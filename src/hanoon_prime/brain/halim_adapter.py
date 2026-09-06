@@ -4,6 +4,7 @@ Communicates with the external HALIM AI advisor service.
 Returns bounded modifier and rich regime classifications.
 Non-blocking: starts debate async, reads cached result instantly.
 """
+
 from __future__ import annotations
 
 import json

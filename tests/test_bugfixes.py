@@ -4,6 +4,7 @@ Bug #1: _exec_decision must respect brain sizing result (threshold bypass).
 Bug #2: Safety net must be enabled by default (MAX_CONCURRENT_POSITIONS).
 Bug #3: Off-market entries must be blocked (US/Eastern market hours).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

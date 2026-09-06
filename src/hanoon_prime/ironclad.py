@@ -3,7 +3,9 @@
 Provides cryptographic integrity, health monitoring, and self-correction
 for the entire neuromorphic brain pipeline.
 """
+
 from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -14,7 +16,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .ironclad_analysis import (
-    HalimAnalyzer, assess_neuromorphic_health, apply_corrections, apply_halim_advice,
+    HalimAnalyzer,
+    apply_corrections,
+    apply_halim_advice,
+    assess_neuromorphic_health,
 )
 
 log = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ _SNAPSHOT_KEY: bytes = b"ironclad-snapshot-key-change-in-production"
 @dataclass
 class IntegrityRecord:
     """Cryptographic integrity record for data."""
+
     data_hash: str
     signature: str
     timestamp: float
@@ -35,6 +41,7 @@ class IntegrityRecord:
 @dataclass
 class HealthReport:
     """System health status report."""
+
     timestamp: float
     uptime: float
     throughput: float
@@ -108,10 +115,18 @@ class IroncladMonitor:
         avg_latency = (self._latency_sum / max(self._decision_count, 1)) * 1000
         nm_health = assess_neuromorphic_health(self._brain)
         integrity = "healthy" if nm_health == "optimal" else "degraded"
-        report = HealthReport(time.time(), uptime, throughput, error_rate,
-                              avg_latency, integrity, nm_health)
+        report = HealthReport(
+            time.time(),
+            uptime,
+            throughput,
+            error_rate,
+            avg_latency,
+            integrity,
+            nm_health,
+        )
         self._health_history.append(report)
-        if len(self._health_history) > 100: self._health_history = self._health_history[-100:]
+        if len(self._health_history) > 100:
+            self._health_history = self._health_history[-100:]
         return report
 
     # === Self-Correction ===
@@ -131,14 +146,21 @@ class IroncladMonitor:
 
     # === Post-Trade Analysis ===
 
-    def analyze_trade(self, ticker: str, won: bool, pnl: float, alpha: dict[str, float]) -> dict[str, Any]:
+    def analyze_trade(
+        self, ticker: str, won: bool, pnl: float, alpha: dict[str, float]
+    ) -> dict[str, Any]:
         """Post-trade analysis with HALIM integration."""
         analysis: dict[str, Any] = {
-            "ticker": ticker, "won": won, "pnl": pnl, "alpha": alpha,
+            "ticker": ticker,
+            "won": won,
+            "pnl": pnl,
+            "alpha": alpha,
             "assessment": "win" if won else "loss",
         }
         if self._halim_analyzer:
-            analysis["halim_insight"] = self._halim_analyzer.analyze_trade(ticker, won, pnl, alpha)
+            analysis["halim_insight"] = self._halim_analyzer.analyze_trade(
+                ticker, won, pnl, alpha
+            )
         self._brain.on_trade_close(ticker, won, pnl)
         if won:
             analysis["learning"] = "strengthen_winning_pathway"
@@ -151,8 +173,13 @@ class IroncladMonitor:
         """Generate post-mortem analysis of recent trades."""
         if not hasattr(self._brain, "episodic"):
             return {"error": "No episodic memory"}
-        trades = self._brain.episodic.recent_trades(recent_n) if hasattr(self._brain.episodic, "recent_trades") else []
-        if not trades: return {"message": "No trades to analyze"}
+        trades = (
+            self._brain.episodic.recent_trades(recent_n)
+            if hasattr(self._brain.episodic, "recent_trades")
+            else []
+        )
+        if not trades:
+            return {"message": "No trades to analyze"}
         if self._halim_analyzer:
             return self._halim_analyzer.get_postmortem(trades, recent_n)
         return {"total_trades": len(trades), "message": "No HALIM integration"}
@@ -165,7 +192,8 @@ def get_monitor(julibrain: Any = None) -> IroncladMonitor:
     """Get or create the global integrity monitor."""
     global _monitor
     if _monitor is None:
-        if julibrain is None: raise RuntimeError("Must call get_monitor(brain) first time")
+        if julibrain is None:
+            raise RuntimeError("Must call get_monitor(brain) first time")
         _monitor = IroncladMonitor(julibrain)
     return _monitor
 
@@ -176,4 +204,10 @@ def reset_monitor() -> None:
     _monitor = None
 
 
-__all__ = ["IroncladMonitor", "IntegrityRecord", "HealthReport", "get_monitor", "reset_monitor"]
+__all__ = [
+    "IroncladMonitor",
+    "IntegrityRecord",
+    "HealthReport",
+    "get_monitor",
+    "reset_monitor",
+]

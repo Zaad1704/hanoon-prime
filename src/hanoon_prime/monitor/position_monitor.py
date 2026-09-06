@@ -4,6 +4,7 @@ Runs on a background thread, re-scores each open position through JULI's
 live brain, feeds exit signals to the shared BrainState, and detects
 stale ticks. The main loop reads exit signals from shared state.
 """
+
 from __future__ import annotations
 
 import logging

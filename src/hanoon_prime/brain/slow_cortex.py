@@ -4,6 +4,7 @@ Handles all network I/O, heavy compute, and disk persistence.
 Updates shared BrainState for System 1 to read instantly.
 Biological parallel: The prefrontal cortex during sleep — consolidating memories.
 """
+
 from __future__ import annotations
 
 import json
@@ -145,9 +146,11 @@ class SlowCortex:
                 "weights": self.memory.get_weights(),
                 "threshold": self.memory.threshold,
                 "pred_error": self.memory.pred_error,
-                "episodic_size": len(self.thinker.episodic._episodes)
-                if hasattr(self.thinker, "episodic")
-                else 0,
+                "episodic_size": (
+                    len(self.thinker.episodic._episodes)
+                    if hasattr(self.thinker, "episodic")
+                    else 0
+                ),
                 "brain_state": self.state.snapshot(),
                 "timestamp": time.time(),
             }

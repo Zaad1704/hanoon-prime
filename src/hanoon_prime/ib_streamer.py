@@ -3,6 +3,7 @@
 Manages live market data: reqMktData, reqMktDepth, reqHistoricalData.
 Tracks executions and commissions for journal carbon copy.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ from .immune import DEPTH_ROWS, EDGE_LOOKBACK, LOOKBACK_BARS
 
 log = logging.getLogger(__name__)
 
+
 @dataclass
 class StreamBuffer:
     """Circular buffer holding recent bars for one ticker."""
@@ -31,12 +33,27 @@ class StreamBuffer:
     bid_sizes: list[float] = field(default_factory=list)
     ask_sizes: list[float] = field(default_factory=list)
 
-    def append(self, close: float, high: float, low: float,
-               volume: float, buy_vol: float, bid_size: float, ask_size: float) -> None:
+    def append(
+        self,
+        close: float,
+        high: float,
+        low: float,
+        volume: float,
+        buy_vol: float,
+        bid_size: float,
+        ask_size: float,
+    ) -> None:
         """Append one bar, trimming to LOOKBACK_BARS."""
         vals = (close, high, low, volume, buy_vol, bid_size, ask_size)
-        attrs = [self.close, self.high, self.low, self.volume,
-                 self.buy_vol, self.bid_sizes, self.ask_sizes]
+        attrs = [
+            self.close,
+            self.high,
+            self.low,
+            self.volume,
+            self.buy_vol,
+            self.bid_sizes,
+            self.ask_sizes,
+        ]
         for lst, val in zip(attrs, vals, strict=True):
             lst.append(val)
         for lst in attrs:
@@ -55,6 +72,7 @@ class StreamBuffer:
         result["bid_sizes"] = np.array(self.bid_sizes)
         result["ask_sizes"] = np.array(self.ask_sizes)
         return result
+
 
 class IBStreamer:
     """Manages all IB Gateway streaming subscriptions for one bot."""
@@ -84,14 +102,22 @@ class IBStreamer:
     def seed_history(self, ticker: str) -> None:
         """Fetch 1-min historical bars for lookback seeding."""
         contract = self.contracts[ticker]
-        bars = self.ib.reqHistoricalData(contract, endDateTime="", durationStr="2 D",
-                                          barSizeSetting="1 min", whatToShow="TRADES",
-                                          useRTH=True, formatDate=1)
+        bars = self.ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr="2 D",
+            barSizeSetting="1 min",
+            whatToShow="TRADES",
+            useRTH=True,
+            formatDate=1,
+        )
         self.ib.sleep(1)
         buf = self.buffers[ticker]
         for bar in reversed(bars):
             bv = self._est_buy_vol(bar.close, bar.high, bar.low, bar.volume)
-            buf.append(bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume)
+            buf.append(
+                bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume
+            )
 
     @staticmethod
     def _est_buy_vol(close: float, high: float, low: float, vol: float) -> float:
@@ -111,7 +137,9 @@ class IBStreamer:
         tk = self.ticker_subs.get(ticker)
         if tk is None or not tk.hasBidAsk():
             return None
-        close = next((float(v) for v in (tk.close, tk.last) if v and not np.isnan(v)), None)
+        close = next(
+            (float(v) for v in (tk.close, tk.last) if v and not np.isnan(v)), None
+        )
         if close is None:
             return None
         high = float(tk.high) if (tk.high and not np.isnan(tk.high)) else close
@@ -121,8 +149,12 @@ class IBStreamer:
         dt = self.depth_subs.get(ticker)
         dom_bids = list(dt.domBids) if dt and dt.domBids else []
         dom_asks = list(dt.domAsks) if dt and dt.domAsks else []
-        bid_sz = sum(d.size for d in dom_bids[:3]) if dom_bids else float(tk.bidSize or 1)
-        ask_sz = sum(d.size for d in dom_asks[:3]) if dom_asks else float(tk.askSize or 1)
+        bid_sz = (
+            sum(d.size for d in dom_bids[:3]) if dom_bids else float(tk.bidSize or 1)
+        )
+        ask_sz = (
+            sum(d.size for d in dom_asks[:3]) if dom_asks else float(tk.askSize or 1)
+        )
         ts = tk.time.timestamp() if tk.time else time.time()
         return close, high, low, vol, bv, bid_sz, ask_sz, ts
 
@@ -168,9 +200,15 @@ class IBStreamer:
         """Record an IB execution (fill) for journal carbon copy."""
         try:
             e = fill.execution
-            self.executions.append({"ticker": fill.contract.symbol, "action": e.side,
-                                    "shares": e.shares, "price": e.price,
-                                    "timestamp": e.time.timestamp() if e.time else time.time()})
+            self.executions.append(
+                {
+                    "ticker": fill.contract.symbol,
+                    "action": e.side,
+                    "shares": e.shares,
+                    "price": e.price,
+                    "timestamp": e.time.timestamp() if e.time else time.time(),
+                }
+            )
         except Exception:
             pass
 
@@ -178,7 +216,9 @@ class IBStreamer:
         """Record IB commission report for journal carbon copy."""
         try:
             sym = fill.contract.symbol if fill.contract else ""
-            self.commissions[sym] = self.commissions.get(sym, 0.0) + float(report.commission)
+            self.commissions[sym] = self.commissions.get(sym, 0.0) + float(
+                report.commission
+            )
         except Exception:
             pass
 

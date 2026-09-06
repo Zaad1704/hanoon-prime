@@ -1,5 +1,7 @@
 """hanoon_prime.ib_bracket — IB bracket order utilities."""
+
 from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -23,7 +25,9 @@ def _extract_bracket_prices(t: Any) -> tuple[float, float] | None:
     return (float(max(sp)), float(max(tp)))
 
 
-def _brackets_from_trades(ib: Any, tracked: set[str], brackets: dict[str, tuple[float, float]]) -> None:
+def _brackets_from_trades(
+    ib: Any, tracked: set[str], brackets: dict[str, tuple[float, float]]
+) -> None:
     """Update bracket levels from IB trades."""
     try:
         for t in ib.trades():

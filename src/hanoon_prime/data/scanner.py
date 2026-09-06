@@ -6,6 +6,7 @@ Replaces hardcoded ticker lists with dynamic discovery.
 Scanner returns ScanDataList that auto-populates via events.
 We poll the list to extract results. Max 50 results per scan.
 """
+
 from __future__ import annotations
 
 import logging

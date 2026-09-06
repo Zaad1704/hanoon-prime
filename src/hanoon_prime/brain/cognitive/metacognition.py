@@ -5,6 +5,7 @@ Combines margin uncertainty (how close to threshold) and prediction
 error (how often JULI's past predictions were wrong).
 Modifier bounded by THINK_BOUND (±0.04).
 """
+
 from __future__ import annotations
 
 from collections import deque
