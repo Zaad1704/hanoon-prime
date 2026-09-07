@@ -98,10 +98,10 @@ class JuliFeed:
             return
         if self._state.get("regime_label", "unknown") != "unknown":
             return
-        self._last_fallback = now
         prices = self._state.get_latest_prices() or []
         if len(prices) < 20:
-            return
+            return  # no stamp: a dataless attempt must not starve the next one
+        self._last_fallback = now
         rs = self._detector.detect(prices)
         if rs.regime != "unknown":
             self._state.update(

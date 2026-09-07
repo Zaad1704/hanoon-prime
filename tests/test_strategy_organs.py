@@ -311,3 +311,16 @@ class TestStrategyGenome:
         brain = NeuromorphicBrain(enable_neuromorphic=False)
         issues = StrategyGenome(brain).diagnose()
         assert not any("dominant" in i for i in issues)
+
+    def test_state_dir_resolves_to_repo_root_runtime(self):
+        """Brain state persists to repo runtime/, never inside src/.
+
+        Regression: brain/config.py used parents[2], which from
+        src/hanoon_prime/brain/config.py resolved to src/runtime/ —
+        stranding all learned state inside the source tree.
+        """
+        from hanoon_prime.brain.config import STATE_DIR
+
+        root = Path(__file__).resolve().parents[1]
+        assert STATE_DIR == root / "runtime"
+        assert "src" not in STATE_DIR.parts[-2:]

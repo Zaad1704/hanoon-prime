@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 # ── Paths ────────────────────────────────────────────────────────────
-STATE_DIR = Path(__file__).resolve().parents[2] / "runtime"
+STATE_DIR = Path(__file__).resolve().parents[3] / "runtime"
 JULI_STATE_FILE = STATE_DIR / "juli_state.json"
 
 # ── Signal thresholds ────────────────────────────────────────────────

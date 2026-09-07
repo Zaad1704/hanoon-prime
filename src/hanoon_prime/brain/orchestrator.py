@@ -47,6 +47,7 @@ from .regime import RegimeDetector
 from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
 from .shared_state import BrainState
+from .strategy_genome import StrategyGenome
 
 log = logging.getLogger(__name__)
 NEURO_BLEND: float = 0.3
@@ -122,6 +123,7 @@ class NeuromorphicBrain:
         self._bandit = HorizonBandit()
         self._regime_weights = RegimeWeights()
         self._learned_exit = LearnedExitPolicy()
+        self.genome = StrategyGenome(self)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
         self._last_horizon: dict[str, str] = {}
@@ -538,6 +540,8 @@ class NeuromorphicBrain:
         self.dynamics.adapt_threshold(self.memory.pred_error)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
+        # Episodic k-NN gets ONE entry per close (here, profit-signed);
+        # Reflector intentionally does not add a second entry.
         self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)
         if self._last_alpha.get(ticker):
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
@@ -612,8 +616,9 @@ class NeuromorphicBrain:
         weights = self._weights_for(regime)
         self._wversion += 1
         self._apply_regime_weights(regime)
-        self.memory.record_outcome(won)
-        self.memory.update_pred_error(conf, 1.0 if won else 0.0)
+        # memory.record_outcome + update_pred_error are owned by the
+        # Reflector above (single-writer); _realized/advisor/exits write
+        # their own stores below.
         self._realized.add_outcome(score, won, pnl_pct, direction)
         self._realized.add_confidence_outcome(conf, won)
         self.exits.adapt_from_realized(self._realized)
@@ -681,6 +686,7 @@ class NeuromorphicBrain:
             "horizon_bandit": self._bandit.snapshot(),
             "regime_weights": self._regime_weights.snapshot(),
             "learned_exit": {"trades": self._learned_exit_trade_count()},
+            "genome": self.genome.get_genome(),
         }
         if self._sleep_engine is not None:
             result["sleep_engine"] = {

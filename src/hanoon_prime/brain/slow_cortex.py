@@ -140,7 +140,7 @@ class SlowCortex:
     def _persist_state(self) -> None:
         """Atomic write to state.json (disk I/O)."""
         try:
-            state_dir = Path(__file__).resolve().parents[2] / "runtime"
+            state_dir = Path(__file__).resolve().parents[3] / "runtime"
             state_dir.mkdir(parents=True, exist_ok=True)
             path = state_dir / "state.json"
             data = {

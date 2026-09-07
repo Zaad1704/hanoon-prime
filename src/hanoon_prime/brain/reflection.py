@@ -55,7 +55,9 @@ class Reflector:
         predicted_score = trade.predicted_score
         self._adapt_weights(won, direction, alpha)
         outcome = pnl_pct if direction > 0 else -pnl_pct
-        self._episodic.add(alpha, outcome)
+        # NOTE: episodic k-NN is written once by the orchestrator (the
+        # single writer for per-close episodes) — do not add here too,
+        # or real closes count double in recall.
         self._memory.add_episode(
             [alpha.get(k, 0.5) for k in list(alpha.keys())[:11]],
             outcome,
