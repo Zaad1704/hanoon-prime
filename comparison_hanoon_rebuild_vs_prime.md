@@ -859,3 +859,47 @@ rebuild still owns the ops surface (webapp/API, bridge services, portfolio
 risk manager, cross_asset optimiser, GateAdvisor) and the 27-indicator
 score; prime owns the contract-bound core with the 5-indicator signed tanh.
 The two generations now disagree mainly on **scope**, not philosophy.
+
+---
+
+## Addendum 3 — 2026-09-07, post-v2.2 head-to-head (code-verified)
+
+Both codebases re-read at commit: rebuild `5830534` (Fix #74, no new
+fixes since Addendum 2), prime `v2.2` (v2.1 brain-first + v2.2
+strategy organs + live smoke hardening).
+
+**Rebuild re-verified unchanged:** `decision.py` still re-ANDs the EV
+gate and conservative quality floor into the approval expression
+(doctrine-vs-reality tension); 3-tier exit ladder; no new fix-named
+suites since #74.
+
+**Prime advanced since Addendum 2:** all five dormant strategy organs
+now wired and live-learning (regime fallback + threading, cross-asset
+feed, meta-label sizing, horizon bandit, per-regime weights); genome
+read-model exposed in telemetry; pipeline health monitor daemon
+(`monitor/pipeline.py`, `GET /pipeline`); live smoke harness
+(23/23: false closes, false quotes, real-bar replay, zero orders);
+three critical bugs found and guarded by tests (state-path stranding,
+double-counted learning, numpy-truthiness entry kill — see FIXES.md).
+
+### Verdict by dimension
+
+| Dimension | Winner | Why |
+|---|---|---|
+| Decision correctness | **prime** | single verdict source, contract-enforced; rebuild re-ANDs its EV gate against its own doctrine |
+| Strategy learning | **prime** | 7 learners fan out per real close with regime context; all bounded, all persisted; rebuild's learning is mostly frozen |
+| Indicator breadth | rebuild | 27+10 vs prime's 27 (5 core + 22 higher-order) — parity approaching, rebuild still broader in raw count |
+| Risk depth | rebuild | portfolio risk manager + cross-asset optimiser vs prime's scalar pre-trade gate |
+| Scar tissue | rebuild | 74 fix-named regressions from real sessions vs prime's clean slate |
+| Ops surface | rebuild | webapp/API/bridge ecosystem vs prime's telemetry API + Telegram |
+| Continuous assurance | **prime** | pipeline monitor daemon + smoke harness + fixing journal; rebuild has no equivalent self-check loop |
+| Test discipline | **prime** | 411 tests incl. live-IB suite + snapshot-shaped regression tests |
+
+**Overall:** prime is now superior on the dimensions that determine
+survival and improvement — decision correctness, learning, assurance.
+Rebuild retains raw-scope advantages (indicators, risk depth, ops,
+scar tissue) that prime has not yet earned. Neither is "better in
+every way"; but prime is better in every way that compounds, and its
+learning loop converts real trades into edge while rebuild's does
+not. The fastest remaining parity moves: port the portfolio risk
+manager, and let real data accumulate.

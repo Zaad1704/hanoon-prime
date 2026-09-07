@@ -121,7 +121,7 @@ class PerTickerCalibration:
             return
         try:
             data = json.loads(_STATE_PATH.read_text())
-            self._data = data.get("ticker_data", {}) or {}
+            self._data = data.get("ticker_data", {}) or {}  # array-safe: dict-typed
             self._last_save = time.time()
         except Exception as exc:
             log.debug("Per-ticker load failed: %s", exc)

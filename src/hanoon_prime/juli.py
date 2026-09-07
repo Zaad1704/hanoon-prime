@@ -111,6 +111,9 @@ class JuliBrain:
             try:
                 dec = self._eval_one(ticker, snap, len(positions))
             except Exception as e:
+                # Counted, never just logged away (FIXES.md Class D):
+                # PipelineMonitor alerts when failures accumulate.
+                self.brain.note_eval_failure(ticker, e)
                 log.warning("Entry eval failed for %s: %s", ticker, e)
                 continue
             if dec is not None:
@@ -150,7 +153,7 @@ class JuliBrain:
         self, ticker: str, snap: dict[str, Any], open_count: int
     ) -> dict[str, Any] | None:
         """Evaluate one ticker through the full brain pipeline."""
-        prices = snap.get("prices") or []
+        prices = snap.get("prices") or []  # array-safe: list-typed
         if len(prices) < 20:
             return None
         self._state.set_latest_prices(prices)

@@ -114,7 +114,7 @@ class ConsolidationEngine:
             if not alpha:
                 return 0.0
             ticker = max(alpha, key=lambda k: abs(alpha.get(k, 0)))
-            sent = self.state.get("news_sentiment", {}) or {}
+            sent = self.state.get("news_sentiment", {}) or {}  # array-safe: dict-typed
             pol = float(sent.get(ticker, 0.0))
             return max(-0.03, min(0.03, pol * 0.03))
         except Exception:

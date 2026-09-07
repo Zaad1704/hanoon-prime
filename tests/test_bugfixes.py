@@ -35,6 +35,7 @@ class TestBug1ThresholdBypass:
         mixin.hippocampus._open_positions = {}
         mixin.executor = MagicMock()
         mixin.juli = MagicMock()
+        mixin.monitor = MagicMock()
         mixin._sleep_mgr = MagicMock()
         mixin._sleep_mgr.get_state.return_value = SleepState(active=True)
         return mixin
@@ -255,6 +256,7 @@ class TestBug3OffMarketGuard:
         mixin.executor = MagicMock()
         mixin.executor.get_newly_closed_trades.return_value = []
         mixin.juli = MagicMock()
+        mixin.monitor = MagicMock()
         mixin._closing = set()
         mixin._last_beat = 0.0
         mixin.ib = MagicMock()
@@ -272,3 +274,39 @@ class TestBug3OffMarketGuard:
             [], [dec], None, CycleMeta(poll=1.0, started=0.0, market_open=False)
         )
         mixin.executor.place_bracket.assert_not_called()
+
+    def test_snapshot_shaped_feed_no_array_truthiness(self):
+        """Regression: FIX-2026-09-07-05.
+
+        entry_bars/compute_alpha must survive REAL snapshots.
+
+        ib_cycle._snapshot stores numpy arrays under ``*_arr`` keys. The
+        ``snap.get("close_arr") or prices`` idiom raised ValueError
+        (ambiguous truth) on every live entry evaluation — invisible in
+        unit tests that passed list-shaped snapshots, and fatal at the
+        open: zero decisions on every ticker.
+        """
+        import numpy as np
+
+        from hanoon_prime.juli_feed import compute_alpha_from_snap, entry_bars
+
+        n = 40
+        snap = {
+            "close_arr": np.linspace(100.0, 101.0, n),
+            "high_arr": np.linspace(101.0, 102.0, n),
+            "low_arr": np.linspace(99.0, 100.0, n),
+            "volume_arr": np.full(n, 1000.0),
+            "buy_volume_arr": np.full(n, 500.0),
+            "bid_sizes_arr": np.full(n, 10.0),
+            "ask_sizes_arr": np.full(n, 12.0),
+            "prices": list(np.linspace(100.0, 101.0, n)),
+        }
+        prices = snap["prices"]
+        bars = entry_bars(snap, prices, "trending_bullish")
+        assert len(bars["close"]) == n
+        assert bars["regime"] == "trending_bullish"
+        alpha = compute_alpha_from_snap(snap)
+        assert alpha, "alpha must compute from a real-shaped snapshot"
+        # The _SRC mapping bug starved volume/depth indicators silently.
+        volume_ish = [k for k in alpha if "vol" in k or "flow" in k or "depth" in k]
+        assert volume_ish, f"volume/depth features missing from alpha: {list(alpha)}"

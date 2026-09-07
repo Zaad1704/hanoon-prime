@@ -26,7 +26,13 @@ REF_TICKERS: tuple[str, ...] = ("SPY", "QQQ", "IWM", "VXX")
 _REGIME_FALLBACK_SECS: float = 30.0
 # (brain key, snapshot key) — snapshot arrays feed alpha computation.
 _KEYS = "close high low volume buy_volume bid_sizes ask_sizes"
-_SRC = "close_arr high_arr low_arr vol_arr buy_vol_arr bid_sizes ask_sizes"
+# Snapshot keys are set by ib_cycle._snapshot as f"{k}_arr" for the
+# streamer arrays() keys (close/high/low/volume/buy_volume/bid_sizes/
+# ask_sizes). Mismatches here silently starve indicators of data.
+_SRC = (
+    "close_arr high_arr low_arr volume_arr buy_volume_arr"
+    " bid_sizes_arr ask_sizes_arr"
+)
 ATTRS = tuple(zip(_KEYS.split(), _SRC.split()))
 
 
@@ -45,9 +51,16 @@ def compute_alpha_from_snap(snap: dict[str, Any]) -> dict[str, float]:
 def entry_bars(
     snap: dict[str, Any], prices: list[float], regime_label: str
 ) -> dict[str, Any]:
-    """Bar context INTO the brain (horizon classification happens there)."""
+    """Bar context INTO the brain (horizon classification happens there).
+
+    NOTE: snapshot arrays are numpy arrays — ``arr or fallback`` raises
+    ValueError (ambiguous truth). Use explicit length checks instead.
+    """
+    close = snap.get("close_arr")
+    if close is None or len(close) == 0:
+        close = prices
     return {
-        "close": snap.get("close_arr") or prices,
+        "close": close,
         "high": snap.get("high_arr"),
         "low": snap.get("low_arr"),
         "regime": regime_label,

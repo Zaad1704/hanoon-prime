@@ -75,6 +75,7 @@ class NeuromorphicBrain:
         self._last_conf: dict[str, float] = {}
         self._realized: RealizedStats = RealizedStats()
         self._decision_count: int = 0
+        self._eval_fail_count: int = 0
         self.episodic = EpisodicMemory()
         # The cortex scores ALL 27 weighted indicators; learned weights are
         # overlaid on the structural defaults (the memory may hold a subset).
@@ -326,6 +327,14 @@ class NeuromorphicBrain:
         )
         sizing.shares = max(1, int(sizing.shares * meta_scale))
 
+    def note_eval_failure(self, ticker: str, err: Exception) -> None:
+        """Count entry-eval failures (FIXES.md Class D): the pipeline
+        monitor alerts when these accumulate — a silent total outage
+        once hid behind per-ticker warnings."""
+        self._eval_fail_count += 1
+        if self._eval_fail_count % 10 == 1:
+            log.warning("Eval failure #%s (%s): %s", self._eval_fail_count, ticker, err)
+
     def _remember_decision(
         self, ticker: str, canon: str, horizon: str, vol_pct: float
     ) -> None:
@@ -339,7 +348,10 @@ class NeuromorphicBrain:
         """Volatility percentile proxy from bar context (meta feature)."""
         if not bars:
             return 0.5
-        window = list(bars.get("close") or [])[-20:]
+        close = bars.get("close")
+        if close is None or len(close) == 0:
+            return 0.5
+        window = list(close)[-20:]
         if len(window) < 10:
             return 0.5
         rets = [(b - a) / a for a, b in zip(window, window[1:]) if a]
@@ -374,7 +386,7 @@ class NeuromorphicBrain:
         the fast path never touches the network.
         """
         try:
-            sent = self.state.get("news_sentiment", {}) or {}
+            sent = self.state.get("news_sentiment", {}) or {}  # array-safe: dict-typed
             pol = float(sent.get(ticker, 0.0))
         except Exception:
             return 0.0

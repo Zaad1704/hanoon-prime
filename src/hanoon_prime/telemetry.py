@@ -26,6 +26,7 @@ ROUTES_GET = {
     "/brain": "_brain_state",
     "/trades": "_recent_trades",
     "/system2": "_system2_state",
+    "/pipeline": "_pipeline_state",
     "/config": "_config",
 }
 POST_ROUTES = {"/safety-net", "/config"}
@@ -201,6 +202,14 @@ class _H(BaseHTTPRequestHandler):
                 :20
             ]
         }
+
+    def _pipeline_state(self) -> dict[str, Any]:
+        """Continuous pipeline health (monitor daemon view)."""
+        mon = getattr(self.bot, "monitor", None) if self.bot else None
+        if mon is None:
+            return {"healthy": False, "error": "monitor not wired"}
+        snap: dict[str, Any] = mon.snapshot()
+        return snap
 
     def _brain_state(self) -> dict[str, Any]:
         juli = getattr(self.bot, "juli", None) if self.bot else None

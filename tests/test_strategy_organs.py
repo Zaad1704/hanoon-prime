@@ -290,7 +290,8 @@ class TestFeedWiring:
 
 class TestStrategyGenome:
     def test_genome_reflects_live_state(self):
-        """The genome reads the brain's actual learned state."""
+        """Regression: FIX-2026-09-07-04 — the genome reads the brain's
+        actual learned state (it was once unwired with zero callers)."""
         brain = NeuromorphicBrain(enable_neuromorphic=False)
         genome = StrategyGenome(brain).get_genome()
         assert genome["threshold"] == pytest.approx(brain.dynamics.threshold, abs=1e-6)
@@ -313,7 +314,9 @@ class TestStrategyGenome:
         assert not any("dominant" in i for i in issues)
 
     def test_state_dir_resolves_to_repo_root_runtime(self):
-        """Brain state persists to repo runtime/, never inside src/.
+        """Regression: FIX-2026-09-07-01.
+
+        Brain state persists to repo runtime/, never inside src/.
 
         Regression: brain/config.py used parents[2], which from
         src/hanoon_prime/brain/config.py resolved to src/runtime/ —

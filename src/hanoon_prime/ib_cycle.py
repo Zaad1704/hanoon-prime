@@ -202,6 +202,9 @@ class BotCycleMixin:
             self._sweep_stale_orders()
             self._check_safety(pnl)
             self._sync_subs()
+            if self.monitor.pop_heal():
+                log.warning("PIPELINE HEAL: forcing re-subscribe")
+                self._sync_subs()
             # Manual flatten request from webapp
             if self._check_manual_flatten():
                 self._finish_cycle([], [], pnl, CycleMeta(poll, started, False))
@@ -245,6 +248,7 @@ class BotCycleMixin:
             if meta.market_open and self._can_trade(dec):
                 self._exec_decision(dec)
         self._reflect_closed()
+        self.monitor.record_cycle(meta.market_open)
         if pnl is not None:
             daily = float(pnl.dailyPnL)
             self.hippocampus._daily_pnl = daily
@@ -463,6 +467,7 @@ class BotCycleMixin:
 
     def _cleanup(self, pnl: Any) -> None:
         """Shutdown all subsystems."""
+        self.monitor.stop()
         self.juli.brain.stop()
         self.streamer.cancel_all()
         self.executor.cancel_all()

@@ -104,7 +104,7 @@ class TelegramChat:
 
     def _handle(self, update: dict[str, Any]) -> None:
         """Respond to one message from the AUTHORIZED chat only."""
-        msg = update.get("message") or {}
+        msg = update.get("message") or {}  # array-safe: dict-typed
         chat = msg.get("chat") if isinstance(msg, dict) else {}
         chat_id = str(chat.get("id", "")) if isinstance(chat, dict) else ""
         if not chat_id or chat_id != str(_get_chat_id() or ""):

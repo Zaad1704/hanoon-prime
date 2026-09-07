@@ -161,6 +161,65 @@ def phase_false_trades(bot: IBStreamingBot) -> None:
         )
 
 
+def phase_replay(bot: IBStreamingBot) -> None:
+    """Live-like replay: real bars through the real tick path, no orders.
+
+    Calls juli.tick directly — decisions and exit signals are computed
+    from the seeded real historical bars, but _exec_decision is never
+    invoked, so nothing is sent to IB.
+    """
+    brain = bot.juli.brain
+    sel_before = (brain.snapshot().get("horizon_bandit", {}) or {}).get("selects", 0)
+    brain.register_position("AAPL", 100.0, horizon="scalp")
+    # Positions drive both exit evaluation and entry evaluation
+    # (_evaluate_entries iterates tracked | positions).
+    watch = {"AAPL", "MSFT", "NVDA"}
+    # False live quotes: _snapshot returns None without a bid/ask (correct
+    # pipeline behavior), so the replay fakes quotes the way the false
+    # closes faked fills — real bars + synthetic quote, zero orders.
+    for sym in watch:
+        tk = bot.streamer.ticker_subs.get(sym)
+        if tk is not None:
+            tk.bid, tk.ask, tk.last, tk.hasBidAsk = 100.0, 100.02, 100.01, True
+    think_before = int(getattr(brain, "_decision_count", 0))
+    dec_total, exit_total = 0, 0
+    for _ in range(3):
+        # S2's slow cycles stamp a 2s refractory that suppresses the fast
+        # path — clear it so the replay exercises real scoring, not the
+        # refractory stub.
+        bot.juli._state.update(refractory_until=0.0)
+        exits, decisions = bot.juli.tick(watch, bot._snapshot, bot.streamer, set())
+        dec_total += len(decisions)
+        exit_total += len(exits)
+        for d in decisions:
+            assert (
+                "sizing" in d and "regime_canon" in d
+            ), f"bad decision keys: {list(d)}"
+    sel_after = (brain.snapshot().get("horizon_bandit", {}) or {}).get("selects", 0)
+    thought_after = int(getattr(brain, "_decision_count", 0))
+    check(
+        "replay: brain scored 9 ticker-ticks",
+        thought_after - think_before >= 9,
+        f"decisions={dec_total} exits={exit_total}"
+        f" thinks=+{thought_after - think_before}",
+    )
+    check(
+        "replay: bandit selection ran",
+        sel_after > sel_before,
+        f"selects {sel_before} -> {sel_after}",
+    )
+    check(
+        "replay: regime context present",
+        bool(brain._last_regime),
+        str(dict(list(brain._last_regime.items())[:3]))[:100],
+    )
+    check(
+        "replay: zero orders sent",
+        not bot.executor._closed_trades and not bot._order_placed_ts,
+        "close queue and order log untouched",
+    )
+
+
 def phase_verify(bot: IBStreamingBot, before: dict) -> None:
     """Assert every mechanism fired, on live state + persisted files."""
     brain = bot.juli.brain
@@ -231,6 +290,12 @@ def phase_verify(bot: IBStreamingBot, before: dict) -> None:
         bool(brain_http),
         f"regime={brain_http.get('brain_state', {}).get('regime_label', '?')}",
     )
+    pipe = http_get("/pipeline")
+    check(
+        "telemetry /pipeline live",
+        bool(pipe.get("vitals")),
+        f"healthy={pipe.get('healthy')}",
+    )
     for fname in (
         "juli_horizon_bandit.json",
         "juli_meta_label.json",
@@ -261,6 +326,7 @@ def main() -> None:
         check("real cycle ran clean (market closed)", True, "no exception")
         before = bot.juli.brain.snapshot()
         phase_false_trades(bot)
+        phase_replay(bot)
         phase_verify(bot, before)
     except Exception as e:  # noqa: BLE001
         LOG.exception("SMOKE ABORT: %s", e)

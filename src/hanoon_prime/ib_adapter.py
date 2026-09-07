@@ -24,6 +24,7 @@ from .ib_streamer import IBStreamer
 from .immune import IB_CLIENT_ID, IB_HOST, IB_LIVE_PORT, IB_PAPER_PORT
 from .juli import JuliBrain
 from .memory import Journal
+from .monitor.pipeline import PipelineMonitor
 
 log = logging.getLogger(__name__)
 MAX_RECONNECT, RECONNECT_DELAY = 5, 5
@@ -50,6 +51,8 @@ class IBStreamingBot(BotCycleMixin):
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
         # Telegram chat (read-only queries answered from brain state)
         self._chat = TelegramChat(state_provider=self._chat_state)
+        # Continuous pipeline health daemon (alerts + heal flags)
+        self.monitor = PipelineMonitor(self, self.journal)
         self._running, self._last_beat = False, 0.0
         self._closing: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
@@ -101,6 +104,7 @@ class IBStreamingBot(BotCycleMixin):
         pnl = self._start_pnl()
         self._pnl_ref: Any = pnl
         self._chat.start()
+        self.monitor.start()
         log.info("All streams active. Entering event loop...")
         while self._running:
             self._cycle(poll, pnl)
@@ -130,7 +134,7 @@ class IBStreamingBot(BotCycleMixin):
         """Read-only snapshot for the Telegram chat (brain + IB state)."""
         try:
             snap = self.juli.brain.snapshot()
-            mem = snap.get("memory", {}) or {}
+            mem = snap.get("memory", {}) or {}  # array-safe: dict-typed
             positions: dict[str, Any] = {}
             for t, pos in self.hippocampus._open_positions.items():
                 positions[t] = {

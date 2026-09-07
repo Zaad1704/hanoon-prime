@@ -178,7 +178,7 @@ class NewsFeedEngine:
             return
         self._last_run = now
         try:
-            alpha = self._state.get("latest_alpha", {}) or {}
+            alpha = self._state.get("latest_alpha", {}) or {}  # array-safe: dict-typed
             tickers = list(alpha.keys())[:5]
         except Exception:
             return
