@@ -1,82 +1,70 @@
-"""brain.strategy_genome — Strategy genome / self-evolution.
+"""brain.strategy_genome — live read-model of the brain's learned strategy.
 
-Encodes scoring logic as an "editable genome" — a structured representation
-of indicator weights, thresholds, and scoring rules that can be diagnosed.
-
-Source: rebuild's strategy_genome.py (simplified).
+The genome is NOT a parallel store: it is a live VIEW over the brain's
+actual learned state — cortex weights (global + per-regime blend),
+dynamics threshold, gate-advisor delta, horizon-bandit posteriors, and
+meta-label calibration. ``diagnose()`` surfaces drift findings; there
+is no second JSON that can silently diverge from the brain.
 """
 
 from __future__ import annotations
 
-import json
-import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .config import DEFAULT_WEIGHTS, SIGNAL_THRESHOLD
+from .config import SIGNAL_THRESHOLD, THRESHOLD_MAX, THRESHOLD_MIN
 
-log = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from .orchestrator import NeuromorphicBrain
 
-_GENOME_PATH = Path("runtime/strategy_genome.json")
+# A single indicator may not dominate the genome.
+_MAX_DOMINANT_WEIGHT: float = 0.35
 
 
 class StrategyGenome:
-    """Editable genome of scoring logic."""
+    """Live diagnostic view over the brain's learned strategy state."""
 
-    def __init__(self) -> None:
-        """Auto-generated docstring."""
-        self._genome: dict[str, Any] = {
-            "weights": dict(DEFAULT_WEIGHTS),
-            "threshold": SIGNAL_THRESHOLD,
-            "modifiers": {},
-            "version": 1,
-        }
-        self._load()
+    def __init__(self, brain: "NeuromorphicBrain") -> None:
+        """Bind the genome view to a live brain."""
+        self._brain = brain
 
     def get_genome(self) -> dict[str, Any]:
-        """Auto-generated docstring."""
-        return dict(self._genome)
-
-    def update_weight(self, indicator: str, weight: float) -> None:
-        """Auto-generated docstring."""
-        self._genome["weights"][indicator] = weight
-        self._save()
-
-    def update_threshold(self, threshold: float) -> None:
-        """Auto-generated docstring."""
-        self._genome["threshold"] = threshold
-        self._save()
+        """Assemble the current genome from live brain state."""
+        b = self._brain
+        return {
+            "weights": b.cortex.get_weights(),
+            "threshold": round(b.dynamics.threshold, 4),
+            "base_threshold": SIGNAL_THRESHOLD,
+            "advisor_delta": b._advisor.threshold_delta(),
+            "regime_weights": b._regime_weights.snapshot(),
+            "horizon_bandit": b._bandit.snapshot(),
+            "meta_label": b._meta.snapshot(),
+            "learned_exit_trades": b._learned_exit.count,
+            "version": 2,
+        }
 
     def diagnose(self) -> list[str]:
-        """Return diagnostic findings about the genome."""
-        issues = []
-        weights = self._genome.get("weights", {})
+        """Return diagnostic findings about the learned strategy."""
+        issues: list[str] = []
+        weights = self._brain.cortex.get_weights()
         total = sum(weights.values())
         if total < 0.8 or total > 1.2:
             issues.append(f"Weight sum={total:.4f} outside [0.8, 1.2]")
         for k, v in weights.items():
-            if v > 0.20:
-                issues.append(f"{k}={v:.4f} > 0.20 (dominant)")
-        thresh = self._genome.get("threshold", 0.58)
-        if thresh < 0.1 or thresh > 0.7:
-            issues.append(f"Threshold={thresh} outside [0.1, 0.7]")
+            if v > _MAX_DOMINANT_WEIGHT:
+                issues.append(f"{k}={v:.4f} > {_MAX_DOMINANT_WEIGHT} (dominant)")
+        thresh = self._brain.dynamics.threshold
+        if not THRESHOLD_MIN <= thresh <= THRESHOLD_MAX:
+            issues.append(
+                f"Threshold={thresh:.4f} outside [{THRESHOLD_MIN}, {THRESHOLD_MAX}]"
+            )
+        advisor = self._brain._advisor.snapshot()
+        if advisor.get("tightening"):
+            issues.append(
+                f"Advisor tightening: delta={advisor.get('delta')} wr={advisor.get('recent_wr')}"
+            )
+        meta = self._brain._meta.snapshot()
+        if meta.get("sizing_active") and meta.get("brier") is not None:
+            brier = float(meta["brier"])
+            if brier > 0.5:
+                issues.append(f"Meta-model Brier={brier:.4f} worse than chance")
         return issues
-
-    def _save(self) -> None:
-        """Auto-generated docstring."""
-        try:
-            _GENOME_PATH.parent.mkdir(parents=True, exist_ok=True)
-            tmp = _GENOME_PATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._genome, default=str))
-            tmp.replace(_GENOME_PATH)
-        except Exception as exc:
-            log.debug("Genome save failed: %s", exc)
-
-    def _load(self) -> None:
-        """Auto-generated docstring."""
-        if not _GENOME_PATH.exists():
-            return
-        try:
-            self._genome = json.loads(_GENOME_PATH.read_text())
-        except Exception as exc:
-            log.debug("Genome load failed: %s", exc)

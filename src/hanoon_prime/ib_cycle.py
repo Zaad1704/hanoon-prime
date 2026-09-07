@@ -239,6 +239,7 @@ class BotCycleMixin:
             if t not in self._closing:
                 self._closing.add(t)
                 self.executor.close_position(t, self.streamer)
+                self._exit_reasons[t] = es.get("type", "brain_exit")
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
         for dec in decisions:
             if meta.market_open and self._can_trade(dec):
@@ -414,6 +415,9 @@ class BotCycleMixin:
                 pnl_pct=trade["return_pct"],
                 direction=trade["direction"],
                 source="ib_fill",
+                exit_triggers=[
+                    self._exit_reasons.pop(trade["ticker"], "manual_or_bracket")
+                ],
             )
             self._closing.discard(trade["ticker"])
             log.info(

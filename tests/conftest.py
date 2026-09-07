@@ -19,6 +19,27 @@ def data_dir() -> Path:
     return DATA_DIR
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_learning_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the strategy organs' persisted state at a per-test directory.
+
+    Without this, one test's bandit/meta/regime updates leak through the
+    shared runtime/*.json files into later tests (nondeterministic
+    horizon overrides). Each test gets fresh learning state. The leaf
+    modules bind their path constants at import time, so patch the leaf
+    module globals directly.
+    """
+    monkeypatch.setattr(
+        "hanoon_prime.brain.meta_label.META_FILE", tmp_path / "meta.json"
+    )
+    monkeypatch.setattr(
+        "hanoon_prime.brain.horizon_bandit.BANDIT_FILE", tmp_path / "bandit.json"
+    )
+    monkeypatch.setattr(
+        "hanoon_prime.brain.regime_weights.REGIME_FILE", tmp_path / "regime.json"
+    )
+
+
 @pytest.fixture
 def sample_tickers() -> list[str]:
     """A subset of tickers for fast backtesting."""

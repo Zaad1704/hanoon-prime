@@ -26,17 +26,25 @@ from .config import (
     NASH_VETO_LOW,
 )
 from .consolidation import ConsolidationEngine
+from .cross_asset import CrossAssetEngine
 from .deliberation import Deliberator
 from .dynamics import Dynamics
 from .episodic import EpisodicMemory
 from .exit_checks import ExitSignal
 from .exits import ExitPolicy
 from .gate_advisor import GateAdvisor
+from .horizon_bandit import HorizonBandit
+from .learned_exit import LearnedExitPolicy
+from .learning_config import CROSS_ASSET_MOD_BOUND, REGIME_MIN_TRADES
 from .memory import JuliMemory
+from .meta_label import MetaLabelModel
+from .meta_label import feature_vector as meta_features
 from .neurons.bridge import NeuromorphicBridge
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .realized_ev import RealizedStats
 from .reflection import Reflector, TradeClose
+from .regime import RegimeDetector
+from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
 from .shared_state import BrainState
 
@@ -81,6 +89,7 @@ class NeuromorphicBrain:
         self.exits = ExitPolicy()
         self._reflector = Reflector(self.memory, self.episodic)
         self._advisor = GateAdvisor(realized=self._realized)
+        self._init_strategy_organs()
         self._neuromorphic: Optional[NeuromorphicBridge] = None
         self._sleep_engine: Optional[SleepReplayEngine] = None
         self._consolidation: Optional[ConsolidationEngine] = None
@@ -98,6 +107,26 @@ class NeuromorphicBrain:
         self._consolidation = ConsolidationEngine(
             brain_state=self.state, sleep_engine=self._sleep_engine
         )
+
+    def _init_strategy_organs(self) -> None:
+        """Wire the strategy-learning organs (all advisory, bounded).
+
+        Regime fallback, cross-asset lead-lag, meta-label sizing, horizon
+        bandit, per-regime weights, learned-exit attribution — plus the
+        per-ticker decision context the close path learns from. Cortex
+        stays the sole verdict source (R1).
+        """
+        self._regime_detector = RegimeDetector()
+        self._cross_asset = CrossAssetEngine()
+        self._meta = MetaLabelModel()
+        self._bandit = HorizonBandit()
+        self._regime_weights = RegimeWeights()
+        self._learned_exit = LearnedExitPolicy()
+        self._last_regime: dict[str, str] = {}
+        self._last_vol_pct: dict[str, float] = {}
+        self._last_horizon: dict[str, str] = {}
+        self._wkey: tuple[str, int] = ("", -1)
+        self._wversion: int = 0
 
     def start(self) -> None:
         """Start the neuromorphic brain (includes slow path)."""
@@ -204,6 +233,38 @@ class NeuromorphicBrain:
             return 0.0
         return 1.0
 
+    def _canonical_regime(self, label: str) -> str:
+        """Map any regime label to a canonical meta/bandit cell."""
+        if label.startswith("trending_bull"):
+            return "trend_up"
+        if label.startswith("trending_bear"):
+            return "trend_down"
+        if label.startswith("trending"):
+            return "trend_up"
+        if label in ("volatile", "crisis"):
+            return "vol"
+        if label in ("ranging", "range"):
+            return "range"
+        if label in ("normal", "unknown", "refractory"):
+            return "unknown"
+        return "unknown"
+
+    def _local_regime_fallback(self, label: str) -> tuple[float, str]:
+        """Local RegimeDetector fallback when HALIM's label is stale.
+
+        The slow path publishes regime from the HALIM service; when that
+        label is stuck at "unknown" (service down) the local numpy
+        detector classifies from the shared close prices instead so the
+        strategy organs always see a real regime.
+        """
+        if label != "unknown":
+            return 1.0, label
+        prices = self.state.get_latest_prices() or []
+        rs = self._regime_detector.detect(prices)
+        if rs.regime == "unknown":
+            return 1.0, label
+        return rs.multiplier, rs.regime
+
     def _evaluate_fast(
         self,
         ticker: str,
@@ -215,22 +276,94 @@ class NeuromorphicBrain:
     ) -> dict[str, Any]:
         """Core fast evaluation — all decisions via neuromorphic brain."""
         _r, rl, rr, hm, eb, _ = self._get_regime_data()
-        # Horizon classification lives IN the brain (bars → horizon tag).
+        _r, rl = self._local_regime_fallback(rl)
+        canon = self._canonical_regime(rl)
+        # Cross-asset lead-lag (SPY/QQQ/IWM/VXX refs via shared state).
+        cross = self._cross_asset.update(
+            ticker, entry_price, self.state.get("ref_prices")
+        ).modifier
+        cross = max(-CROSS_ASSET_MOD_BOUND, min(CROSS_ASSET_MOD_BOUND, cross))
+        # Horizon: mechanical classifier, bandit may override from realized
+        # data (bounded, advisory — shapes patience/sizing, never verdicts).
         horizon = self._classify_horizon(bars)
-        ctx = self._score_pipeline(ticker, alpha, _r, hm, eb)
+        horizon, hz_reason = self._bandit.select(canon, horizon)
+        self._apply_regime_weights(canon)
+        ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
         ctx["horizon"] = horizon
+        ctx["horizon_reason"] = hz_reason
+        ctx["regime_canon"] = canon
         sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
-        # Gate advisor: realized-WR threshold raise + gate-closed size scalar.
-        # Advisory by construction — it tunes the entry bar and sizing, it
-        # never produces or flips a verdict.
-        if sizing.risk_pass:
-            if self._advisor.is_tightening():
-                sizing.shares = max(1, int(sizing.shares * GATE_CLOSED_SIZE_SCALAR))
+        self._scale_admitted_size(ctx, sizing, canon, horizon, bars)
         self._store_decision(ticker, alpha, ctx["stabilized"], ctx["confidence"])
+        self._remember_decision(ticker, canon, horizon, self._vol_pct(bars))
         self.state.update(
             nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
         )
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    def _scale_admitted_size(
+        self,
+        ctx: dict[str, Any],
+        sizing: SizingResult,
+        canon: str,
+        horizon: str,
+        bars: dict[str, Any] | None,
+    ) -> None:
+        """Scale an ADMITTED entry's size by advisor + meta-label factors.
+
+        Advisory by construction — it tunes sizing only, never produces or
+        flips a verdict (R1).
+        """
+        if not sizing.risk_pass:
+            return
+        if self._advisor.is_tightening():
+            sizing.shares = max(1, int(sizing.shares * GATE_CLOSED_SIZE_SCALAR))
+        vol_pct = self._vol_pct(bars)
+        meta_scale = self._meta.size_scalar(
+            ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
+        )
+        sizing.shares = max(1, int(sizing.shares * meta_scale))
+
+    def _remember_decision(
+        self, ticker: str, canon: str, horizon: str, vol_pct: float
+    ) -> None:
+        """Store the decision context the close path will learn from."""
+        self._last_regime[ticker] = canon
+        self._last_vol_pct[ticker] = vol_pct
+        self._last_horizon[ticker] = horizon
+
+    @staticmethod
+    def _vol_pct(bars: dict[str, Any] | None) -> float:
+        """Volatility percentile proxy from bar context (meta feature)."""
+        if not bars:
+            return 0.5
+        window = list(bars.get("close") or [])[-20:]
+        if len(window) < 10:
+            return 0.5
+        rets = [(b - a) / a for a, b in zip(window, window[1:]) if a]
+        if not rets:
+            return 0.5
+        mean_abs = sum(abs(c) for c in window) / len(window)
+        var = sum(r * r for r in rets) / len(rets)
+        spread = (var**0.5) / (mean_abs + 1e-12)
+        return float(max(0.0, min(1.0, spread * 100.0)))
+
+    def _weights_for(self, regime: str) -> dict[str, float]:
+        """Global learned weights overlaid with the regime vector if trained."""
+        weights = dict(DEFAULT_WEIGHTS)
+        weights.update(self.memory.get_weights())
+        regime_vec = self._regime_weights.weights_for(regime)
+        if regime_vec:
+            weights.update(regime_vec)
+        return weights
+
+    def _apply_regime_weights(self, regime: str) -> None:
+        """Hot-swap regime-blended weights (cached per regime+version)."""
+        key = (regime, self._wversion)
+        if key == self._wkey:
+            return
+        self._wkey = key
+        self.cortex.set_weights(self._weights_for(regime))
 
     def _news_bias(self, ticker: str) -> float:
         """Bounded live-news sentiment bias (System 2 evidence, ±0.03).
@@ -270,6 +403,7 @@ class NeuromorphicBrain:
         regime_mul: float,
         halim: float,
         episodic: float,
+        cross: float = 0.0,
     ) -> dict[str, Any]:
         """Compute the blended stabilized score and decision intermediates."""
         base = self.cortex.evaluate(alpha)
@@ -283,7 +417,7 @@ class NeuromorphicBrain:
         advisor_delta = self._advisor.threshold_delta()
         news_bias = self._news_bias(ticker)
         raw = blended * regime_mul + halim + episodic + nash_op
-        raw += news_bias - advisor_delta
+        raw += news_bias + cross - advisor_delta
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
         return {
             "base": base,
@@ -354,6 +488,8 @@ class NeuromorphicBrain:
             "confidence": ctx["confidence"],
             "sizing": sizing,
             "horizon": ctx.get("horizon", "scalp"),
+            "horizon_reason": ctx.get("horizon_reason", "classifier"),
+            "regime_canon": ctx.get("regime_canon", "unknown"),
             "regime": labels.regime_label,
             "risk": labels.risk_label,
             "trace": {
@@ -373,6 +509,7 @@ class NeuromorphicBrain:
         self._last_alpha[ticker] = alpha
         self._last_score[ticker] = score
         self._last_conf[ticker] = confidence
+        self._last_horizon.setdefault(ticker, "scalp")
         self.memory.record_score(ticker, score)
         self.state.set_latest_alpha(alpha)
         self._decision_count += 1
@@ -384,6 +521,10 @@ class NeuromorphicBrain:
         pnl_pct: float,
         direction: int = 1,
         source: str = "real_trade",
+        regime: str | None = None,
+        horizon: str | None = None,
+        vol_pct: float = 0.5,
+        exit_triggers: list[str] | None = None,
     ) -> None:
         """All learning routes through neuromorphic brain — evolved per trade.
 
@@ -391,6 +532,9 @@ class NeuromorphicBrain:
         The consolidation buffer path (System 2) is telemetry/consolidation
         only — it must NOT also write memory.
         """
+        canon = regime or self._last_regime.get(ticker, "unknown")
+        hz = horizon or self._last_horizon.get(ticker, "scalp")
+        vp = self._last_vol_pct.get(ticker, vol_pct)
         self.dynamics.adapt_threshold(self.memory.pred_error)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
@@ -399,21 +543,56 @@ class NeuromorphicBrain:
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
         if self._neuromorphic is not None:
             self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
+        self._learn_strategy_organs(ticker, won, pnl_pct, direction, canon, hz, vp)
+        if exit_triggers is not None:
+            self._learned_exit.record(0.0, exit_triggers, won)
         # IRONYCLADE: the realized-EV feedback loop only learns from real
         # executions (real_trade/ib_fill/ib_paper). Paper & synthetic fills
         # are excluded so the live gate isn't trained on backtest noise.
         if source in _IRONYCLADE:
-            self._learn_from_real(ticker, won, pnl_pct, direction)
+            self._learn_from_real(ticker, won, pnl_pct, direction, canon)
+
+    def _learn_strategy_organs(
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int,
+        canon: str,
+        hz: str,
+        vp: float,
+    ) -> None:
+        """Feed every strategy organ from one close (bounded, advisory).
+
+        Meta-label (sizing), horizon bandit (selection), per-regime
+        weights (scoring) — the realized loop stays IRONYCLADE-gated;
+        these organs learn from every close.
+        """
+        self._meta.record(
+            meta_features(
+                self._last_conf.get(ticker, 0.5),
+                self._last_score.get(ticker, 0.0),
+                vp,
+                canon,
+                hz,
+            ),
+            won,
+        )
+        self._bandit.update(canon, hz, pnl_pct)
+        self._regime_weights.learn(
+            canon, self._last_alpha.get(ticker, {}), won, direction
+        )
 
     def _learn_from_real(
-        self, ticker: str, won: bool, pnl_pct: float, direction: int
+        self, ticker: str, won: bool, pnl_pct: float, direction: int, regime: str
     ) -> None:
         """The closed learning loop — runs once per REAL trade close.
 
         (a) Weight gradient over ALL 27 indicators (loss-aversion 1.2x via
         Reflector — the single writer for weights/episodes/calibration).
         (b) Hot-swap learned weights into the cortex so the very next tick
-        scores with the updated brain.
+        scores with the updated brain; per-regime vector blended when its
+        regime is trained (REGIME_MIN_TRADES real closes).
         (c) Realized band/RR/conf-bins + calibration (the realized-EV gate).
         (d) Learned exits + gate advisor retune from the new sample.
         """
@@ -427,17 +606,22 @@ class NeuromorphicBrain:
                 direction=direction,
                 alpha=self._last_alpha.get(ticker, {}),
                 predicted_score=conf,
+                regime=regime,
             )
         )
-        weights = dict(DEFAULT_WEIGHTS)
-        weights.update(self.memory.get_weights())
-        self.cortex.set_weights(weights)
+        weights = self._weights_for(regime)
+        self._wversion += 1
+        self._apply_regime_weights(regime)
         self.memory.record_outcome(won)
         self.memory.update_pred_error(conf, 1.0 if won else 0.0)
         self._realized.add_outcome(score, won, pnl_pct, direction)
         self._realized.add_confidence_outcome(conf, won)
         self.exits.adapt_from_realized(self._realized)
         self._advisor.record_outcome(won)
+
+    def _learned_exit_trade_count(self) -> int:
+        """Real exits recorded by the learned-exit attributor."""
+        return self._learned_exit.count
 
     def on_ib_fill(self, fill: dict[str, Any]) -> None:
         """Route IB fill data to consolidation engine."""
@@ -493,6 +677,10 @@ class NeuromorphicBrain:
             "nash": self.nash.get_telemetry(),
             "advisor": self._advisor.snapshot(),
             "exits_adaptive": self.exits.telemetry(),
+            "meta_label": self._meta.snapshot(),
+            "horizon_bandit": self._bandit.snapshot(),
+            "regime_weights": self._regime_weights.snapshot(),
+            "learned_exit": {"trades": self._learned_exit_trade_count()},
         }
         if self._sleep_engine is not None:
             result["sleep_engine"] = {

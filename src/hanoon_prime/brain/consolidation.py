@@ -22,6 +22,7 @@ from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .news_sources import NewsFeedEngine
+from .regime import RegimeDetector
 from .shared_state import BrainState
 from .thinker import Signal, Thinker
 
@@ -51,6 +52,9 @@ class ConsolidationEngine:
         # News organ (System 2): live headlines → bounded sentiment into
         # BrainState. Evidence for the brain, never a gate.
         self.news = NewsFeedEngine(brain_state, interval=interval * 4.0)
+        # Local regime fallback: classifies from shared prices when HALIM
+        # is unreachable, so the label never stays "unknown" for long.
+        self._detector = RegimeDetector()
         self._sleep_engine = sleep_engine
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -117,7 +121,7 @@ class ConsolidationEngine:
             return 0.0
 
     def _update_regime(self) -> None:
-        """Get regime classification from HALIM."""
+        """Get regime classification from HALIM (local fallback if stale)."""
         alpha = self._get_latest_alpha()
         if not alpha:
             return
@@ -125,10 +129,27 @@ class ConsolidationEngine:
             regime = self.halim.get_regime(alpha, self.state.get_latest_prices())
         except Exception as e:
             log.warning("Regime query failed: %s", e)
+            regime = None
+        if isinstance(regime, dict):
+            self._apply_regime(regime)
+        elif self.state.get("regime_label", "unknown") == "unknown":
+            # HALIM down or unparsable: publish the local numpy detector's
+            # classification so the strategy organs always see a real regime.
+            self._local_regime()
+
+    def _local_regime(self) -> None:
+        """Publish a local RegimeDetector classification (fallback only)."""
+        prices = self.state.get_latest_prices() or []
+        if len(prices) < 20:
             return
-        if not isinstance(regime, dict):
-            return
-        self._apply_regime(regime)
+        rs = self._detector.detect(prices)
+        if rs.regime != "unknown":
+            self.state.update(
+                regime_label=rs.regime,
+                regime_multiplier=rs.multiplier,
+                regime_source="local_fallback",
+            )
+            log.info("S2 REGIME FALLBACK: %s (mult=%.2f)", rs.regime, rs.multiplier)
 
     def _apply_regime(self, regime: dict[str, Any]) -> None:
         """Apply regime data to shared state."""

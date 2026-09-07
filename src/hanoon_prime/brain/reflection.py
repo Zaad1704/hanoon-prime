@@ -35,6 +35,7 @@ class TradeClose:
     direction: int
     alpha: dict[str, float]
     predicted_score: float = 0.0
+    regime: str = "unknown"
 
 
 class Reflector:
@@ -69,7 +70,7 @@ class Reflector:
                     "ticker": tick,
                     "won": won,
                     "pnl_pct": pnl_pct,
-                    "regime": "unknown",
+                    "regime": trade.regime,
                     "pattern": f"{'win' if won else 'loss'}_{abs(pnl_pct):.1%}",
                 }
             )

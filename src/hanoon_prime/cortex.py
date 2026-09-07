@@ -83,6 +83,10 @@ class Cortex:
         """Hot-swap indicator weights (called by the orchestrator after learning)."""
         self._weights = dict(weights)
 
+    def get_weights(self) -> dict[str, float]:
+        """Current effective weights (live view for the strategy genome)."""
+        return dict(self._weights)
+
     def evaluate(self, raw: dict[str, float]) -> Thought:
         """Z-score normalize raw indicators → tanh score → verdict."""
         z_scores: dict[str, float] = {}

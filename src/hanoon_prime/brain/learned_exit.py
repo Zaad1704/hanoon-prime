@@ -33,15 +33,20 @@ class LearnedExitPolicy:
     """Derive exit triggers from historical trades."""
 
     def __init__(self) -> None:
-        """Auto-generated docstring."""
+        """Initialize the trade ring buffer."""
         self._trades: deque[dict[str, Any]] = deque(maxlen=200)
+
+    @property
+    def count(self) -> int:
+        """Real exits recorded so far."""
+        return len(self._trades)
 
     def record(self, health_score: float, triggers: list[str], won: bool) -> None:
         """Record exit outcome for learning."""
         self._trades.append({"health": health_score, "triggers": triggers, "won": won})
 
     def get_policy(self) -> ExitPolicy:
-        """Get learned exit policy."""
+        """Derive exit health floor and trigger weights from history."""
         if len(self._trades) < _MIN_TRADES:
             return ExitPolicy()  # neutral
         # Compute health floor: health level below which WR < 50%

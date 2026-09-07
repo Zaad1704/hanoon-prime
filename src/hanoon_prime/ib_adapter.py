@@ -52,6 +52,7 @@ class IBStreamingBot(BotCycleMixin):
         self._chat = TelegramChat(state_provider=self._chat_state)
         self._running, self._last_beat = False, 0.0
         self._closing: set[str] = set()
+        self._exit_reasons: dict[str, str] = {}
         self._last_bars: int = 0
         # Gateway supervision state (rebuild runner_gateway port)
         self._gw_was_connected: bool = True
