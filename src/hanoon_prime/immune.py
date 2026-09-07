@@ -76,7 +76,12 @@ INDICATOR_WEIGHTS: dict[str, float] = {
 # ── Learning: asymmetric punishment (R8: single system) ──────────────
 LEARNING_RATE: float = 0.02  # base step size per trade
 REWARD_SCALE: float = 0.5  # 0.5× reward on WIN (normalized)
-PENALTY_SCALE: float = 2.0  # 2× punishment on LOSS (asymmetric)
+# PENALTY_SCALE: legacy hippocampus path. The LIVE learning loop
+# (brain/reflection.py → Reflector) uses brain/config.py:PENALTY_SCALE
+# (1.2), which matches rebuild's guardrail-validated WEIGHT_LOSS_AVERSION.
+# Aligned here so both paths read the same value (brain-first decision
+# 2026-09-07: live value wins; 2.0 was outside rebuild's guardrail range).
+PENALTY_SCALE: float = 1.2  # punishment multiplier on LOSS (asymmetric)
 WEIGHT_DECAY: float = 0.999  # per-trade geometric decay
 WEIGHT_MIN: float = -2.0  # lower bound on indicator weights
 WEIGHT_MAX: float = 2.0  # upper bound on indicator weights

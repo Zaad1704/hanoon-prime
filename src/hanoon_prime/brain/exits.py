@@ -23,6 +23,7 @@ from .exit_checks import ExitSignal, check_consolidation
 from .exit_checks import check_giveback as _giveback
 from .exit_checks import check_profit_lock as _profit_lock
 from .exit_checks import check_stale as _stale
+from .horizons import params_for
 
 if TYPE_CHECKING:
     from .realized_ev import RealizedStats
@@ -86,8 +87,10 @@ class ExitPolicy:
         ticker: str,
         entry_price: float,
         entry_alpha: dict[str, float] | None = None,
+        horizon: str = "scalp",
     ) -> None:
-        """Register a new position for exit monitoring."""
+        """Register a new position for exit monitoring (per-horizon windows)."""
+        self._stale_minutes = params_for(horizon).stale_minutes
         self._entry_price[ticker] = entry_price
         self._peak_price[ticker] = entry_price
         self._peak_pnl[ticker] = 0.0

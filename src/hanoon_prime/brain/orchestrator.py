@@ -13,6 +13,7 @@ from typing import Any, Optional
 from ..cortex import Cortex
 from ..hippocampus import Hippocampus
 from ..types import FillInfo
+from . import horizons
 from .affective import Affective
 from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
 from .cognitive.nash import NashBrain, NashPrediction
@@ -20,6 +21,7 @@ from .config import (
     _IRONYCLADE,
     DEFAULT_WEIGHTS,
     GATE_CLOSED_SIZE_SCALAR,
+    NASH_PENALTY_MAX,
     NASH_VETO_HIGH,
     NASH_VETO_LOW,
 )
@@ -115,11 +117,19 @@ class NeuromorphicBrain:
         entry_price: float = 0.0,
         atr: float = 1.0,
         open_positions: int = 0,
+        bars: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """FAST PATH: All decisions from neuromorphic brain."""
+        """FAST PATH: All decisions from neuromorphic brain.
+
+        ``bars`` (optional close/high/low arrays + regime intel) lets the
+        brain classify the candidate's trading horizon itself — the
+        horizon is part of the brain's world model, not an external tag.
+        """
         if self.state.is_refractory():
             return self._refractory_response(ticker)
-        return self._evaluate_fast(ticker, alpha, entry_price, atr, open_positions)
+        return self._evaluate_fast(
+            ticker, alpha, entry_price, atr, open_positions, bars=bars
+        )
 
     def _refractory_response(self, ticker: str) -> dict[str, Any]:
         """No-trade response during refractory period."""
@@ -161,19 +171,27 @@ class NeuromorphicBrain:
     def _apply_nash_gate(
         self, score: float, direction: int, nash_pred: NashPrediction
     ) -> float:
-        """Apply Nash veto gate if triggered.
+        """Apply Nash's pattern memory as a BOUNDED PENALTY (brain-first).
 
-        gate_authority now fires on the VETO bands (pattern memory with
-        enough samples that historically loses < 45% or wins > 55%), so
-        this directional policy can actually veto: longs are refused when
-        the pattern says it loses; shorts when it says it wins.
+        The old behavior zeroed the score (hard veto) — a one-way lock that
+        could deadlock the brain on its own learned history (the exact
+        failure mode rebuild engineered around in its Nash/EV gates). Now
+        the pattern memory LEANS: a strong losing pattern subtracts a
+        bounded penalty scaled by pattern confidence and win-prob deficit,
+        but an overwhelming brain signal can still clear the threshold.
+        Pattern memory advises; the brain decides.
         """
         if not nash_pred.gate_authority:
             return score
+        conf = max(0.0, min(1.0, nash_pred.confidence))
         if direction > 0 and nash_pred.win_prob < NASH_VETO_LOW:
-            return 0.0  # Bullish veto
+            deficit = (NASH_VETO_LOW - nash_pred.win_prob) / NASH_VETO_LOW
+            return score - NASH_PENALTY_MAX * conf * deficit
         if direction < 0 and nash_pred.win_prob > NASH_VETO_HIGH:
-            return 0.0  # Bearish veto
+            # Short side: score is NEGATIVE — leaning away means pulling
+            # it toward zero (ADD the penalty), not amplifying the short.
+            deficit = (nash_pred.win_prob - NASH_VETO_HIGH) / (1.0 - NASH_VETO_HIGH)
+            return score + NASH_PENALTY_MAX * conf * deficit
         return score
 
     def _check_eod_penalty(self) -> float:
@@ -193,13 +211,15 @@ class NeuromorphicBrain:
         entry_price: float,
         atr: float,
         open_positions: int,
+        bars: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Core fast evaluation — all decisions via neuromorphic brain."""
         _r, rl, rr, hm, eb, _ = self._get_regime_data()
+        # Horizon classification lives IN the brain (bars → horizon tag).
+        horizon = self._classify_horizon(bars)
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb)
-        sizing = self._maybe_size(
-            ctx["stabilized"], ctx["confidence"], entry_price, atr, open_positions
-        )
+        ctx["horizon"] = horizon
+        sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
         # Gate advisor: realized-WR threshold raise + gate-closed size scalar.
         # Advisory by construction — it tunes the entry bar and sizing, it
         # never produces or flips a verdict.
@@ -211,6 +231,37 @@ class NeuromorphicBrain:
             nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
         )
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    def _news_bias(self, ticker: str) -> float:
+        """Bounded live-news sentiment bias (System 2 evidence, ±0.03).
+
+        Reads the news organ's published sentiment from shared state —
+        the fast path never touches the network.
+        """
+        try:
+            sent = self.state.get("news_sentiment", {}) or {}
+            pol = float(sent.get(ticker, 0.0))
+        except Exception:
+            return 0.0
+        return max(-0.03, min(0.03, pol * 0.03))
+
+    @staticmethod
+    def _classify_horizon(bars: dict[str, Any] | None) -> str:
+        """Classify the trading horizon from bar arrays (never blocks)."""
+        if not bars:
+            return "scalp"
+        close = bars.get("close")
+        if close is None or len(close) < 10:
+            return "scalp"
+        classified = horizons.classify(
+            close,
+            bars.get("high"),
+            bars.get("low"),
+            regime=str(bars.get("regime", "unknown")),
+            halim_verdict=bars.get("halim_verdict"),
+        )
+        # A disabled classification snaps to the closest ACTIVE rung.
+        return horizons.get_horizon_manager().active(classified)
 
     def _score_pipeline(
         self,
@@ -230,26 +281,62 @@ class NeuromorphicBrain:
         # relieve after winning ones). Advisory — folds into the score before
         # the dynamics stabilize it.
         advisor_delta = self._advisor.threshold_delta()
-        score = blended * regime_mul + halim + episodic + nash_op - advisor_delta
-        direction = 1 if score > 0 else (-1 if score < 0 else 0)
-        score = self._apply_nash_gate(score, direction, nash_pred)
-        if self._check_eod_penalty() == 0.0:
-            score = 0.0
-        stabilized, dyn_reason = self.dynamics.process(score, direction)
-        final_dir = 1 if stabilized > 0 else (-1 if stabilized < 0 else 0)
+        news_bias = self._news_bias(ticker)
+        raw = blended * regime_mul + halim + episodic + nash_op
+        raw += news_bias - advisor_delta
+        stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
         return {
             "base": base,
             "nash_pred": nash_pred,
             "nash_op": nash_op,
             "neuro_score": neuro_score,
             "confidence": base.confidence,
-            "raw_score": score,
+            "raw_score": raw,
             "stabilized": stabilized,
             "final_dir": final_dir,
             "dyn_reason": dyn_reason,
             "nash_win_prob": nash_pred.win_prob,
             "advisor_delta": advisor_delta,
         }
+
+    def _stabilize(
+        self, raw: float, nash_pred: NashPrediction
+    ) -> tuple[float, str, int]:
+        """Nash lean + EOD zero + dynamics stabilization on the raw score."""
+        direction = 1 if raw > 0 else (-1 if raw < 0 else 0)
+        score = self._apply_nash_gate(raw, direction, nash_pred)
+        if self._check_eod_penalty() == 0.0:
+            score = 0.0
+        stabilized, dyn_reason = self.dynamics.process(score, direction)
+        final_dir = 1 if stabilized > 0 else (-1 if stabilized < 0 else 0)
+        return stabilized, dyn_reason, final_dir
+
+    def _maybe_size(
+        self,
+        ctx: dict[str, Any],
+        entry_price: float,
+        atr: float,
+        open_positions: int,
+    ) -> SizingResult:
+        """Size position if score clears the dynamic threshold.
+
+        Per-horizon patience scales the bar (longer horizons accept a
+        slightly lower score; scalp keeps the full bar). Mechanical, not
+        a gate — it shapes the sizing bar only.
+        """
+        score = float(ctx["stabilized"])
+        horizon = str(ctx.get("horizon", "scalp"))
+        patience = horizons.params_for(horizon).patience
+        if abs(score) <= self.dynamics.threshold * patience:
+            return SizingResult()
+        return self.risk.evaluate(
+            score,
+            float(ctx["confidence"]),
+            entry_price,
+            atr,
+            open_positions,
+            horizon=horizon,
+        )
 
     def _build_tick_result(
         self,
@@ -266,6 +353,7 @@ class NeuromorphicBrain:
             "direction": ctx["final_dir"],
             "confidence": ctx["confidence"],
             "sizing": sizing,
+            "horizon": ctx.get("horizon", "scalp"),
             "regime": labels.regime_label,
             "risk": labels.risk_label,
             "trace": {
@@ -378,28 +466,19 @@ class NeuromorphicBrain:
         )
         return result
 
-    def register_position(self, ticker: str, entry_price: float) -> None:
-        """Register position for exit monitoring."""
-        self.exits.register(ticker, entry_price, self._last_alpha.get(ticker, {}))
+    def register_position(
+        self, ticker: str, entry_price: float, horizon: str = "scalp"
+    ) -> None:
+        """Register position for exit monitoring (per-horizon exit windows)."""
+        self.exits.register(
+            ticker, entry_price, self._last_alpha.get(ticker, {}), horizon=horizon
+        )
 
     def check_exit(
         self, ticker: str, current_price: float, ib_pnl: float = 0.0, direction: int = 1
     ) -> ExitSignal:
         """Check if position should be exited."""
         return self.exits.evaluate(ticker, current_price, ib_pnl, direction)
-
-    def _maybe_size(
-        self,
-        score: float,
-        confidence: float,
-        entry_price: float,
-        atr: float,
-        open_positions: int,
-    ) -> SizingResult:
-        """Size position if score clears the dynamic threshold."""
-        if abs(score) <= self.dynamics.threshold:
-            return SizingResult()
-        return self.risk.evaluate(score, confidence, entry_price, atr, open_positions)
 
     def snapshot(self) -> dict[str, Any]:
         """Full brain snapshot for telemetry."""

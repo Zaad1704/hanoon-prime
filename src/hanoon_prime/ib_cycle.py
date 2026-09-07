@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._telegram import safety_halt, shutdown
+from .brain.horizons import holds_through_close
 from .config import TRADING_CONFIG
 from .immune import (
     CONSECUTIVE_LOSSES_PAUSE,
@@ -63,6 +64,106 @@ def try_connect(ib_client: Any, host: str, port: int, cid: int) -> bool:
 class BotCycleMixin:
     """Mixin providing cycle loop, execution, and safety for IBStreamingBot."""
 
+    # ── Gateway supervision (rebuild runner_gateway.py port) ────────────
+
+    def _supervise_gateway(self) -> None:
+        """Detect a dropped Gateway and reconnect with backoff + re-sync.
+
+        Rebuild lesson (runner_gateway.py): after reconnecting you MUST
+        re-request market data — IB silently drops subscriptions on
+        disconnect, and without re-subscribe the watchdog sees stale
+        ticks and panics. 1s → 2s → 4s → 8s → 16s → 30s (cap).
+        """
+        try:
+            connected = bool(self.ib.isConnected())
+        except Exception as exc:
+            log.debug("isConnected check failed: %s", exc)
+            connected = False
+        if connected:
+            self._gw_was_connected = True
+            self._gw_attempts = 0
+            return
+        if self._gw_was_connected:
+            self._gw_was_connected = False
+            self._gw_attempts = 0
+            log.warning("GATEWAY: connection lost — reconnecting")
+        delay = min(30.0, 1.0 * (2 ** min(self._gw_attempts, 4)))
+        time.sleep(delay)
+        self._gw_attempts += 1
+        if self._reconnect():
+            self._resubscribe_all()
+
+    def _reconnect(self) -> bool:
+        """One reconnect attempt via the adapter's retrying connect()."""
+        try:
+            self.connect(self.ib.host, self.ib.port, self.ib.clientId)
+        except Exception as exc:
+            log.warning("GATEWAY: reconnect attempt failed: %s", exc)
+            return False
+        ok = False
+        try:
+            ok = bool(self.ib.isConnected())
+        except Exception as exc:
+            log.debug("post-reconnect check failed: %s", exc)
+        if ok:
+            self._gw_was_connected = True
+            self._gw_attempts = 0
+            log.warning("GATEWAY: reconnected — re-subscribing streams")
+        return ok
+
+    def _resubscribe_all(self) -> None:
+        """Re-request market data after a reconnect (IB drops subs silently)."""
+        targets = set(self.executor.tracked_tickers) | set(self.streamer.ticker_subs)
+        for t in targets:
+            try:
+                self.streamer.subscribe(t)
+            except Exception as exc:
+                log.debug("re-subscribe %s failed: %s", t, exc)
+        for t in set(self.hippocampus._open_positions):
+            try:
+                self.streamer.seed_history(t)
+            except Exception as exc:
+                log.debug("re-seed %s failed: %s", t, exc)
+
+    def _sweep_stale_orders(self) -> None:
+        """Cancel JULI parents that have been pending too long.
+
+        IB queues bracket parents that never fill (Error 201 territory in
+        rebuild — a stacked order book). Sweeping keeps the book clean and
+        lets the brain re-decide with fresh data.
+        """
+        pending = ("PendingSubmit", "PreSubmitted")
+        try:
+            trades = list(self.ib.openTrades())
+        except Exception as exc:
+            log.debug("openTrades failed: %s", exc)
+            return
+        now = time.time()
+        for trade in trades:
+            order = getattr(trade, "order", None)
+            group = getattr(order, "ocaGroup", "") if order else ""
+            if not order or order.parentId or not group.startswith("JULI_"):
+                continue
+            if trade.orderStatus.status not in pending:
+                continue
+            self._sweep_one(order, group.replace("JULI_", ""), now)
+
+    def _sweep_one(self, order: Any, sym: str, now: float) -> None:
+        """Cancel one stale pending parent (tracked ≥ 60s)."""
+        oid = order.orderId
+        placed = self._order_placed_ts.get(oid)
+        if placed is None:
+            self._order_placed_ts[oid] = now
+            return
+        if now - placed <= 60.0:
+            return
+        log.info("SWEEP: stale pending parent %s (%.0fs)", sym, now - placed)
+        try:
+            self.ib.cancelOrder(order)
+        except Exception as exc:
+            log.warning("SWEEP cancel %s failed: %s", sym, exc)
+        self._order_placed_ts.pop(oid, None)
+
     def _snapshot(self, sym: str) -> dict[str, Any] | None:
         """Build snapshot dict from live ticker data."""
         tk = self.streamer.ticker_subs.get(sym)
@@ -96,7 +197,9 @@ class BotCycleMixin:
         """One main loop iteration."""
         started = time.monotonic()
         try:
+            self._supervise_gateway()
             self.executor.sync_from_ib(self.streamer)
+            self._sweep_stale_orders()
             self._check_safety(pnl)
             self._sync_subs()
             # Manual flatten request from webapp
@@ -212,7 +315,13 @@ class BotCycleMixin:
         return True
 
     def _check_eod_flatten(self) -> bool:
-        """If EOD window, Juli tries to flatten. If she fails, we force it."""
+        """If EOD window, flatten scalp/multihour/swing positions.
+
+        Horizon-aware (rebuild v4 lesson): positions classified multiday
+        or longer are DESIGNED to hold through sessions — flattening them
+        at the close defeats their thesis. Only intraday horizons force-
+        close; longer rungs survive until their own exit policy fires.
+        """
         from .config import TRADING_CONFIG
 
         if not TRADING_CONFIG.eod_flatten_enabled:
@@ -220,19 +329,25 @@ class BotCycleMixin:
         if not _SLEEP_MGR.is_eod_window(TRADING_CONFIG.eod_flatten_minutes):
             return False
         remaining = _SLEEP_MGR.minutes_to_close()
-        pos_count = len(self.hippocampus._open_positions)
-        if pos_count == 0:
-            log.info("EOD: no positions, all flat (%.1f min to close)", remaining)
+        intraday = [
+            t
+            for t in self.hippocampus._open_positions
+            if not holds_through_close(self.executor._horizons.get(t, "scalp"))
+        ]
+        if not intraday:
+            log.info(
+                "EOD: only overnight-safe horizons open (%.1f min to close)",
+                remaining,
+            )
             return False
-        # Juli already closed some — check if any remain
         log.warning(
-            "EOD FLATTEN: %.1f min to close, %d positions remain — forcing market close",
+            "EOD FLATTEN: %.1f min to close, %d intraday positions — forcing market close",
             remaining,
-            pos_count,
+            len(intraday),
         )
-        closed = self.executor.close_all_positions(self.streamer)
-        log.warning("EOD FLATTEN: sent market orders for %d positions", closed)
-        return True
+        closed = self.executor.close_all_positions(self.streamer, only=set(intraday))
+        log.warning("EOD FLATTEN: sent limit orders for %d positions", closed)
+        return bool(closed)
 
     def _can_trade(self, dec: dict[str, Any]) -> bool:
         """Check session and direction config before trading."""
@@ -268,18 +383,26 @@ class BotCycleMixin:
         # Portfolio risk gate (drawdown scalar + hard block) — wired from
         # monitor/portfolio_risk.py, which was previously orphaned.
         if _PORTFOLIO_RISK.pre_trade_risk_gate() is False:
-            log.info("SKIP %s portfolio_risk (scalar=%.2f)", t, _PORTFOLIO_RISK._risk_scalar)
+            log.info(
+                "SKIP %s portfolio_risk (scalar=%.2f)", t, _PORTFOLIO_RISK._risk_scalar
+            )
             return
         sizing = dec.get("sizing")
         if sizing is None or getattr(sizing, "shares", 0) <= 0:
             log.debug("SKIP %s sizing=0", t)
             return
         price = float((tk.bid + tk.ask) * 0.5)
+        horizon = str(dec.get("horizon", "scalp"))
         self.executor.place_bracket(
-            t, dec["thought"], price, self.streamer, sizing=dec["sizing"]
+            t,
+            dec["thought"],
+            price,
+            self.streamer,
+            sizing=dec["sizing"],
+            horizon=horizon,
         )
         self.executor.last_thoughts[t] = dec["thought"]
-        self.juli.brain.register_position(t, price)
+        self.juli.brain.register_position(t, price, horizon=horizon)
 
     def _reflect_closed(self) -> None:
         """Route closed trades to neuromorphic brain for learning."""

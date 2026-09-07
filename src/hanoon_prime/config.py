@@ -6,7 +6,7 @@ ib_cycle read/write these. Thread-safe via simple attribute access.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -26,6 +26,10 @@ class TradingConfig:
     # EOD flatten
     eod_flatten_enabled: bool = True
     eod_flatten_minutes: float = 5.0  # minutes before close to flatten
+
+    # Horizons — scalp-only by default (brain-first rollout: the ladder is
+    # fully implemented; the webapp activates more rungs when ready).
+    horizons: set[str] = field(default_factory=lambda: {"scalp"})
 
     def is_session_active(self, session: str) -> bool:
         """Check if a session is enabled."""
@@ -53,6 +57,7 @@ class TradingConfig:
             "direction_mode": self.direction_mode,
             "eod_flatten_enabled": self.eod_flatten_enabled,
             "eod_flatten_minutes": self.eod_flatten_minutes,
+            "horizons": sorted(self.horizons),
         }
 
 

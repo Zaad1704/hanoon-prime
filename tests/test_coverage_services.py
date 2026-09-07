@@ -186,8 +186,11 @@ class TestProtect:
         result = _get_oca_orders(ib, "TSLA")
         assert result == [t1, t2]
 
-    def test_place_oca_uses_stub_when_ib_missing(self):
-        # _ib is None when ib_insync is absent -> Order() raises AttributeError
+    def test_place_oca_uses_stub_when_ib_missing(self, monkeypatch):
+        # _ib None (ib_insync absent, or stubbed here) -> Order() raises
+        # AttributeError. Patched explicitly so the test is deterministic
+        # whether or not the optional ib extra is installed.
+        monkeypatch.setattr("hanoon_prime._protect._ib", None)
         contract = SimpleNamespace()
         with pytest.raises(AttributeError):
             _place_oca(

@@ -20,13 +20,10 @@ from .types import BarSeries
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
-# fmt: off
-ATTRS = (
-    ("close", "close_arr"), ("high", "high_arr"), ("low", "low_arr"),
-    ("volume", "vol_arr"), ("buy_volume", "buy_vol_arr"),
-    ("bid_sizes", "bid_sizes"), ("ask_sizes", "ask_sizes"),
-)
-# fmt: on
+# (brain key, snapshot key) — snapshot arrays feed alpha computation.
+_KEYS = "close high low volume buy_volume bid_sizes ask_sizes"
+_SRC = "close_arr high_arr low_arr vol_arr buy_vol_arr bid_sizes ask_sizes"
+ATTRS = tuple(zip(_KEYS.split(), _SRC.split()))
 
 
 class JuliBrain:
@@ -74,11 +71,8 @@ class JuliBrain:
         """Screen candidates through snapshots."""
         if not self._candidates:
             return
-        n = sum(
-            1
-            for c in self._candidates[:MAX_CANDIDATES]
-            if (snap := get_snapshot(c.symbol)) and snap.get("last", 0) > 0
-        )
+        snaps = [get_snapshot(c.symbol) for c in self._candidates[:MAX_CANDIDATES]]
+        n = sum(1 for s in snaps if s and s.get("last", 0) > 0)
         log.info("SCREEN: %d/%d passed", n, len(self._candidates))
 
     def _maybe_allocate(self, positions: set[str]) -> None:
@@ -125,16 +119,21 @@ class JuliBrain:
                 decisions.append(dec)
         return decisions
 
+    def _entry_bars(self, snap: dict[str, Any], prices: list[float]) -> dict[str, Any]:
+        """Bar context INTO the brain (horizon classification happens there)."""
+        return {
+            "close": snap.get("close_arr") or prices,
+            "high": snap.get("high_arr"),
+            "low": snap.get("low_arr"),
+            "regime": self._state.get("regime_label", "unknown"),
+        }
+
     def _compute_alpha(self, snap: dict[str, Any]) -> dict[str, float]:
         """Compute all indicators from snapshot arrays."""
-        kw = {
-            k: (
-                []
-                if (v := snap.get(u)) is None
-                else (list(v) if not isinstance(v, list) else v)
-            )
-            for k, u in ATTRS
-        }
+        kw: dict[str, Any] = {}
+        for k, u in ATTRS:
+            v = snap.get(u)
+            kw[k] = [] if v is None else (v if isinstance(v, list) else list(v))
         if len(kw["close"]) < 20:
             return {}
         alpha = compute_all_alpha(BarSeries(**kw))
@@ -144,27 +143,27 @@ class JuliBrain:
         self, ticker: str, direction: int, result: dict[str, Any]
     ) -> dict[str, Any]:
         """Build decision dict from brain result."""
-        score = result.get("score", 0)
+        score, conf = result.get("score", 0), result.get("confidence", 0.5)
         verdict = result.get("verdict", "")
-        conf = result.get("confidence", 0.5)
         log.info(
-            "THINK %s %s score=%.3f regime=%s risk=%s",
+            "THINK %s %s score=%.3f regime=%s risk=%s hz=%s",
             ticker,
             "BUY" if direction > 0 else "SELL",
             score,
             result.get("regime", "?"),
             result.get("risk", "normal"),
-        )
-        thought = SimpleNamespace(
-            direction=direction, score=score, verdict=verdict, confidence=conf
+            result.get("horizon", "scalp"),
         )
         return {
             "ticker": ticker,
             "direction": direction,
             "verdict": verdict,
             "score": score,
-            "thought": thought,
+            "thought": SimpleNamespace(
+                direction=direction, score=score, verdict=verdict, confidence=conf
+            ),
             "sizing": result.get("sizing"),
+            "horizon": result.get("horizon", "scalp"),
         }
 
     def _eval_one(
@@ -182,6 +181,7 @@ class JuliBrain:
             entry_price=float(prices[-1]),
             atr=snap.get("atr", 1.0),
             open_positions=open_count,
+            bars=self._entry_bars(snap, prices),
         )
         latency_us = (time.perf_counter_ns() - t0) / 1000.0
         if latency_us > 1000.0:

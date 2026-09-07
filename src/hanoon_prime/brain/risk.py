@@ -11,19 +11,25 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from ..edge import kelly_fraction, score_to_win_prob
 from ..immune import (
-    ATR_STOP_MULT,
-    ATR_TARGET_MULT,
     KELLY_FRACTION,
     MAX_CONCURRENT_POSITIONS,
     MAX_LOSS_PER_TRADE,
     MAX_POSITION_NOTIONAL,
 )
 from .config import PENNY_NOTIONAL_CAPS
+from .horizons import params_for
 from .realized_ev import RealizedStats, ev_gate_should_enter
+
+
+def _ev_scale(gate: dict[str, Any]) -> float:
+    """Advisory scale: full size on pass, 0.75 thin-positive, 0.5 negative."""
+    if gate["should_enter"]:
+        return 1.0
+    return 0.75 if gate["ev"] > 0.0 else 0.5
 
 
 @dataclass
@@ -37,6 +43,13 @@ class SizingResult:
     kelly: float = 0.0
     risk_pass: bool = False
     reason: str = ""
+    ev_scale: float = 1.0
+    """Realized-EV confidence scale on shares (bounded [0.5, 1.0]).
+    Advisory by construction — the realized-EV math never refuses an entry
+    (nothing stands between the brain's pick and mechanical risk), it only
+    sizes the conviction down when realized data distrusts the band."""
+    ev_reason: str = ""
+    """Realized-EV gate verdict string, for telemetry only."""
 
 
 class RiskEngine:
@@ -76,11 +89,22 @@ class RiskEngine:
         return PENNY_NOTIONAL_CAPS[-1][1]
 
     def _size(
-        self, score: float, entry_price: float, atr: float, kelly: float
+        self,
+        score: float,
+        entry_price: float,
+        atr: float,
+        kelly: float,
+        horizon: str = "scalp",
     ) -> tuple[int, float, float]:
-        """Compute (shares, stop, target) under all notional/loss caps."""
+        """Compute (shares, stop, target) under all notional/loss caps.
+
+        Stop/target multipliers are per-horizon (scalp keeps the prime
+        2×/6× ATR; longer horizons widen both, preserving 3:1 R:R).
+        """
         direction = 1 if score > 0 else -1
-        risk_per_share = atr * ATR_STOP_MULT
+        hp = params_for(horizon)
+        stop_mult, target_mult = hp.atr_stop_mult, hp.atr_target_mult
+        risk_per_share = atr * stop_mult
         max_by_notional = MAX_POSITION_NOTIONAL / entry_price
         max_by_loss = MAX_LOSS_PER_TRADE / risk_per_share
         max_by_kelly = MAX_POSITION_NOTIONAL * kelly / entry_price
@@ -88,9 +112,26 @@ class RiskEngine:
         shares = max(
             1, int(min(max_by_notional, max_by_loss, max_by_kelly, max_by_penny))
         )
-        stop = round(entry_price - direction * ATR_STOP_MULT * atr, 2)
-        target = round(entry_price + direction * ATR_TARGET_MULT * atr, 2)
+        stop = round(entry_price - direction * stop_mult * atr, 2)
+        target = round(entry_price + direction * target_mult * atr, 2)
         return shares, stop, target
+
+    def _preflight(
+        self, score: float, confidence: float, entry_price: float, atr: float
+    ) -> tuple[str | None, float, float, dict[str, Any]]:
+        """Mechanical validity + Kelly + realized-EV advisory computation."""
+        bad = self._invalid_inputs(score, entry_price, atr)
+        if bad is not None:
+            return bad, 0.0, 0.0, {}
+        win_prob = score_to_win_prob(score)
+        kelly = kelly_fraction(win_prob) * KELLY_FRACTION
+        if not math.isfinite(kelly) or kelly <= 0:
+            return "Invalid Kelly (non-finite or zero)", 0.0, 0.0, {}
+        direction = 1 if score > 0 else -1
+        gate = ev_gate_should_enter(
+            score, win_prob, self._realized, direction, confidence=confidence
+        )
+        return None, win_prob, kelly, gate
 
     def evaluate(
         self,
@@ -99,25 +140,49 @@ class RiskEngine:
         entry_price: float,
         atr: float,
         open_positions: int,
+        horizon: str = "scalp",
     ) -> SizingResult:
-        """Full risk evaluation. Returns sizing or rejection."""
-        bad = self._invalid_inputs(score, entry_price, atr)
+        """Mechanical limits + advisory realized-EV sizing (brain-first).
+
+        The realized-EV gate NEVER refuses — it only scales sizing (bounded
+        [0.5, 1.0]). Only mechanical limits (data validity, sub-rounding
+        Kelly, position cap) return shares=0.
+        """
+        bad, win_prob, kelly, gate = self._preflight(
+            score, confidence, entry_price, atr
+        )
         if bad is not None:
             return SizingResult(reason=bad)
-        win_prob = score_to_win_prob(score)
-        kelly = kelly_fraction(win_prob) * KELLY_FRACTION
-        if not math.isfinite(kelly) or kelly <= 0:
-            return SizingResult(reason="Invalid Kelly (non-finite or zero)")
-        direction = 1 if score > 0 else -1
-        gate = ev_gate_should_enter(
-            score, win_prob, self._realized, direction, confidence=confidence
-        )
-        ev = gate["ev"]
-        if not gate["should_enter"]:
-            return SizingResult(ev=ev, kelly=kelly, reason=gate["reason"])
+        ev, ev_scale = gate["ev"], _ev_scale(gate)
         if open_positions >= MAX_CONCURRENT_POSITIONS:
-            return SizingResult(reason=f"Max {MAX_CONCURRENT_POSITIONS} positions")
-        shares, stop, target = self._size(score, entry_price, atr, kelly)
+            return SizingResult(
+                ev=ev, kelly=kelly, reason=f"Max {MAX_CONCURRENT_POSITIONS} positions"
+            )
+        return self._compose_result(
+            score, entry_price, atr, kelly, horizon, ev, ev_scale, gate["reason"]
+        )
+
+    def _compose_result(
+        self,
+        score: float,
+        entry_price: float,
+        atr: float,
+        kelly: float,
+        horizon: str,
+        ev: float,
+        ev_scale: float,
+        ev_reason: str,
+    ) -> SizingResult:
+        """Mechanical size + sub-rounding guard + advisory EV scale."""
+        shares, stop, target = self._size(score, entry_price, atr, kelly, horizon)
+        # Sub-rounding guard (mechanical, not a gate): when Kelly sizing
+        # buys less than one share the edge is below rounding noise.
+        max_by_kelly = MAX_POSITION_NOTIONAL * kelly / entry_price
+        if max_by_kelly < 1.0:
+            reason = f"Sub-rounding edge: EV {ev:.3f} too low for 1 share"
+            return SizingResult(ev=ev, kelly=kelly, reason=reason)
+        if ev_scale < 1.0:
+            shares = max(1, int(shares * ev_scale))
         return SizingResult(
             shares,
             stop_price=stop,
@@ -126,4 +191,6 @@ class RiskEngine:
             kelly=kelly,
             risk_pass=True,
             reason="ok",
+            ev_scale=ev_scale,
+            ev_reason=ev_reason,
         )

@@ -104,6 +104,14 @@ class _H(BaseHTTPRequestHandler):
         if "eod_flatten_minutes" in body:
             TRADING_CONFIG.eod_flatten_minutes = float(body["eod_flatten_minutes"])
             log.info("EOD window -> %.1f min", TRADING_CONFIG.eod_flatten_minutes)
+        if "horizons" in body:
+            # Webapp activates trading horizons (rebuild parity: the ladder
+            # is fully implemented; scalp-only is the safe default).
+            from .brain.horizons import get_horizon_manager
+
+            enabled = get_horizon_manager().set_enabled(body["horizons"])
+            TRADING_CONFIG.horizons = set(enabled)
+            log.info("Horizons -> %s", enabled)
         self._r(200, TRADING_CONFIG.to_dict())
 
     def _body(self) -> dict[str, Any]:

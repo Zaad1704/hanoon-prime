@@ -50,6 +50,10 @@ files = ["src/hanoon_prime"]
 exclude = ["tests/", "scripts/", "src/hanoon_prime/ib_adapter.py", "src/hanoon_prime/ib_streamer.py", "src/hanoon_prime/ib_executor.py", "src/hanoon_prime/ib_compat.py", "src/hanoon_prime/ib_cycle.py"]
 
 [[tool.mypy.overrides]]
+module = "ib_insync.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "hanoon_prime.brain.*"
 disable_error_code = ["index"]
 
@@ -102,6 +106,11 @@ ignore = ["E501", "E701"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["C901", "E701", "PLR0912"]
+# Cohesive 6-arg surfaces (bars/horizon extend the brain's world model);
+# R16 bans inline noqa, so the allowance lives here, scoped per file.
+"src/hanoon_prime/brain/orchestrator.py" = ["PLR0913"]
+"src/hanoon_prime/brain/risk.py" = ["PLR0913"]
+"src/hanoon_prime/ib_executor.py" = ["PLR0913"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

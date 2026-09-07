@@ -11,6 +11,7 @@ import numpy as np
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from ._protect import protect_position, sweep_zombies
 from ._telegram import trade_closed, trade_opened
+from .brain.horizons import HORIZONS
 from .brain.risk import SizingResult
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
@@ -38,6 +39,7 @@ class IBExecutor:
         self.tracked_tickers: set[str] = set(tracked_tickers or [])
         self._brackets: dict[str, tuple[float, float]] = {}
         self._pending_parent: set[str] = set()
+        self._horizons: dict[str, str] = {}  # ticker → trading horizon
         self._last_snapshot: float = 0.0
         self._closed_trades: list[dict[str, Any]] = []
         self.last_thoughts: dict[str, Any] = {}
@@ -49,6 +51,7 @@ class IBExecutor:
         price: float,
         streamer: Any,
         sizing: Optional[SizingResult] = None,
+        horizon: str = "scalp",
     ) -> None:
         """Place atomic parent + TP + SL via IB's bracketOrder().
 
@@ -67,9 +70,7 @@ class IBExecutor:
             stop = float(sizing.stop_price)
             target = float(sizing.target_price)
         else:
-            raw = self.brain.size_position(
-                score_to_win_prob(thought.score), price, atr
-            )
+            raw = self.brain.size_position(score_to_win_prob(thought.score), price, atr)
             shares = max(1, int(raw))
             stop = round(price - d * ATR_STOP_MULT * atr, 2)
             target = round(price + d * ATR_TARGET_MULT * atr, 2)
@@ -77,6 +78,7 @@ class IBExecutor:
             return
         action = "BUY" if d > 0 else "SELL"
         contract = streamer.contracts[ticker]
+        self._horizons[ticker] = horizon
         for order in self.ib.bracketOrder(
             action, shares, round(price, 2), target, stop
         ):
@@ -127,6 +129,7 @@ class IBExecutor:
     def _record_exit(self, ticker: str, _streamer: Any) -> None:
         """Record a closed position to journal and brain."""
         self._brackets.pop(ticker, None)
+        self._horizons.pop(ticker, None)
         pos = self.brain._open_positions.pop(ticker, None)
         if pos is None:
             return
@@ -259,8 +262,14 @@ class IBExecutor:
         except Exception as e:
             log.warning("close_position failed %s: %s", ticker, e)
 
-    def close_all_positions(self, _streamer: Any) -> int:
-        """Flatten every open position via limit orders (post-market safe)."""
+    def close_all_positions(self, _streamer: Any, only: set[str] | None = None) -> int:
+        """Flatten open positions via limit orders (post-market safe).
+
+        ``only`` restricts the flatten to specific tickers (horizon-aware
+        EOD: intraday rungs close, overnight rungs hold). When ``only`` is
+        None, ALL orders are cancelled afterwards; with a filter, surviving
+        positions keep their protection and order children are left alone.
+        """
         count = 0
         try:
             ib_positions = self.ib.positions()
@@ -268,6 +277,8 @@ class IBExecutor:
             ib_positions = []
         for pos in ib_positions:
             sym = pos.contract.symbol
+            if only is not None and sym not in only:
+                continue
             qty = abs(int(pos.position))
             if qty == 0:
                 continue
@@ -288,7 +299,8 @@ class IBExecutor:
                 count += 1
             except Exception as e:
                 log.warning("FLATTEN failed %s: %s", sym, e)
-        self.cancel_all()
+        if only is None:
+            self.cancel_all()
         return count
 
     def cancel_all(self) -> None:

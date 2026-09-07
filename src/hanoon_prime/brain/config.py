@@ -171,11 +171,15 @@ PENNY_NOTIONAL_CAPS: list[tuple[float, float]] = [
 # ── Realized-state persistence ────────────────────────────────────────
 JULI_REALIZED_FILE: Path = STATE_DIR / "juli_realized.json"
 
-# ── Nash gate authority (brain/cognitive/nash.py): veto bands ─────────
+# ── Nash pattern memory (brain/cognitive/nash.py): bounded penalty ─────
 # With >= _GATE_MIN samples, pattern memory whose realized win probability
-# falls below 45% vetoes LONG entries; above 55% vetoes SHORT entries.
+# falls below 45% leans LONG entries away (bounded penalty, scaled by
+# pattern confidence + deficit); above 55% leans SHORT entries away.
+# BRAIN-FIRST (2026-09-07): pattern memory is advisory — it may never zero
+# the score (the old hard veto could deadlock the brain on its own history).
 NASH_VETO_LOW: float = 0.45
 NASH_VETO_HIGH: float = 0.55
+NASH_PENALTY_MAX: float = 0.15  # max bounded score penalty from pattern memory
 
 # ── IRONYCLADE: trade sources that may update the realized learning loop ───
 # Paper / synthetic / backtest fills are excluded so the live EV gate only

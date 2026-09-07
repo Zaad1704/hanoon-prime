@@ -21,6 +21,7 @@ from ..types import BarSeries, FillInfo
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
+from .news_sources import NewsFeedEngine
 from .shared_state import BrainState
 from .thinker import Signal, Thinker
 
@@ -47,6 +48,9 @@ class ConsolidationEngine:
 
         self.buffer = TradeBuffer(on_trade_closed=self._on_trade_closed)
         self.supervisor = LearningSupervisor(self.buffer, self.memory)
+        # News organ (System 2): live headlines → bounded sentiment into
+        # BrainState. Evidence for the brain, never a gate.
+        self.news = NewsFeedEngine(brain_state, interval=interval * 4.0)
         self._sleep_engine = sleep_engine
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -89,13 +93,28 @@ class ConsolidationEngine:
         self._update_regime()
         self._update_halim()
         self._run_thinker()
+        self.news.maybe_refresh()
         self._persist_state()
         log.info(
-            "S2 | regime=%.2f halim=%.3f thinker=%.4f",
+            "S2 | regime=%.2f halim=%.3f thinker=%.4f news=%.2f",
             self.state.get("regime_multiplier", 1.0),
             self.state.get("halim_modifier", 0.0),
             self.state.get("thinker_modifier", 0.0),
+            self._news_bias(),
         )
+
+    def _news_bias(self) -> float:
+        """Bounded news sentiment bias for the latest alpha ticker (±0.03)."""
+        try:
+            alpha = self._get_latest_alpha()
+            if not alpha:
+                return 0.0
+            ticker = max(alpha, key=lambda k: abs(alpha.get(k, 0)))
+            sent = self.state.get("news_sentiment", {}) or {}
+            pol = float(sent.get(ticker, 0.0))
+            return max(-0.03, min(0.03, pol * 0.03))
+        except Exception:
+            return 0.0
 
     def _update_regime(self) -> None:
         """Get regime classification from HALIM."""

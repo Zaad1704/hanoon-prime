@@ -68,7 +68,7 @@ impossible. If you can't commit, you can't break the main branch.
 5. **JULI Trails Both**: JULI trails BOTH stop and target as position moves in favor.
 6. **JULI Cancels Orphans**: JULI monitors all orders and cancels orphans immediately.
 7. **Single Consciousness**: JULI is ONE process. IB socket → ring buffer → cerebellum → cortex → hands.
-8. **Punishment-Dominant Learning**: JULI is punished 2× harder for losses than rewarded for wins.
+8. **Punishment-Dominant Learning**: JULI is punished harder for losses than rewarded for wins (PENALTY_SCALE 1.2 vs REWARD_SCALE 0.5).
 9. **Hard Safety Nets**: The Immune System is non-overridable. IB-reported daily loss → hard stop.
 
 ---
@@ -176,7 +176,9 @@ Bounds:             w_i ∈ [-2.0, +2.0]
 
 - LEARNING_RATE = 0.02
 - REWARD_SCALE = 0.5 (gentle reinforcement)
-- PENALTY_SCALE = 2.0 (strong punishment — 4× harder than reward)
+- PENALTY_SCALE = 1.2 (loss-aversion; aligned across immune.py and
+  brain/config.py — the live Reflector path and rebuild's guardrail
+  value agree; 2.0 was outside rebuild's validated guardrail range)
 - WEIGHT_DECAY = 0.999 per trade
 - WEIGHT_MIN = -2.0, WEIGHT_MAX = +2.0
 
@@ -248,7 +250,36 @@ The live system never touches CSV files.
 
 ---
 
-## R19 — Realized Learning Gate (v2.0.0)
+## R19 — Realized Learning Gate (v2.1 BRAIN-FIRST)
+
+> **BRAIN-FIRST amendment (2026-09-07):** the realized-EV gate is
+> **ADVISORY**. It computes EV, records its verdict in telemetry, and
+> SCALES the position (bounded [0.5, 1.0]) — it never refuses an entry.
+> Nothing stands between the brain's pick and execution except MECHANICAL
+> limits (data validity, sub-rounding Kelly, position caps, session/EOD,
+> daily-loss halt). Rationale: a learned gate that can block is
+> self-referential — trained on the trades it allowed, it can deadlock on
+> its own history (rebuild's 2026-08-14 EV deadlock; the death spiral).
+> Learned signals LEAN (bounded, two-way); mechanical constraints GATE.
+
+Prime closes the one quantitative gap vs rebuild *Snowflake*: the entry gate
+now blends the structural EV with **realized** band win-rate and realized R:R, so
+the system evolves from every real trade instead of replaying a static prior.
+
+- `brain/realized_ev.py` — `RealizedStats` persists closed-trade outcomes to
+  `runtime/juli_realized.json` and exposes `band_wr`, `realized_rr`,
+  `is_gate_closed`, `compute_ev_and_entry`, `ev_gate_should_enter` and the
+  `verify_learning_gate` 3-probe canary (refuse losing band, admit recovery,
+  admit thin data).
+- `brain/risk.py` — `RiskEngine.evaluate(...)` calls `ev_gate_should_enter`
+  ADVISORY: sizing scale only, never a refusal.
+- `brain/orchestrator.py` — `on_trade_close(...)` feeds only IRONYCLADE
+  sources (`real_trade`, `ib_fill`, `ib_paper`) into `RealizedStats` +
+  `memory.record_outcome`/`update_pred_error`, closing the wiring gap where
+  rebuild updated dynamics/exits but never the realized band/RR.
+- Nash pattern memory is likewise a bounded LEAN (`NASH_PENALTY_MAX = 0.15`,
+  scaled by pattern confidence + win-prob deficit) — the old hard veto that
+  zeroed the score is retired (`test_R22`/`test_brain_first` pin this).
 
 Prime closes the one quantitative gap vs rebuild *Snowflake*: the entry gate
 now blends the structural EV with **realized** band win-rate and realized R:R, so

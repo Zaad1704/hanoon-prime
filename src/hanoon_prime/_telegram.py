@@ -3,6 +3,7 @@
 Sends trade entries, exits, safety halts, and errors to Telegram.
 Uses stdlib urllib — no external dependencies.
 Rate-limited (max 10/min), 429-aware, chunked at 4096 chars.
+The read-only chat interface lives in _telegram_chat.py.
 """
 
 from __future__ import annotations

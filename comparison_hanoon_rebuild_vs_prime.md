@@ -241,7 +241,7 @@ only.
 
 | | PRIME | REBUILD |
 |---|---|---|
-| **Threshold** | `cortex` `|score| ≥ ENTRY_THRESHOLD=0.65` → `BUY`/`SELL` (`cortex.py:124`). | `score ≥ SIGNAL_THRESHOLD=0.60` → `ENTER` (`hanoon/juli/__init__.py:50`); GUARDRAILS dict in `constants.py:34` lists `value: 0.58` — **the live value (0.60) and the guardrail value (0.58) disagree**; the `GateAdvisor` (`hanoon/halim_bridge/gate_advisor.py`) further auto-tunes it from realized WR. |
+| **Threshold** | `cortex` `|score| ≥ ENTRY_THRESHOLD=0.65` → `BUY`/`SELL` (`cortex.py:124`). | `SIGNAL_THRESHOLD` is read **from** the guardrail: `constants.py:123` → `SIGNAL_THRESHOLD = GUARDRAILS["SIGNAL_THRESHOLD"]["value"]` = **0.58** (the old 0.60-vs-0.58 disagreement was resolved in rebuild's favor of the guardrail); the `GateAdvisor` (`hanoon/halim_bridge/gate_advisor.py`) further auto-tunes it from realized WR. |
 | **Direction** | Sign of the tanh score; `SELL` only if `SHORT_ALLOWED=True` (`immune.py:40`). | Derived from a directional subset of alpha (direction_hint + `institutional_flow`/`orderbook_imbalance`/`momentum`/`ichimoku`/`trend_strength` per `DIR_*_THRESH`), then neuromancer + Nash + Halim modify it (`thinker.py`). |
 | **EV gate** | Structural `gross_ev > 0` checked at sizing; **not an entry gate** per se. | **Hard entry gate:** `ev_gate_should_enter` → `ev > 0.05` (plus `CONSERVATIVE_EV_MIN=0.07` AND, in `decision.py` ANDed with verdict ENTER + halim approval + direction). |
 | **Halim** | Pre-loaded `halim_modifier` from `BrainState`; blended into score (`orchestrator.py:169` `+hm`). | Bounded **advisor pull** `±HALIM_PULL_BOUND=0.03` (`constants.py` + `thinker.py:289`); can veto when direction opposes and trust·pull high (`live.py:117-121`). |
@@ -296,8 +296,10 @@ re-submission, not a systematic exit policy.
 
 ### REBUILD — multi-tier, learned-aware, portfolio-aware (`execution/brackets.py`)
 
-`BracketManager.should_exit` (`brackets.py:154`) — a **5-tier ladder** on every
-monitor pulse:
+`BracketManager.should_exit` (`brackets.py:154`) — a **3-tier ladder** (TIER 1
+hard stop, TIER 2 JULI primary verdict, TIER 3 mechanical safety nets with
+sub-checks 3a/3b/…) on every monitor pulse. Note TIER 3 sub-checks read
+`bracket.horizon` — rebuild's mechanical exits are already horizon-aware:
 
 1. **TIER 1 — Hard stop** (`force_exit`). Never overridden.
 2. **TIER 2 — JULI's primary verdict** (`juli_exit_verdict ∈ {EXIT,
@@ -756,3 +758,104 @@ modules). The remaining differences are deliberate: prime keeps exits
 light `threshold_adapter` rather than rebuild's full `halim_gate_advisor`
 service — i.e. prime deliberately trades rebuild's optimiser for the
 provability of a tighter, contract-bound core.
+
+---
+
+## Addendum 2 — v2.1 BRAIN-FIRST (2026-09-07, code-verified)
+
+A second hardening run ported rebuild's *doctrine*, not just its features.
+The central decision is written into `CONTRACT.md` (R19 amendment):
+
+> **Learned signals LEAN (bounded, two-way); mechanical constraints GATE.**
+
+A learned gate that can *block* is self-referential — trained on the trades
+it allowed, it can deadlock on its own history (rebuild's 2026-08-14 EV
+deadlock, §3's documented death spiral). Prime's v2.1 therefore retires every
+remaining learned hard-gate and demotes it to a bounded lean:
+
+| Learned signal | v2.0.0 behavior | v2.1 BRAIN-FIRST behavior |
+|---|---|---|
+| Realized-EV gate (`brain/risk.py`) | `should_enter=False` refused the entry | **Advisory sizing scale only**: full size on `should_enter`, `0.75` on thin positive EV, `0.5` on negative EV — bounded `[0.5, 1.0]` (`SizingResult.ev_scale`); verdict kept in `ev_reason` for telemetry. Only MECHANICAL limits refuse: data validity, sub-rounding Kelly (<1 share), `MAX_CONCURRENT_POSITIONS`. |
+| Nash pattern memory (`brain/orchestrator.py`) | `_apply_nash_gate` zeroed the score (hard veto) | **Bounded penalty** `NASH_PENALTY_MAX = 0.15` (`brain/config.py`), scaled by pattern confidence × win-prob deficit; short side leans toward zero. An overwhelming brain signal can still clear the threshold. Pinned by `tests/test_brain_first.py::TestNashBoundedPenalty` (`leaned != 0.0` — never a hard veto again). |
+| Loss-aversion constant | `immune.py PENALTY_SCALE = 2.0` | **1.2** — verified equal to rebuild's `WEIGHT_LOSS_AVERSION = 1.2` (`hanoon/juli/constants.py:362`, itself "reduced from 1.5 — was causing over-reactive weight decay"); `brain/config.py` and `immune.py` now read the same value (CONTRACT.md §Punishment updated). |
+
+### 1. The horizon ladder (rebuild `hanoon/horizon.py` → prime `brain/horizons.py`)
+
+Six rungs — `scalp, multihour, swing, multiday, multiweek, longterm` — each
+with `(atr_stop_mult, atr_target_mult, stale_minutes, patience)`. Every rung
+keeps the sacred ≥ 3:1 R:R (asserted at import). Classification lives **in
+the brain**: `tick(..., bars=...)` → `_classify_horizon` blends ATR%-base →
+momentum-consistency bump → regime shrink → bounded one-step Halim nudge,
+then snaps to the closest *enabled* rung (`HorizonManager`, persisted in
+`runtime/horizons.json`, `scalp`-only safe default, webapp `POST /config
+horizons`). Per-horizon effects wired end-to-end: `RiskEngine._size` uses
+run-specific ATR multipliers (scalp keeps 2×/6×), `ExitPolicy.register` takes
+per-horizon stale windows, `_maybe_size` scales the entry bar by `patience`,
+and EOD flatten is horizon-aware — `holds_through_close` (multiday+) SURVIVE
+the close (rebuild v4 lesson: flattening an overnight thesis at 15:55 defeats
+it). `ib_executor` tracks `ticker → horizon` for order metadata + EOD policy.
+
+### 2. The news organ (rebuild `senses/news/providers.py` → prime `brain/news_sources.py`)
+
+System-2 sensory evidence, never a gate: Yahoo Finance search API (no key) +
+Finnhub company-news (`FINNHUB_API_KEY` free tier), stdlib-only with 4s
+timeouts and a 5-min per-ticker cache, scored by the SAME `SentimentPolarity`
+model the outcome learner uses. `NewsFeedEngine` runs on the consolidation
+thread and publishes `{ticker: polarity}` into `BrainState`; the fast path
+reads a bounded ±0.03 bias (`_news_bias`) without touching the network.
+Every provider failure is silent — no source is load-bearing.
+
+### 3. Ops ports from rebuild
+
+- **Gateway supervision** (`runner_gateway.py` port): `_supervise_gateway`
+detects drops, reconnects 1s→2s→4s→8s→16s→30s-cap backoff, then
+`_resubscribe_all` re-requests market data + re-seeds history — IB silently
+drops subscriptions on disconnect (the stale-tick watchdog panic).
+- **Stale-order sweep**: pending `JULI_*` bracket parents older than 60s are
+cancelled so the brain re-decides on fresh data (rebuild's Error-201
+stacked-book lesson).
+- **Read-only Telegram chat** (`ops/telegram_chat.py` port): `TelegramChat`
+long-polls getUpdates, answers `/status`, `/positions`, `/horizons` from a
+read-only brain snapshot. Auth = configured chat_id only; rate-bucketed
+20/min; it can never place orders or mutate config.
+
+### 4. Rebuild drift since the body comparison (re-verified 2026-09-07)
+
+Rebuild is now at **Fix #74**: #72 (proportional cold-start prediction-error
++ WS heartbeat), #73 v2 (per-ticker loss penalty is now ALPHA-AWARE
+PROPORTIONAL, not a hard block — the hard block was rejected as another
+death-spiral gate), #74 (confidence boost 0.30→0.60, threshold kept 0.55).
+The body's §4 threshold note is corrected above: live `SIGNAL_THRESHOLD` now
+READS the guardrail (0.58), so the old 0.60-vs-0.58 split is gone. §5's
+"5-tier ladder" is corrected to the actual **3-tier** ladder (TIER 1 hard
+stop / TIER 2 JULI verdict / TIER 3 mechanical nets); TIER 3 sub-checks are
+individually adaptive (`adaptive_thresholds.py`) and horizon-aware
+(`bracket.horizon`). `_KELLY_BASE_FRACTION = 0.15` carries the scar note
+"was 25% — losses were 5x wins on $1000 notional". The doctrine-vs-reality
+tension in §4 (`decision.py` re-ANDing the EV gate at the ops layer) is
+UNCHANGED and still present at `hanoon/juli/decision.py:135-141`.
+
+### 5. Gates (all green, both environments)
+
+`pytest tests/ -m "not live"` → **370 passed**; `mypy src/hanoon_prime/`
+(strict) clean in 116 files; `ruff check src/hanoon_prime tests` clean; all
+six script gates (R9/R10/R11/R13/R15/R16) pass. Two environment-robustness
+fixes shipped with this run: `test_place_oca_uses_stub_when_ib_missing` now
+monkeypatches `_protect._ib = None` instead of depending on `ib_insync`
+being ambient-absent, and `pyproject.toml` gained the standard
+`ignore_missing_imports` override for the optional `ib_insync` extra — so
+the type gate passes whether or not the `ib` extra is installed (CI
+installs only `.[dev]`).
+
+### Verdict after v2.1
+
+The v2.0.0 addendum framed the split as **provability (prime) vs
+survivability (rebuild)**. v2.1 collapses most of that trade-off: prime now
+holds rebuild's survivability doctrine (learned signals lean, mechanical
+constraints gate; horizons; news evidence; gateway self-heal) *inside* the
+provability cage (R1–R20 contract, strict mypy, ≤200-line modules, single
+verdict source). The remaining genuine differences are the deliberate ones:
+rebuild still owns the ops surface (webapp/API, bridge services, portfolio
+risk manager, cross_asset optimiser, GateAdvisor) and the 27-indicator
+score; prime owns the contract-bound core with the 5-indicator signed tanh.
+The two generations now disagree mainly on **scope**, not philosophy.
