@@ -98,18 +98,20 @@ class ConsolidationEngine:
 
     def _update_policy(self) -> None:
         """Slow-cortex policy pulse: publish safety + portfolio risk state."""
-        feed = self.state.get("account_feed") or {}
+        feed = self.state.get("account_feed") or {}  # array-safe: dict-typed
         self.safety.begin_call()
         self.safety.on_daily_pnl(float(feed.get("daily_pnl", 0.0)))
         self.safety.on_consecutive_losses(int(self.state.get("consecutive_losses", 0)))
-        self.safety.on_position_count(len(self.state.get("positions_open") or {}))
+        self.safety.on_position_count(
+            len(self.state.get("positions_open") or {})  # array-safe: dict-typed
+        )
         risk = self._portfolio_policy_state(feed)
         self._publish_giveback_exits()
         self.state.update(policy_state=risk)
 
     def _portfolio_policy_state(self, feed: dict[str, Any]) -> dict[str, Any]:
         """Fold portfolio risk + safety authorization into policy_state."""
-        positions = feed.get("positions") or {}
+        positions = feed.get("positions") or {}  # array-safe: dict-typed
         if positions:
             self.portfolio_risk.update_positions(positions)
         equity = feed.get("equity")

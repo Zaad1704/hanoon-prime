@@ -12,17 +12,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hanoon_prime.brain.policy.verdict import ENTER, Verdict
 from hanoon_prime.brain.risk import RiskEngine, SizingResult
 from hanoon_prime.hippocampus import Hippocampus
 from hanoon_prime.ib_cycle import CycleMeta
 from hanoon_prime.immune import MAX_CONCURRENT_POSITIONS
-from hanoon_prime.monitor.sleep_manager import SleepManager, SleepState
+from hanoon_prime.monitor.sleep_manager import SleepManager
 
 # ── Bug #1: Entry threshold bypass ────────────────────────────────────
 
 
 class TestBug1ThresholdBypass:
-    """_exec_decision must skip entries when brain says sizing=0."""
+    """_execute_verdict must honor the Verdict's sizing (threshold bypass)."""
 
     def _make_mixin(self):
         """Build a minimal BotCycleMixin-like object with mocked deps."""
@@ -31,69 +32,61 @@ class TestBug1ThresholdBypass:
         mixin = BotCycleMixin.__new__(BotCycleMixin)
         mixin.streamer = MagicMock()
         mixin.hippocampus = MagicMock()
-        mixin.hippocampus.check_entry_allowed.return_value = True
         mixin.hippocampus._open_positions = {}
         mixin.executor = MagicMock()
         mixin.juli = MagicMock()
         mixin.monitor = MagicMock()
-        mixin._sleep_mgr = MagicMock()
-        mixin._sleep_mgr.get_state.return_value = SleepState(active=True)
         return mixin
 
+    def _enter_verdict(self, sizing):
+        from hanoon_prime.brain.policy.verdict import ENTER, Verdict
+
+        return Verdict(
+            ticker="TSLA",
+            action=ENTER,
+            sizing=sizing,
+            horizon="scalp",
+            thought=SimpleNamespace(direction=1, score=0.65),
+        )
+
     def test_skips_when_sizing_shares_zero(self):
-        """Decision with SizingResult(shares=0) must NOT place bracket."""
+        """Verdict with SizingResult(shares=0) must NOT place bracket."""
         mixin = self._make_mixin()
         tk = MagicMock()
         tk.hasBidAsk = True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
-        dec = {
-            "ticker": "TSLA",
-            "direction": 1,
-            "sizing": SizingResult(shares=0),
-            "thought": SimpleNamespace(direction=1, score=0.02),
-        }
-        mixin._exec_decision(dec)
+        mixin._execute_verdict(self._enter_verdict(SizingResult(shares=0)))
         mixin.executor.place_bracket.assert_not_called()
 
     def test_skips_when_sizing_none(self):
-        """Decision with no sizing must NOT place bracket."""
+        """Verdict with no sizing must NOT place bracket."""
         mixin = self._make_mixin()
         tk = MagicMock()
         tk.hasBidAsk = True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
-        dec = {
-            "ticker": "TSLA",
-            "direction": 1,
-            "sizing": None,
-            "thought": SimpleNamespace(direction=1, score=0.02),
-        }
-        mixin._exec_decision(dec)
+        mixin._execute_verdict(self._enter_verdict(None))
         mixin.executor.place_bracket.assert_not_called()
+        mixin.juli.brain.register_position.assert_not_called()
 
-    def test_places_bracket_when_sizing_valid(self):
-        """Decision with valid sizing MUST place bracket."""
+    def test_places_bracket_and_registers_when_sizing_valid(self):
+        """Verdict with valid sizing MUST place bracket and register."""
         mixin = self._make_mixin()
-        # Portfolio risk gate needs synced equity to allow the entry
-        from hanoon_prime.ib_cycle import _PORTFOLIO_RISK
-
-        _PORTFOLIO_RISK.update_equity(1_000_000.0)
         tk = MagicMock()
         tk.hasBidAsk = True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
-        dec = {
-            "ticker": "TSLA",
-            "direction": 1,
-            "sizing": SizingResult(shares=3, risk_pass=True),
-            "thought": SimpleNamespace(direction=1, score=0.65),
-        }
-        mixin._exec_decision(dec)
+        v = self._enter_verdict(SizingResult(shares=3, risk_pass=True))
+        mixin._execute_verdict(v)
         mixin.executor.place_bracket.assert_called_once()
+        mixin.juli.brain.register_position.assert_called_once_with(
+            "TSLA", 100.5, horizon="scalp"
+        )
+        mixin.juli.brain.note_entry.assert_called_once_with("TSLA")
 
     def test_risk_engine_rejects_below_threshold_score(self):
         """RiskEngine rejects tiny scores via EV gate (no 1-share trades)."""
@@ -267,12 +260,12 @@ class TestBug3OffMarketGuard:
         mixin.ib.pendingTickers.return_value = []
         mixin.journal = MagicMock()
 
-        dec = {
-            "ticker": "TSLA",
-            "direction": 1,
-            "sizing": SizingResult(shares=3, risk_pass=True),
-            "thought": SimpleNamespace(direction=1, score=0.65),
-        }
+        dec = Verdict(
+            ticker="TSLA",
+            action=ENTER,
+            sizing=SizingResult(shares=3, risk_pass=True),
+            thought=SimpleNamespace(direction=1, score=0.65),
+        )
         # market_open=False should skip all entries
         mixin._finish_cycle(
             [], [dec], None, CycleMeta(poll=1.0, started=0.0, market_open=False)

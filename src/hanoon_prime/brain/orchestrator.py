@@ -206,7 +206,10 @@ class NeuromorphicBrain:
         if veto:
             return Verdict(ticker=ticker, action=VETOED, reason=veto, stage="validity")
         assert snap is not None
-        self.state.set_latest_prices(snap.get("prices") or [])
+        prices = snap.get("prices")
+        if prices is None:
+            prices = []
+        self.state.set_latest_prices(prices)
         outcome = self._score_candidate(ticker, snap, len(open_positions))
         if isinstance(outcome, Verdict):
             return outcome
@@ -230,7 +233,7 @@ class NeuromorphicBrain:
         """Return a veto reason when the snapshot is unusable, else ''."""
         if snap is None or not isinstance(snap, dict):
             return "no_data"
-        prices = snap.get("prices") or []
+        prices = snap.get("prices") or []  # array-safe (plain list)
         if len(prices) < 20:
             return "no_data"
         for key in ("last", "bid", "ask", "mid"):
@@ -244,7 +247,7 @@ class NeuromorphicBrain:
         self, ticker: str, snap: dict[str, Any], open_count: int
     ) -> tuple[dict[str, Any], dict[str, Any], SimpleNamespace] | Verdict:
         """Score through the brain; Verdict short-circuit on failure."""
-        prices = snap.get("prices") or []
+        prices = snap.get("prices") or []  # array-safe (plain list)
         t0 = time.perf_counter_ns()
         try:
             alpha = compute_alpha_from_snap(snap)
@@ -267,6 +270,15 @@ class NeuromorphicBrain:
                 reason="eval_error",
                 stage="pipeline",
             )
+        thought = self._extract_thought(result, ticker)
+        if isinstance(thought, Verdict):
+            return thought
+        return result, bars, thought
+
+    def _extract_thought(
+        self, result: dict[str, Any], ticker: str
+    ) -> SimpleNamespace | Verdict:
+        """Normalize direction/score/confidence or short-circuit HOLD."""
         thought_raw = result.get("thought")
         if isinstance(thought_raw, SimpleNamespace):
             direction = int(thought_raw.direction)
@@ -280,10 +292,7 @@ class NeuromorphicBrain:
             return Verdict(
                 ticker=ticker, action=HOLD, reason="no_signal", stage="pipeline"
             )
-        thought = SimpleNamespace(
-            direction=direction, score=score, confidence=confidence
-        )
-        return result, bars, thought
+        return SimpleNamespace(direction=direction, score=score, confidence=confidence)
 
     def _apply_fast_gates(
         self,
@@ -321,29 +330,39 @@ class NeuromorphicBrain:
                 stage="trading_policy",
             )
         if policy.get("authorized", True) is False:
-            probe = self.probe.maybe_probe(
-                float(thought.score),
-                float(snap.get("bid", 0.0)),
-                float(snap.get("ask", 0.0)),
-                int(policy.get("consecutive_losses", 0)),
-            )
-            if probe:
-                log.info("PROBE %s: recovery entry admitted", ticker)
-                return Verdict(
-                    ticker=ticker,
-                    action=ENTER,
-                    reason="probe_recovery",
-                    stage="probe_recovery",
-                    direction=thought.direction,
-                    score=float(thought.score),
-                )
+            return self._halted_verdict(ticker, thought, snap, policy)
+        return None
+
+    def _halted_verdict(
+        self,
+        ticker: str,
+        thought: SimpleNamespace,
+        snap: dict[str, Any],
+        policy: dict[str, Any],
+    ) -> Verdict:
+        """Safety halt: probe recovery admits; else VETOED at the reason."""
+        probe = self.probe.maybe_probe(
+            float(thought.score),
+            float(snap.get("bid", 0.0)),
+            float(snap.get("ask", 0.0)),
+            int(policy.get("consecutive_losses", 0)),
+        )
+        if probe:
+            log.info("PROBE %s: recovery entry admitted", ticker)
             return Verdict(
                 ticker=ticker,
-                action=VETOED,
-                reason=str(policy.get("pause_reason") or "halted"),
-                stage="safety",
+                action=ENTER,
+                reason="probe_recovery",
+                stage="probe_recovery",
+                direction=thought.direction,
+                score=float(thought.score),
             )
-        return None
+        return Verdict(
+            ticker=ticker,
+            action=VETOED,
+            reason=str(policy.get("pause_reason") or "halted"),
+            stage="safety",
+        )
 
     def _admit_verdict(
         self,
@@ -363,7 +382,18 @@ class NeuromorphicBrain:
             return Verdict(
                 ticker=ticker, action=HOLD, reason="not_sized", stage="pipeline"
             )
-        prices = snap.get("prices") or []
+        return self._portfolio_admit(ticker, snap, sizing, policy, thought)
+
+    def _portfolio_admit(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        sizing: SizingResult,
+        policy: dict[str, Any],
+        thought: SimpleNamespace,
+    ) -> Verdict:
+        """Portfolio risk gate + scaling; Verdict short-circuit on veto."""
+        prices = snap.get("prices") or []  # array-safe (plain list)
         price = float(snap.get("last") or snap.get("mid") or prices[-1])
         notional = float(sizing.shares) * price
         ok, reason = portfolio_gate(ticker, notional, policy)
@@ -398,7 +428,7 @@ class NeuromorphicBrain:
         open_count: int,
     ) -> SizingResult:
         """Size an admitted candidate from thought (mirrors _maybe_size)."""
-        prices = snap.get("prices") or []
+        prices = snap.get("prices") or []  # array-safe (plain list)
         horizon = self._classify_horizon(bars)
         patience = horizons.params_for(horizon).patience
         if abs(float(thought.score)) <= self.dynamics.threshold * patience:

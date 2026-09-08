@@ -220,10 +220,13 @@ class _H(BaseHTTPRequestHandler):
         return snap
 
     def _risk_state(self) -> dict[str, Any]:
-        """Portfolio risk snapshot (rebuild port: scalar, stress, giveback)."""
-        from .ib_cycle import _PORTFOLIO_RISK
-
-        return _PORTFOLIO_RISK.get_risk_state()
+        """Portfolio risk snapshot (slow cortex publishes policy_state)."""
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        brain = getattr(juli, "brain", None) if juli else None
+        if brain is None:
+            return {}
+        policy = brain.state.get("policy_state")
+        return dict(policy) if isinstance(policy, dict) else {}
 
     def _brain_state(self) -> dict[str, Any]:
         juli = getattr(self.bot, "juli", None) if self.bot else None

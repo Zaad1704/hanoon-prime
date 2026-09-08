@@ -32,7 +32,7 @@ def portfolio_gate(
         return False, f"stress_size>{STRESS_SIZE_CAP:.0%}"
     if float(portfolio.get("exposure", 0.0)) >= 1.0:
         return False, "exposure_cap"
-    holdings = portfolio.get("holdings", {}) or {}
+    holdings = portfolio.get("holdings", {}) or {}  # array-safe: dict-typed
     held = abs(float(holdings.get(ticker, 0.0) or 0.0))
     conc = (held + notional) / float(portfolio["equity"])
     if conc > CONCENTRATION_CAP:

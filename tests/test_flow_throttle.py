@@ -17,54 +17,67 @@ from hanoon_prime.juli import EVAL_WINDOW, JuliBrain
 
 
 # ── FIX-2026-09-08-02: rotating entry evaluation (no THINK burst) ─────
+class _FakeBrain:
+    """Lightweight NeuromorphicBrain stand-in: counts decide_entry calls."""
+
+    def __init__(self) -> None:
+        self.called: list[str] = []
+        self.exits = SimpleNamespace(is_registered=lambda t: False)
+        self.state = SimpleNamespace(get=lambda k, d=None: d, update=lambda **k: None)
+
+    def begin_entry_cycle(self) -> None:
+        pass
+
+    def decide_entry(self, ticker, snap, open_positions, session="rth"):
+        self.called.append(ticker)
+        from hanoon_prime.brain.policy.verdict import Verdict
+
+        return Verdict(ticker=ticker)
+
+    def register_position(self, *a, **k) -> None:
+        pass
+
+    def check_exit(self, *a, **k):
+        return SimpleNamespace(should_exit=False, reason="", exit_type="")
+
+
 class TestRotatingEvalWindow:
-    def test_eval_window_rotates_across_cycles(self):
-        """Regression: FIX-2026-09-08-02 — the eval cursor advances so the
-        whole universe gets scored over successive cycles, not in one burst."""
-        brain = JuliBrain(MagicMock())
-        brain.brain = MagicMock()
-        # Pretend a 10-ticker tracked universe.
+    def _make_juli(self) -> JuliBrain:
+        import collections
+
+        brain = JuliBrain.__new__(JuliBrain)
+        brain.brain = _FakeBrain()
         brain.budget = SimpleNamespace(
             get_all_tracked=lambda: {f"S{i}" for i in range(10)}
         )
+        brain._state = SimpleNamespace()
         brain._eval_off = 0
-        # First call scores the first EVAL_WINDOW tickers.
-        calls = []
-        brain._eval_one = lambda t, snap, n: calls.append(t) or (
-            {"ticker": t} if random_pass(t) else None
-        )
-        # Avoid real brain calls: stub _state / tick paths minimally.
-        brain._state = MagicMock()
-        brain.brain.note_eval_failure = MagicMock()
-        blanket = {f"S{i}" for i in range(10)}
-        brain._evaluate_entries(blanket, lambda t: {"prices": [1.0] * 21})
-        assert len(calls) <= EVAL_WINDOW, "scored more than window per cycle"
-        assert brain._eval_off == EVAL_WINDOW, "cursor did not advance"
+        brain._lock_held = False
+        brain._recent_verdicts = collections.deque(maxlen=200)
+        return brain
+
+    def test_eval_window_rotates_across_cycles(self):
+        """Regression: FIX-2026-09-08-02 — the eval cursor advances so the
+        whole universe gets scored over successive cycles (Verdicts, not a
+        silent omission), not in one burst."""
+        b = self._make_juli()
+        universe = {f"S{i}" for i in range(10)}
+        b.tick(universe, {}, None, set(), session="rth")
+        assert len(b.brain.called) <= EVAL_WINDOW, "scored more than window"
+        assert b._eval_off == EVAL_WINDOW, "cursor did not advance"
+        assert b.brain.called, "no decide_entry calls at all"
+        assert set(b.brain.called) <= universe
 
     def test_rotation_advances_to_holdout(self):
         """Regression: FIX-2026-09-08-02 — after enough cycles the cursor
         wraps and later tickers get evaluated too."""
-        brain = JuliBrain(MagicMock())
-        brain.budget = SimpleNamespace(
-            get_all_tracked=lambda: {f"S{i}" for i in range(6)}
-        )
-        brain._eval_off = 0
-        seen = set()
-        blank = {"prices": [1.0] * 21}
-
-        def fake_eval(t, snap, n):
-            seen.add(t)
-            return None
-
-        brain._eval_one = fake_eval
-        brain._state = MagicMock()
-        brain.brain.note_eval_failure = MagicMock()
+        b = self._make_juli()
         universe = {f"S{i}" for i in range(6)}
         for _ in range(4):
-            brain._evaluate_entries(universe, lambda t: blank)
+            b.tick(universe, {}, None, set(), session="rth")
         # Cursor moves EVAL_WINDOW each cycle: 0→4→2→0→4 with wrap mod 6.
-        assert seen, "no tickers ever evaluated"
-        assert len(seen) >= 2, "rotation should reach multiple slices"
+        assert b.brain.called, "no tickers ever evaluated"
+        assert len(set(b.brain.called)) >= 2, "rotation reaches multiple slices"
 
 
 def random_pass(_t: str) -> bool:
@@ -149,13 +162,14 @@ class TestFlattenMarketOrders:
 class TestSubDollarBar:
     def test_bar_rejects_low_score_penny(self):
         """Regression: FIX-2026-09-08-06 — a sub-$1 ticker with a normal
-        score is refused (bar raised), matching the `sub_dollar_bar` log."""
-        # The gate lives in ib_cycle._can_trade; assert the immune
-        # constants exist and the bar is above the base entry threshold.
-        from hanoon_prime.immune import ENTRY_THRESHOLD, PENNY_PRICE, PENNY_SCORE_BAR
-
-        assert PENNY_PRICE < 1.01
-        assert PENNY_SCORE_BAR > ENTRY_THRESHOLD
+        score is refused (bar raised), matching the `low_penny_score` gate
+        that now lives in the brain's TradingPolicy."""
+        allowed, reason = TRADING_CONFIG.is_penny_bar_cleared("PENNY", 0.5, 0.6)
+        assert not allowed
+        assert reason == "low_penny_score"
+        # A genuinely extreme conviction still clears it (not a hard block).
+        allowed, _ = TRADING_CONFIG.is_penny_bar_cleared("PENNY", 0.5, 0.99)
+        assert allowed
 
 
 # ── FIX-2026-09-08-07: long-only default (telemetry-toggleable) ───────

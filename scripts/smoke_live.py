@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from hanoon_prime.brain.policy.verdict import ENTER, HOLD, VETOED, Verdict  # noqa: E402
 from hanoon_prime.ib_adapter import IBStreamingBot  # noqa: E402
 from hanoon_prime.immune import TELEMETRY_PORT  # noqa: E402
 from hanoon_prime.telemetry import TelemetryAPI  # noqa: E402
@@ -164,15 +165,15 @@ def phase_false_trades(bot: IBStreamingBot) -> None:
 def phase_replay(bot: IBStreamingBot) -> None:
     """Live-like replay: real bars through the real tick path, no orders.
 
-    Calls juli.tick directly — decisions and exit signals are computed
-    from the seeded real historical bars, but _exec_decision is never
+    Calls juli.tick directly — Verdicts and exit signals are computed
+    from the seeded real historical bars, but _execute_verdict is never
     invoked, so nothing is sent to IB.
     """
     brain = bot.juli.brain
     sel_before = (brain.snapshot().get("horizon_bandit", {}) or {}).get("selects", 0)
     brain.register_position("AAPL", 100.0, horizon="scalp")
     # Positions drive both exit evaluation and entry evaluation
-    # (_evaluate_entries iterates tracked | positions).
+    # (juli.tick scores watch | held_positions).
     watch = {"AAPL", "MSFT", "NVDA"}
     # False live quotes: _snapshot returns None without a bid/ask (correct
     # pipeline behavior), so the replay fakes quotes the way the false
@@ -188,13 +189,12 @@ def phase_replay(bot: IBStreamingBot) -> None:
         # path — clear it so the replay exercises real scoring, not the
         # refractory stub.
         bot.juli._state.update(refractory_until=0.0)
-        exits, decisions = bot.juli.tick(watch, bot._snapshot, bot.streamer, set())
+        exits, decisions = bot.juli.tick(watch, bot._snapshot, bot.streamer, {"AAPL"})
         dec_total += len(decisions)
         exit_total += len(exits)
-        for d in decisions:
-            assert (
-                "sizing" in d and "regime_canon" in d
-            ), f"bad decision keys: {list(d)}"
+        for v in decisions:
+            assert isinstance(v, Verdict), f"non-Verdict decision: {type(v)}"
+            assert v.action in (ENTER, HOLD, VETOED), f"bad action: {v.action}"
     sel_after = (brain.snapshot().get("horizon_bandit", {}) or {}).get("selects", 0)
     thought_after = int(getattr(brain, "_decision_count", 0))
     check(

@@ -1,17 +1,24 @@
-"""hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain."""
+"""hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain.
+
+Brain-first: every evaluated ticker yields a Verdict from
+``NeuromorphicBrain.decide_entry`` — never a silent omission. Tickers not
+in the rotating eval window are scheduling, not decisions: they produce no
+Verdict this cycle and age out of ``/verdicts`` naturally.
+"""
 
 from __future__ import annotations
 
+import collections
 import logging
 import time
-from types import SimpleNamespace
 from typing import Any
 
 from .brain.orchestrator import NeuromorphicBrain
+from .brain.policy.verdict import Verdict
 from .brain.shared_state import BrainState
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
-from .juli_feed import JuliFeed, check_tick_latency, compute_alpha_from_snap, entry_bars
+from .juli_feed import JuliFeed
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
@@ -31,27 +38,83 @@ class JuliBrain:
         self._candidates: list[ScanResult] = []
         self._last_alloc: float = 0.0
         self.feed = JuliFeed(self._state)
+        self._recent_verdicts: collections.deque[Verdict] = collections.deque(
+            maxlen=200
+        )
+        self._lock_held: bool = False
         self.brain.start()
 
     def tick(
         self,
-        positions: set[str],
-        get_snapshot: Any,
+        watch: set[str] | dict[str, Any],
+        snapshot: dict[str, Any] | Any,
         streamer: Any,
+        held_positions: set[str] | list[str],
         closing: set[str] | None = None,
         pos_info: dict[str, dict[str, Any]] | None = None,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """One full brain cycle. Returns (entry_decisions, exit_signals)."""
-        self.feed.ensure_refs(streamer)
-        self._sync_and_scan()
-        self._maybe_screen(get_snapshot)
-        self.feed.fallback_regime()
-        self._maybe_allocate(positions)
-        exits = self._evaluate_exits(
-            positions, get_snapshot, closing or set(), pos_info or {}
-        )
-        entries = self._evaluate_entries(positions, get_snapshot)
-        return exits, entries
+        session: str = "rth",
+    ) -> tuple[list[dict[str, Any]], list[Verdict]]:
+        """Brain-first decision loop: returns (exits, verdicts) with lock."""
+        if self._lock_held:
+            return [], []
+        self._lock_held = True
+        self.brain.begin_entry_cycle()
+        try:
+            universe = sorted(set(watch) | set(held_positions or ()))
+            if not universe:
+                self._eval_off = 0
+                return [], []
+            verdicts = self._eval_window(universe, snapshot, held_positions, session)
+            exits = self._evaluate_exits(
+                set(held_positions or ()),
+                snapshot,
+                closing or set(),
+                pos_info or {},
+            )
+            policy_exits = self.brain.state.get("policy_exits")  # array-safe list
+            if policy_exits:
+                exits += list(policy_exits)
+            return exits, verdicts
+        finally:
+            self._lock_held = False
+
+    def _eval_window(
+        self,
+        universe: list[str],
+        snapshot: Any,
+        held_positions: set[str] | list[str],
+        session: str,
+    ) -> list[Verdict]:
+        """Score the rotating EVAL_WINDOW slice (scheduling, no decisions)."""
+        off = int(getattr(self, "_eval_off", 0)) % len(universe)
+        window = universe[off : off + EVAL_WINDOW]
+        self._eval_off = (off + EVAL_WINDOW) % len(universe)
+        verdicts = [
+            self.brain.decide_entry(
+                ticker,
+                self._snap_for(snapshot, ticker),
+                set(held_positions or ()),
+                session,
+            )
+            for ticker in window
+        ]
+        for v in verdicts:
+            self._recent_verdicts.append(v)
+        return verdicts
+
+    @staticmethod
+    def _snap_for(snapshot: Any, ticker: str) -> dict[str, Any] | None:
+        """Resolve a snapshot from a callable or a dict (never raises)."""
+        try:
+            if callable(snapshot):
+                snap = snapshot(ticker)
+            elif isinstance(snapshot, dict):
+                snap = snapshot.get(ticker)
+            else:
+                snap = None
+        except Exception:
+            return None
+        return snap if isinstance(snap, dict) else None
 
     def _sync_and_scan(self) -> None:
         """Sync scanner results and start new scan if due."""
@@ -87,19 +150,19 @@ class JuliBrain:
     def _evaluate_exits(
         self,
         positions: set[str],
-        get_snapshot: Any,
+        snapshot: Any,
         closing: set[str],
-        pos_info: dict[str, dict[str, Any]] | None = None,
+        pos_info: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Evaluate open positions for exit signals (direction-aware). Registers adopted orphans."""
+        """Evaluate open positions for exit signals (direction-aware)."""
         exits = []
         for t in positions:
             if t in closing:
                 continue
-            snap = get_snapshot(t)
+            snap = self._snap_for(snapshot, t)
             if snap is None or snap.get("last", 0) <= 0:
                 continue
-            info = (pos_info or {}).get(t, {})
+            info = pos_info.get(t, {})
             direction = int(info.get("direction", 1)) or 1
             entry = info.get("entry_price") or snap["last"]
             if entry > 0 and not self.brain.exits.is_registered(t):
@@ -114,84 +177,6 @@ class JuliBrain:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)
         return exits
-
-    def _evaluate_entries(
-        self, positions: set[str], get_snapshot: Any
-    ) -> list[dict[str, Any]]:
-        """Evaluate rotated entry window (full-parallel throttle)."""
-        universe = sorted(self.budget.get_all_tracked() | positions)
-        if not universe:
-            return []
-        off = getattr(self, "_eval_off", 0) % len(universe)
-        window = EVAL_WINDOW
-        slice_ = universe[off : off + window]
-        self._eval_off = (off + window) % len(universe)
-        decisions = []
-        for ticker in slice_:
-            snap = get_snapshot(ticker)
-            if snap is None:
-                continue
-            try:
-                dec = self._eval_one(ticker, snap, len(positions))
-            except Exception as e:
-                # Counted (FIXES.md Class D): PipelineMonitor alerts on accumulation.
-                self.brain.note_eval_failure(ticker, e)
-                log.warning("Entry eval failed for %s: %s", ticker, e)
-                continue
-            if dec is not None:
-                decisions.append(dec)
-        return decisions
-
-    def _build_decision(
-        self, ticker: str, direction: int, result: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Build decision dict from brain result."""
-        score, conf = result.get("score", 0), result.get("confidence", 0.5)
-        verdict = result.get("verdict", "")
-        log.info(
-            "THINK %s %s score=%.3f risk=%s hz=%s/%s",
-            ticker,
-            "BUY" if direction > 0 else "SELL",
-            score,
-            result.get("risk", "normal"),
-            result.get("horizon", "scalp"),
-            result.get("horizon_reason", "classifier"),
-        )
-        return {
-            "ticker": ticker,
-            "direction": direction,
-            "verdict": verdict,
-            "score": score,
-            "thought": SimpleNamespace(
-                direction=direction, score=score, verdict=verdict, confidence=conf
-            ),
-            "sizing": result.get("sizing"),
-            "horizon": result.get("horizon", "scalp"),
-            "regime_canon": result.get("regime_canon", "unknown"),
-        }
-
-    def _eval_one(
-        self, ticker: str, snap: dict[str, Any], open_count: int
-    ) -> dict[str, Any] | None:
-        """Evaluate one ticker through the full brain pipeline."""
-        prices = snap.get("prices") or []  # array-safe: list-typed
-        if len(prices) < 20:
-            return None
-        self._state.set_latest_prices(prices)
-        t0 = time.perf_counter_ns()
-        result = self.brain.tick(
-            alpha=compute_alpha_from_snap(snap),
-            ticker=ticker,
-            entry_price=float(prices[-1]),
-            atr=snap.get("atr", 1.0),
-            open_positions=open_count,
-            bars=entry_bars(snap, prices, self._state.get("regime_label", "unknown")),
-        )
-        check_tick_latency(t0, ticker)
-        direction = result.get("direction", 0)
-        return (
-            self._build_decision(ticker, direction, result) if direction != 0 else None
-        )
 
     def on_trade_close(
         self, ticker: str, won: bool, pnl_pct: float, direction: int = 1

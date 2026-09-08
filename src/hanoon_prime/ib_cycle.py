@@ -14,20 +14,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._ib_sync import read_portfolio
-from ._telegram import safety_halt, shutdown
+from ._telegram import shutdown
 from .brain.horizons import holds_through_close
-from .brain.probe_recovery import probe_recovery as _PROBE_RECOVERY
-from .config import TRADING_CONFIG
-from .immune import (
-    CONSECUTIVE_LOSSES_PAUSE,
-    DAILY_LOSS_LIMIT,
-    ENTRY_REUSE_COOLDOWN_SEC,
-    MAX_CONCURRENT_POSITIONS,
-    MAX_ENTRIES_PER_CYCLE,
-    PENNY_PRICE,
-    PENNY_SCORE_BAR,
-)
-from .brain.policy.portfolio_risk import PortfolioRiskManager
+from .brain.policy.verdict import ENTER, Verdict
 from .monitor.sleep_manager import SleepManager
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
@@ -36,7 +25,6 @@ CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
-_PORTFOLIO_RISK = PortfolioRiskManager()
 
 
 @dataclass
@@ -327,48 +315,52 @@ class BotCycleMixin:
             self._supervise_gateway()
             self.executor.sync_from_ib(self.streamer, closing=self._closing)
             self._sweep_stale_orders()
-            self._check_safety(pnl)
             self._sync_subs()
             if self.monitor.pop_heal():
                 log.warning("PIPELINE HEAL: forcing re-subscribe")
                 self._sync_subs()
-            # Manual flatten request from webapp
-            if self._check_manual_flatten():
+            # Manual flatten request, then EOD flatten (both skip brain).
+            if self._check_manual_flatten() or self._check_eod_flatten():
                 self._finish_cycle([], [], pnl, CycleMeta(poll, started, False))
                 return
-            # EOD flatten: force-close all positions in last N minutes of RTH
-            if self._check_eod_flatten():
-                self._finish_cycle([], [], pnl, CycleMeta(poll, started, False))
-                return
-            positions = set(self.hippocampus._open_positions.keys())
-            market_open = _SLEEP_MGR.get_state().active
-            pos_info = {
-                t: {
-                    "direction": p.direction,
-                    "entry_price": p.entry_price,
-                    "stop_price": p.stop_price,
-                }
-                for t, p in self.hippocampus._open_positions.items()
-            }
-            self._halim_order_review()
-            exit_s, decisions = self.juli.tick(
-                positions, self._snapshot, self.streamer, self._closing, pos_info
-            )
-            self._finish_cycle(
-                exit_s, decisions, pnl, CycleMeta(poll, started, market_open)
-            )
+            self._run_brain_cycle(poll, pnl, started)
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
+
+    def _run_brain_cycle(self, poll: float, pnl: Any, started: float) -> None:
+        """Score the whole universe and finish the cycle (single funnel)."""
+        positions = set(self.hippocampus._open_positions.keys())
+        mkt_state = _SLEEP_MGR.get_state()
+        pos_info = {
+            t: {
+                "direction": p.direction,
+                "entry_price": p.entry_price,
+                "stop_price": p.stop_price,
+            }
+            for t, p in self.hippocampus._open_positions.items()
+        }
+        self._halim_order_review()
+        exit_s, verdicts = self.juli.tick(
+            set(self.juli.budget.get_all_tracked()),
+            self._snapshot,
+            self.streamer,
+            positions,
+            self._closing,
+            pos_info,
+            session=mkt_state.session,
+        )
+        self._finish_cycle(
+            exit_s, verdicts, pnl, CycleMeta(poll, started, mkt_state.active)
+        )
 
     def _finish_cycle(
         self,
         exit_s: list[dict[str, Any]],
-        decisions: list[dict[str, Any]],
+        verdicts: list[Verdict],
         pnl: Any,
         meta: CycleMeta,
     ) -> None:
-        """Process tickers, exits, decisions, reflect, wait."""
-        self._cycle_entries = 0  # reset per-cycle entry order cap
+        """Execute exits, journal/execute verdicts, reflect, wait."""
         self._last_bars = sum(
             1
             for tk in self.ib.pendingTickers()
@@ -382,55 +374,71 @@ class BotCycleMixin:
                 self.executor.close_position(t, self.streamer)
                 self._exit_reasons[t] = es.get("type", "brain_exit")
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
-        for dec in decisions:
-            if meta.market_open and self._can_trade(dec):
-                self._exec_decision(dec)
-        self._reflect_closed()
-        self.monitor.record_cycle(meta.market_open)
         if pnl is not None:
-            daily = float(pnl.dailyPnL)
-            self.hippocampus._daily_pnl = daily
-        self._sync_portfolio_risk()
+            self.hippocampus._daily_pnl = float(pnl.dailyPnL)
+        self._publish_account_feed(pnl)
+        market_open = bool(meta and meta.market_open)
+        for v in verdicts:
+            self.journal.append({"event": "verdict", "ts": time.time(), **v.to_dict()})
+            if market_open and v.action == ENTER:
+                self._execute_verdict(v)
+        self._reflect_closed()
+        self.monitor.record_cycle(market_open)
         elapsed = time.monotonic() - meta.started
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)
         self._heartbeat()
         npos = len(self.hippocampus._open_positions)
-        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(decisions), len(exit_s))
+        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(verdicts), len(exit_s))
 
-    def _sync_portfolio_risk(self) -> None:
-        """Feed IB-reported equity into the portfolio risk manager (throttled).
+    def _publish_account_feed(self, pnl: Any) -> None:
+        """Forward IB account facts to the slow cortex on BrainState."""
+        daily = float(pnl.dailyPnL) if pnl is not None else 0.0
+        feed: dict[str, Any] = {"daily_pnl": daily, "ts": time.monotonic()}
+        if time.monotonic() - getattr(self, "_last_policy_sync", 0.0) >= RISK_SYNC_SECS:
+            self._last_policy_sync = time.monotonic()
+            try:
+                summary = self.ib.accountSummary(self.account)
+                net_liq = next(
+                    (float(i.value) for i in summary if i.tag == "NetLiquidation"),
+                    0.0,
+                )
+                feed["equity"] = net_liq
+                feed["positions"] = read_portfolio(self.ib)
+            except Exception as exc:
+                log.debug("Account sync skipped: %s", exc)
+        self.juli._state.update(
+            account_feed=feed,
+            consecutive_losses=getattr(self.hippocampus, "_consecutive_losses", 0),
+        )
 
-        Reads NetLiquidation once per RISK_SYNC_SECS; the manager derives
-        drawdown → risk scalar → entry block internally.
-        """
-        now = time.monotonic()
-        if now - getattr(self, "_last_risk_sync", 0.0) < RISK_SYNC_SECS:
+    def _execute_verdict(self, verdict: Verdict) -> None:
+        """Execute one ENTER verdict (live bid/ask, sizing, open skip)."""
+        ticker = verdict.ticker
+        sizing = verdict.sizing
+        if sizing is None or getattr(sizing, "shares", 0) <= 0:
+            log.info("SKIP %s sizing=0", ticker)
             return
-        self._last_risk_sync = now
-        try:
-            summary = self.ib.accountSummary(self.account)
-            net_liq = next(
-                (float(i.value) for i in summary if i.tag == "NetLiquidation"),
-                0.0,
-            )
-            _PORTFOLIO_RISK.update_equity(net_liq)
-            _PORTFOLIO_RISK.update_positions(read_portfolio(self.ib))
-            giveback = _PORTFOLIO_RISK.check_portfolio_giveback()
-            for t in giveback.tickers:
-                if t not in self._closing:
-                    self._closing.add(t)
-                    self._exit_reasons[t] = "portfolio_giveback"
-                    self.executor.close_position(t, self.streamer)
-                    log.warning(
-                        "GIVEBACK EXIT %s (fade=%.0f%% peak=$%.0f now=$%.0f)",
-                        t,
-                        giveback.fade * 100,
-                        giveback.peak,
-                        giveback.unrealized,
-                    )
-        except Exception as e:
-            log.debug("Portfolio risk sync skipped: %s", e)
+        tk = self.streamer.ticker_subs.get(ticker)
+        if tk is None or not tk.hasBidAsk or math.isnan(tk.bid) or math.isnan(tk.ask):
+            log.warning("VERDICT UNEXECUTABLE %s: no live bid/ask", ticker)
+            return
+        if ticker in self.hippocampus._open_positions:
+            log.info("SKIP %s open", ticker)
+            return
+        price = float((tk.bid + tk.ask) * 0.5)
+        self.executor.place_bracket(
+            ticker,
+            verdict.thought,
+            price,
+            self.streamer,
+            sizing=verdict.sizing,
+            horizon=verdict.horizon,
+        )
+        self.executor.last_thoughts[ticker] = verdict.thought
+        self.juli.brain.register_position(ticker, price, horizon=verdict.horizon)
+        self._attach_position_watchers(ticker)
+        self.juli.brain.note_entry(ticker)
 
     def _sync_subs(self) -> None:
         """Sync subscriptions: async mkt data for all, one seed per cycle.
@@ -544,147 +552,6 @@ class BotCycleMixin:
         log.warning("EOD FLATTEN: sent limit orders for %d positions", closed)
         return bool(closed)
 
-    def _can_trade(self, dec: dict[str, Any]) -> bool:
-        """Check session and direction config before trading."""
-        if self._halted:
-            return False
-        # Check direction mode (thought is a SimpleNamespace, not dict)
-        thought = dec.get("thought")
-        side = getattr(thought, "verdict", "BUY") if thought else "BUY"
-        if not TRADING_CONFIG.is_direction_allowed(side):
-            log.debug(
-                "SKIP %s direction=%s mode=%s",
-                dec["ticker"],
-                side,
-                TRADING_CONFIG.direction_mode,
-            )
-            return False
-        # Raise-the-bar for sub-dollar tickers: the brain must be EXTREMELY
-        # sure of a quick scalp before we accept a micro-cap setup. This is
-        # not a hard price block — the higher bar can still be cleared.
-        t = dec["ticker"]
-        tk = self.streamer.ticker_subs.get(t)
-        if tk is not None and tk.hasBidAsk:
-            last = float(tk.last or tk.close or 0)
-            mid = float((tk.bid + tk.ask) * 0.5) if tk.bid and tk.ask else 0.0
-            px = mid or last
-            if px < PENNY_PRICE and abs(dec.get("score", 0.0)) < PENNY_SCORE_BAR:
-                log.info(
-                    "SKIP %s sub_dollar_bar price=%.3f score=%.3f (need >= %.2f)",
-                    t,
-                    px,
-                    abs(dec.get("score", 0.0)),
-                    PENNY_SCORE_BAR,
-                )
-                return False
-        # Check session (sleep_manager already gates overall, but double-check)
-        state = _SLEEP_MGR.get_state()
-        if not TRADING_CONFIG.is_session_active(state.session):
-            log.debug("SKIP %s session=%s disabled", dec["ticker"], state.session)
-            return False
-        return True
-
-    def _portfolio_gate_and_size(
-        self, t: str, tk: Any, dec: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """Portfolio risk gate + size adjustment (rebuild port).
-
-        Returns the (possibly resized) sizing dict to execute, or None
-        when the entry is blocked or sized to zero.
-        """
-        sizing = dec.get("sizing")
-        if sizing is None or getattr(sizing, "shares", 0) <= 0:
-            log.debug("SKIP %s sizing=0", t)
-            return None
-        price = float((tk.bid + tk.ask) * 0.5)
-        shares = int(sizing.shares)
-        allowed, reason = _PORTFOLIO_RISK.pre_trade_risk_gate(t, abs(shares * price))
-        if not allowed:
-            log.info("SKIP %s portfolio_risk (%s)", t, reason)
-            return None
-        adj = _PORTFOLIO_RISK.adjust_size(shares, price)
-        if adj != shares:
-            log.info(
-                "SIZE %s %d->%d (scalar=%.2f)",
-                t,
-                shares,
-                adj,
-                _PORTFOLIO_RISK._risk_scalar,
-            )
-            sizing.shares = adj
-            if adj <= 0:
-                log.info("SKIP %s sized_to_zero", t)
-                return None
-        return {"sizing": sizing, "price": price}
-
-    def _entry_throttled(self, t: str) -> bool:
-        """Full-parallel-throttle: cap entries per cycle + per-ticker cooldown.
-
-        Returns True if this entry should be deferred, False if it may
-        place. Kept as its own method to stay under the R3 40-line limit.
-        """
-        if getattr(self, "_cycle_entries", 0) >= MAX_ENTRIES_PER_CYCLE:
-            log.debug("THROTTLE %s: cycle order cap reached", t)
-            return True
-        last_enter = getattr(self, "_entry_reuse_ts", {}).get(t, 0.0)
-        if time.time() - last_enter < ENTRY_REUSE_COOLDOWN_SEC:
-            log.debug("THROTTLE %s: reuse cooldown", t)
-            return True
-        return False
-
-    def _entry_safety_cleared(self, t: str, tk: Any, dec: dict[str, Any]) -> bool:
-        """Death-spiral PROBE recovery (off-by-default; on in production):
-        one quality-gated entry bypasses the halt to re-establish edge and
-        resume learning. check_entry_allowed's halt is UNCHANGED while
-        PROBE_RECOVERY_ENABLED is False. Returns False to block the entry.
-        """
-        if self.hippocampus.check_entry_allowed():
-            return True
-        thought = dec.get("thought")
-        if _PROBE_RECOVERY.maybe_probe(
-            getattr(thought, "score", 0.0),
-            float(tk.bid),
-            float(tk.ask),
-            self.hippocampus.consecutive_losses,
-        ):
-            log.info("PROBE %s death_spiral_recovery", t)
-            return True
-        log.info("SKIP %s safety", t)
-        return False
-
-    def _exec_decision(self, dec: dict[str, Any]) -> None:
-        """Execute an entry decision through IB (throttled, fill-confirmed)."""
-        tk = self.streamer.ticker_subs.get(dec["ticker"])
-        if tk is None or not tk.hasBidAsk or math.isnan(tk.bid) or math.isnan(tk.ask):
-            return
-        t = dec["ticker"]
-        if self._entry_throttled(t):
-            return
-        if not self._entry_safety_cleared(t, tk, dec):
-            return
-        if t in self.hippocampus._open_positions:
-            log.info("SKIP %s open", t)
-            return
-        exec_pack = self._portfolio_gate_and_size(t, tk, dec)
-        if exec_pack is None:
-            return
-        horizon = str(dec.get("horizon", "scalp"))
-        self.executor.place_bracket(
-            t,
-            dec["thought"],
-            exec_pack["price"],
-            self.streamer,
-            sizing=exec_pack["sizing"],
-            horizon=horizon,
-        )
-        self.executor.last_thoughts[t] = dec["thought"]
-        self.juli.brain.register_position(t, exec_pack["price"], horizon=horizon)
-        self._attach_position_watchers(t)
-        # Throttle accounting only after a real bracket was placed.
-        self._cycle_entries = getattr(self, "_cycle_entries", 0) + 1
-        self._entry_reuse_ts = getattr(self, "_entry_reuse_ts", {})
-        self._entry_reuse_ts[t] = time.time()
-
     def _attach_position_watchers(self, ticker: str) -> None:
         """Attach tick-driven exit watcher + per-position PnL stream.
 
@@ -761,28 +628,6 @@ class BotCycleMixin:
             len(self.hippocampus._open_positions),
             self.journal.count(),
         )
-
-    def _check_safety(self, pnl: Any) -> None:
-        """Check safety nets before trading (immune.py constants)."""
-        if not self.hippocampus.safety_enabled:
-            return
-        n = count_open_positions(self.ib, self.executor.tracked_tickers)
-        if n > MAX_CONCURRENT_POSITIONS:
-            log.critical("SAFETY: %d > %d", n, MAX_CONCURRENT_POSITIONS)
-            self._halt("too_many_positions")
-            return
-        if pnl is not None and float(pnl.dailyPnL) < -DAILY_LOSS_LIMIT:
-            log.critical("SAFETY: P&L $%.2f", float(pnl.dailyPnL))
-            self._halt("daily_loss_limit")
-            return
-        if self.hippocampus._consecutive_losses >= CONSECUTIVE_LOSSES_PAUSE:
-            self._halt("consecutive_losses")
-
-    def _halt(self, reason: str) -> None:
-        """Emergency halt — block new entries, never stop the bot."""
-        self._halted = True
-        self.journal.append({"event": "halt", "reason": reason, "ts": time.time()})
-        safety_halt(reason)
 
     def _cleanup(self, pnl: Any) -> None:
         """Shutdown all subsystems."""
