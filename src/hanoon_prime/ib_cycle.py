@@ -306,17 +306,40 @@ class BotCycleMixin:
             log.debug("Portfolio risk sync skipped: %s", e)
 
     def _sync_subs(self) -> None:
-        """Sync subscriptions with scanner and open positions."""
+        """Sync subscriptions with scanner and open positions.
+
+        Fast path: reqMktData is async, so ALL missing tickers subscribe
+        immediately. Slow path: history seeding (blocking reqHistoricalData
+        + sleep) runs ONE ticker per cycle so the loop never stalls —
+        position monitoring and entry evaluation keep running every cycle.
+        """
         tracked = self.juli.budget.get_all_tracked()
         scanner = {c.symbol for c in self.juli._candidates[:20]}
         needed = tracked | scanner | set(self.hippocampus._open_positions.keys())
         self.executor.tracked_tickers = tracked
-        for s in [s for s in needed if s not in self.streamer.ticker_subs][:5]:
+        missing = [s for s in sorted(needed) if s not in self.streamer.ticker_subs]
+        # Async market data for everything missing — no cycle stall.
+        for s in missing:
             try:
                 self.streamer.subscribe(s)
-                self.streamer.seed_history(s)
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
+        # Seed history one ticker per cycle (blocking call kept out of
+        # the hot path); positions take priority over scanner candidates.
+        seeded = self.__dict__.setdefault("_seeded_subs", set())
+        pending = [
+            s
+            for s in sorted(set(self.hippocampus._open_positions))
+            + sorted(set(missing))
+            if s in self.streamer.ticker_subs and s not in seeded
+        ]
+        if pending:
+            s = pending[0]
+            try:
+                self.streamer.seed_history(s)
+                seeded.add(s)
+            except Exception as e:
+                log.debug("Seed %s fail: %s", s, e)
 
     def _check_manual_flatten(self) -> bool:
         """Check if webapp requested a manual flatten."""
