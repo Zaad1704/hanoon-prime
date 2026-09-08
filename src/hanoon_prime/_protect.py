@@ -84,6 +84,10 @@ def _validate_protection(
 
 def _place_oca(ib_client: Any, contract: Any, order: BracketOrder) -> None:
     """Place OCA STP+LMT pair as position protection."""
+    if math.isnan(order.stop) or math.isnan(order.target):
+        log.warning("OCA skip %s: NaN stop=%.4f target=%.4f",
+                    order.oca, order.stop, order.target)
+        return
     kw = dict(
         action=order.action,
         totalQuantity=order.qty,
