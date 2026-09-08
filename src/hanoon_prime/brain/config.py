@@ -106,6 +106,19 @@ GATE_CLOSED_SIZE_SCALAR: float = 0.5  # size multiplier while gate tightening
 CONF_BIN_SIZE: float = 0.05  # confidence bin width (0.50→bin 10)
 CONF_MIN_SAMPLES: int = 20  # min trades in a conf bin before pull
 
+# ── Entry quality modifiers (pre-trade validation) ───────────────────
+# VWAP chase penalty: penalize if price is far above VWAP (chasing)
+VWAP_CHASE_PCT: float = 0.03  # 3% above VWAP triggers penalty
+VWAP_CHASE_PENALTY_MAX: float = 0.10  # max score penalty
+
+# Momentum quality: penalize negative/zero momentum for longs
+MOMENTUM_NEGATIVE_PENALTY_MAX: float = 0.08
+MOMENTUM_FLAT_PENALTY: float = 0.03
+
+# Spread penalty: penalize wide spreads (slippage risk)
+SPREAD_THRESHOLD_PCT: float = 0.015  # 1.5% spread triggers penalty
+SPREAD_PENALTY_MAX: float = 0.06
+
 # ── Regime detection ─────────────────────────────────────────────────
 REGIME_VOL_WINDOW: int = 20
 REGIME_TREND_WINDOW: int = 20

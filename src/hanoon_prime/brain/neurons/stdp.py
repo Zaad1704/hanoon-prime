@@ -165,20 +165,66 @@ class STDPLearner:
         now = timestamp or time.time()
         self._record_post_spike(neuron_id, now)
 
-    def apply_reward(self, reward: float, window_sec: float = 5.0) -> None:
-        """Apply reward signal to recent synapses."""
+    def apply_reward(
+        self,
+        reward: float,
+        window_sec: float = 5.0,
+        severity_scale: float = 1.0,
+        stale_sec: float = 0.0,
+        entry_price: float = 0.0,
+    ) -> None:
+        """Apply reward-modulated STDP with severity-aware learning signals.
+
+        Enhanced from rebuild's proportional reward system:
+        - Binary +1/-1 replaced with reward scaled by R:R quality
+        - Stale position penalty: holding losers longer = stronger negative
+        - Penny stock penalty: low price + loss = stronger negative
+
+        Args:
+            reward: +1 for win, -1 for loss (base reward)
+            window_sec: time window for recent synapses
+            severity_scale: scales penalty by loss severity (1.0 = normal)
+            stale_sec: seconds held (for stale penalty)
+            entry_price: entry price (for penny stock penalty)
+        """
         now = time.time()
         if reward == 0:
             return
+
+        # ── PROPORTIONAL REWARD ─────────────────────────────────────
+        # Base reward: +1 for win, -1 for loss
+        base_reward = reward
+
+        # Scale by severity: bigger losses = stronger negative signal
+        # A $50 loss gets -2.0, a $300 loss gets -5.0 (adapted from rebuild)
+        if reward < 0:
+            # Severity scaling based on position size proxy
+            scale = max(1.0, min(severity_scale, 2.0))
+            base_reward = reward * scale
+
+        # ── STALE POSITION PENALTY ──────────────────────────────────
+        # Holding a losing penny stock for hours = disaster
+        stale_penalty = 0.0
+        if reward < 0 and stale_sec > 600:  # >10min holding a loser
+            stale_penalty = -min(stale_sec / 600.0, 3.0)  # up to -3.0
+
+        # ── PENNY STOCK GAP RISK PENALTY ──────────────────────────────
+        penny_penalty = 0.0
+        if reward < 0 and entry_price < 5.0 and severity_scale > 1.0:
+            penny_penalty = -min(5.0 / max(entry_price, 0.1), 3.0)  # up to -3.0
+
+        total_reward = base_reward + stale_penalty + penny_penalty
+
+        # Apply reward to synapses
         for syn in self._synapses.values():
             is_recent = now - syn.last_pre_spike < window_sec or syn.trace > 0.1
             if not is_recent:
                 continue
-            if reward > 0:
-                bonus = A_PLUS * 0.3 * reward
+            if total_reward > 0:
+                bonus = A_PLUS * 0.3 * total_reward
                 syn.strength = min(STEEP_MAX, syn.strength + bonus)
-            elif reward < 0:
-                penalty = A_MINUS * 0.3 * abs(reward)
+            elif total_reward < 0:
+                penalty = A_MINUS * 0.3 * abs(total_reward)
                 syn.strength = max(STEEP_MIN, syn.strength - penalty)
 
 

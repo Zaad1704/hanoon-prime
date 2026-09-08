@@ -1,15 +1,19 @@
 """brain.exits — exit intelligence for open positions.
 
 JULI's exit decision layer: profit-lock tiers, consolidation exit,
-alpha delta tracking. Works alongside the mechanical ATR trailing
-in ib_executor.py. Trigger math lives in ``exit_checks.py``; this
-module owns per-position state and the learned thresholds.
+alpha delta tracking, and 8 exit pillars for nuanced timing.
+Works alongside the mechanical ATR trailing in ib_executor.py.
+Trigger math lives in ``exit_checks.py``; this module owns per-position
+state and the learned thresholds.
 """
 
 from __future__ import annotations
 
+import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+_log = logging.getLogger(__name__)
 
 from .config import (
     EXIT_ADAPT_GIVEBACK_MAX,
@@ -27,6 +31,199 @@ from .horizons import params_for
 
 if TYPE_CHECKING:
     from .realized_ev import RealizedStats
+
+
+# ── EXIT PILLARS (enhanced exit signal processing) ──────────────────
+# Based on rebuild's thinker.py: 8 pillars for nuanced exit timing.
+# Each pillar returns exit likelihood in [0, 1] — combined for final decision.
+
+
+def compute_setup_degradation(
+    alpha: dict[str, float] | None = None,
+) -> float:
+    """Pillar 1: Setup degradation (0.0-1.0).
+
+    Re-evaluate alpha strength: how many indicators are still confirming?
+    More weak than strong signals → setup degrading.
+    """
+    if not alpha:
+        return 0.0
+    strong = sum(1 for k, v in alpha.items() if isinstance(v, (int, float)) and v > 0.6)
+    weak = sum(1 for k, v in alpha.items() if isinstance(v, (int, float)) and v < 0.4)
+    total = max(strong + weak, 1)
+    # More weak than strong → exit signal
+    degradation = max(0.0, (weak - strong) / total)
+    return min(1.0, degradation)
+
+
+def compute_momentum_fading(
+    momentum: float = 0.0,
+    momentum_accel: float = 0.0,
+    pnl_pct: float = 0.0,
+) -> float:
+    """Pillar 2: Momentum fading (0.0-1.0).
+
+    Sharp deceleration → strong exit signal.
+    Amplified if in profit but momentum dying.
+    """
+    exit_score = 0.0
+    if momentum_accel < -1.0:
+        exit_score = 0.8  # sharp deceleration
+    elif momentum_accel < -0.3:
+        exit_score = 0.5  # moderate deceleration
+    elif momentum_accel < 0.0:
+        exit_score = 0.2  # slight deceleration
+    # If in profit but momentum fading, amplify
+    if exit_score > 0 and pnl_pct > 0.02:
+        exit_score = min(exit_score + 0.2, 1.0)
+    return exit_score
+
+
+def compute_flow_reversal(
+    direction: int = 1,
+    institutional_flow: float = 0.0,
+) -> float:
+    """Pillar 3: Flow reversal (0.0-1.0).
+
+    Institutional money leaving the position direction.
+    Longs: negative flow bearish; Shorts: positive flow bearish.
+    """
+    exit_score = 0.0
+    if direction > 0:
+        if institutional_flow < -0.3:
+            exit_score = 0.7
+        elif institutional_flow < -0.1:
+            exit_score = 0.3
+    else:
+        if institutional_flow > 0.3:
+            exit_score = 0.7
+        elif institutional_flow > 0.1:
+            exit_score = 0.3
+    return exit_score
+
+
+def compute_giveback_risk(
+    health_score: float = 0.5,
+    pnl_pct: float = 0.0,
+) -> float:
+    """Pillar 4: Giveback risk (0.0-1.0).
+
+    How vulnerable is profit to reversal?
+    Higher health score + profit → higher giveback risk if setup degrading.
+    """
+    if pnl_pct > 0.05:
+        # Up 5%+ → giveback risk
+        return min(health_score * 1.5, 0.8)
+    elif pnl_pct > 0.02:
+        # Up 2-5% → moderate risk
+        return min(health_score * 0.8, 0.5)
+    return 0.0
+
+
+def compute_time_pressure(
+    hold_minutes: float = 0.0,
+    flat_timeout_minutes: float = 20.0,
+    pnl_pct: float = 0.0,
+) -> float:
+    """Pillar 5: Time pressure (0.0-1.0).
+
+    Position held too long without progress.
+    Adaptive based on actual hold time vs flat timeout.
+    """
+    if hold_minutes <= 0:
+        return 0.0
+    ratio = hold_minutes / max(flat_timeout_minutes, 1.0)
+    if ratio >= 1.0:
+        # Past timeout → strong exit
+        return min(0.8 + (ratio - 1.0) * 0.4, 1.0)
+    elif ratio >= 0.7:
+        # Approaching timeout
+        return 0.3 + (ratio - 0.7) * 1.5
+    elif pnl_pct < 0.005 and pnl_pct > -0.005 and ratio >= 0.5:
+        # Flat trade at 50% timeout
+        return 0.2 * (ratio - 0.5) * 2.0
+    return 0.0
+
+
+def compute_stale_risk(
+    hold_minutes: float = 0.0,
+    stale_minutes_force: float = 120.0,
+    stale_minutes_tight: float = 60.0,
+    pnl_pct: float = 0.0,
+) -> float:
+    """Pillar 6: Stale risk (0.0-1.0).
+
+    Losers held too long → stronger exit signal.
+    Adaptive based on stale thresholds.
+    """
+    if hold_minutes <= 0 or pnl_pct >= 0:
+        return 0.0
+    stale_force_ratio = hold_minutes / max(stale_minutes_force, 1.0)
+    stale_tight_ratio = hold_minutes / max(stale_minutes_tight, 1.0)
+    if stale_force_ratio >= 1.0:
+        return min(0.9 + (stale_force_ratio - 1.0) * 0.3, 1.0)
+    elif stale_tight_ratio >= 1.0:
+        return min(0.6 + stale_force_ratio * 0.3, 1.0)
+    elif stale_tight_ratio >= 0.7:
+        return 0.2 + stale_tight_ratio * 1.5
+    # Amplify if losing
+    if pnl_pct < -0.02:
+        return min(0.5, 0.3 * 1.5)
+    return 0.0
+
+
+def compute_episodic_recall(
+    ticker: str,
+    episodic_memory: Any | None = None,
+) -> float:
+    """Pillar 7: Episodic recall (0.0-1.0).
+
+    What happened last time with similar patterns?
+    Loss rate * 0.5 → exit likelihood.
+    """
+    if episodic_memory is None:
+        return 0.0
+    try:
+        hist = episodic_memory.query(ticker, k=5)
+        if hist and len(hist) >= 2:
+            wins = sum(1 for h in hist if isinstance(h, dict) and h.get("won"))
+            loss_rate = 1.0 - (wins / len(hist))
+            return min(loss_rate * 0.5, 1.0)
+    except Exception as e:
+        _log.warning("episodic recall error: %s", e)
+    return 0.0
+
+
+def compute_sentiment_exit(
+    sentiment_pull: float = 0.0,
+) -> float:
+    """Pillar 8: News sentiment exit (0.0-1.0).
+
+    Negative news → stronger exit signal.
+    Positive news never forces exit.
+    """
+    if sentiment_pull < 0:
+        return min(abs(sentiment_pull) * 2.0, 1.0)
+    return 0.0
+
+
+def _combine_pillars(pillars: list[float], weights: list[float] | None = None) -> float:
+    """Combine pillar scores into exit likelihood.
+
+    Default weights: equal importance with emphasis on stale/giveback.
+    """
+    if not pillars:
+        return 0.0
+    if weights is None:
+        weights = [1.0] * len(pillars)
+    if len(weights) != len(pillars):
+        # Fall back to max approach
+        return max(pillars)
+    weighted_sum = sum(p * w for p, w in zip(pillars, weights))
+    weight_sum = sum(weights)
+    if weight_sum == 0:
+        return 0.0
+    return min(1.0, weighted_sum / weight_sum)
 
 
 class ExitPolicy:
@@ -106,11 +303,19 @@ class ExitPolicy:
         current_price: float,
         ib_unrealized_pnl: float = 0.0,
         direction: int = 1,
+        exit_pillars: dict[str, float] | None = None,
     ) -> ExitSignal:
-        """Evaluate exit conditions for one position."""
+        """Evaluate exit conditions for one position.
+
+        Enhanced with 8 exit pillars for nuanced timing.
+        If exit_pillars dict is provided, combines pillar scores with
+        mechanical exits (profit-lock, giveback, stale, consolidation).
+        """
         if ticker not in self._entry_ts:
             return ExitSignal()
         self._update_peaks(ticker, current_price, ib_unrealized_pnl)
+
+        # Standard mechanical exits
         for check in (
             self._check_profit_lock,
             self._check_giveback,
@@ -120,6 +325,57 @@ class ExitPolicy:
             sig = check(ticker, ib_unrealized_pnl, direction, current_price)
             if sig.should_exit:
                 return sig
+
+        # Enhanced pillar-based exit check (advisory, configurable threshold)
+        if exit_pillars is not None:
+            pillar_signal = self._check_pillars(
+                ticker, current_price, direction, exit_pillars
+            )
+            if pillar_signal.should_exit:
+                return pillar_signal
+
+        return ExitSignal()
+
+    def _check_pillars(
+        self,
+        ticker: str,
+        current_price: float,
+        direction: int,
+        pillars: dict[str, float],
+        exit_threshold: float = 0.6,
+    ) -> ExitSignal:
+        """Check pillar scores for exit decision.
+
+        Args:
+            ticker: position ticker
+            current_price: current market price
+            direction: 1 for long, -1 for short
+            pillars: dict of pillar_name -> score (0.0-1.0)
+            exit_threshold: combined score threshold for exit (default 0.6)
+
+        Returns:
+            ExitSignal if pillar score exceeds threshold, else empty signal.
+        """
+        if not pillars:
+            return ExitSignal()
+        # Combine pillar scores with weights emphasizing risk pillars
+        pillar_values = list(pillars.values())
+        weights = []
+        for name in pillars.keys():
+            if name in ("stale_risk", "giveback_risk", "momentum_fading"):
+                weights.append(1.2)  # Emphasize risk pillars
+            elif name in ("setup_degradation", "flow_reversal"):
+                weights.append(1.0)
+            else:
+                weights.append(0.8)  # Time pressure, episodic, sentiment = lower weight
+        combined = _combine_pillars(pillar_values, weights)
+        if combined >= exit_threshold:
+            return ExitSignal(
+                should_exit=True,
+                exit_type="pillars",
+                reason=f"Combined pillar score {combined:.2f} >= {exit_threshold}",
+                exit_score=combined,
+            )
         return ExitSignal()
 
     def deregister(self, ticker: str) -> None:

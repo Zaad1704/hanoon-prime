@@ -20,7 +20,15 @@ from ..immune import (
     MAX_LOSS_PER_TRADE,
     MAX_POSITION_NOTIONAL,
 )
-from .config import PENNY_NOTIONAL_CAPS
+from .config import (
+    MOMENTUM_FLAT_PENALTY,
+    MOMENTUM_NEGATIVE_PENALTY_MAX,
+    PENNY_NOTIONAL_CAPS,
+    SPREAD_PENALTY_MAX,
+    SPREAD_THRESHOLD_PCT,
+    VWAP_CHASE_PCT,
+    VWAP_CHASE_PENALTY_MAX,
+)
 from .horizons import params_for
 from .realized_ev import RealizedStats, ev_gate_should_enter
 
@@ -50,6 +58,8 @@ class SizingResult:
     sizes the conviction down when realized data distrusts the band."""
     ev_reason: str = ""
     """Realized-EV gate verdict string, for telemetry only."""
+    quality_penalty: float = 0.0
+    """Entry quality penalty applied as advisory score adjustment."""
 
 
 class RiskEngine:
@@ -142,6 +152,9 @@ class RiskEngine:
         entry_price: float,
         atr: float,
         open_positions: int,
+        alpha: dict[str, float] | None = None,
+        high: list[float] | None = None,
+        low: list[float] | None = None,
         horizon: str = "scalp",
     ) -> SizingResult:
         """Mechanical limits + advisory realized-EV sizing (brain-first).
@@ -149,6 +162,10 @@ class RiskEngine:
         The realized-EV gate NEVER refuses — it only scales sizing (bounded
         [0.5, 1.0]). Only mechanical limits (data validity, sub-rounding
         Kelly, position cap) return shares=0.
+
+        Entry quality modifiers (VWAP chase, momentum, spread) apply as
+        score penalties before final EV evaluation — advisory influence,
+        not hard blocks (the thinker/cortex decides entry timing).
         """
         bad, win_prob, kelly, gate = self._preflight(
             score, confidence, entry_price, atr
@@ -160,8 +177,36 @@ class RiskEngine:
             return SizingResult(
                 ev=ev, kelly=kelly, reason=f"Max {MAX_CONCURRENT_POSITIONS} positions"
             )
+        # Entry quality modifiers (advisory score penalties)
+        direction = 1 if score > 0 else -1
+        quality_penalty = self._compute_entry_quality_penalty(
+            alpha=alpha,
+            direction=direction,
+            high=high,
+            low=low,
+            vwap_dev=alpha.get("vwap_deviation", 0.0) if alpha else 0.0,
+            momentum=alpha.get("momentum", 0.0) if alpha else 0.0,
+        )
+        adjusted_score = score - quality_penalty
+        # Recompute EV with adjusted score (advisory adjustment)
+        adjusted_win_prob = score_to_win_prob(
+            adjusted_score, prior_top=gate.get("p_struct")
+        )
+        adjusted_kelly = kelly_fraction(adjusted_win_prob) * KELLY_FRACTION
+        adjusted_ev = gate["p"] * gate["r"] - (1.0 - gate["p"])
+        adjusted_ev_scale = _ev_scale(
+            {**gate, "ev": adjusted_ev, "win_prob": adjusted_win_prob}
+        )
         return self._compose_result(
-            score, entry_price, atr, kelly, horizon, ev, ev_scale, gate["reason"]
+            adjusted_score,
+            entry_price,
+            atr,
+            adjusted_kelly,
+            horizon,
+            adjusted_ev,
+            adjusted_ev_scale,
+            gate["reason"],
+            quality_penalty=quality_penalty,
         )
 
     def _compose_result(
@@ -174,6 +219,7 @@ class RiskEngine:
         ev: float,
         ev_scale: float,
         ev_reason: str,
+        quality_penalty: float = 0.0,
     ) -> SizingResult:
         """Mechanical size + sub-rounding guard + advisory EV scale."""
         shares, stop, target = self._size(score, entry_price, atr, kelly, horizon)
@@ -182,7 +228,12 @@ class RiskEngine:
         max_by_kelly = MAX_POSITION_NOTIONAL * kelly / entry_price
         if max_by_kelly < 1.0:
             reason = f"Sub-rounding edge: EV {ev:.3f} too low for 1 share"
-            return SizingResult(ev=ev, kelly=kelly, reason=reason)
+            return SizingResult(
+                ev=ev,
+                kelly=kelly,
+                reason=reason,
+                quality_penalty=quality_penalty,
+            )
         if ev_scale < 1.0:
             shares = max(1, int(shares * ev_scale))
         return SizingResult(
@@ -195,4 +246,70 @@ class RiskEngine:
             reason="ok",
             ev_scale=ev_scale,
             ev_reason=ev_reason,
+            quality_penalty=quality_penalty,
         )
+
+    def _compute_entry_quality_penalty(
+        self,
+        alpha: dict[str, float] | None,
+        direction: int,
+        high: list[float] | None,
+        low: list[float] | None,
+        vwap_dev: float = 0.0,
+        momentum: float = 0.0,
+    ) -> float:
+        """Entry quality modifiers (advisory score penalties).
+
+        These are SOFT penalties applied to the score before EV evaluation.
+        They're advisory, not hard blocks — the thinker/cortex decides.
+
+        1. VWAP CHASING: penalize if price is far above VWAP for longs
+        2. MOMENTUM: penalize negative/zero momentum
+        3. SPREAD: penalize wide spreads (slippage risk)
+
+        Returns total quality penalty (positive value to subtract from score).
+        """
+        penalty = 0.0
+        notes = []
+
+        # MODIFIER 1: VWAP chasing (longs only)
+        if direction > 0 and vwap_dev > VWAP_CHASE_PCT:
+            pen = min(VWAP_CHASE_PENALTY_MAX, vwap_dev * 2.0)
+            penalty += pen
+            notes.append(f"vwap_chase({vwap_dev*100:.1f}%=-{pen:.3f})")
+
+        # MODIFIER 2: Momentum quality
+        if direction > 0:
+            if momentum < 0.0:
+                pen = min(MOMENTUM_NEGATIVE_PENALTY_MAX, abs(momentum) * 0.5)
+                penalty += pen
+                notes.append(f"neg_momentum({momentum:.3f}=-{pen:.3f})")
+            elif momentum < 0.02:
+                penalty += MOMENTUM_FLAT_PENALTY
+                notes.append(
+                    f"flat_momentum({momentum:.3f}=-{MOMENTUM_FLAT_PENALTY:.3f})"
+                )
+
+        # MODIFIER 3: Spread penalty
+        if high and low and len(high) > 0 and len(low) > 0:
+            last_high = float(high[-1])
+            last_low = float(low[-1])
+            if last_low > 0:
+                spread_pct = (last_high - last_low) / last_low
+                if spread_pct > SPREAD_THRESHOLD_PCT:
+                    pen = min(
+                        SPREAD_PENALTY_MAX, (spread_pct - SPREAD_THRESHOLD_PCT) * 2.0
+                    )
+                    penalty += pen
+                    notes.append(f"wide_spread({spread_pct*100:.2f}%=-{pen:.3f})")
+
+        # Log quality notes for telemetry
+        if notes:
+            from foundations.log import debug
+
+            debug(
+                f"Entry quality penalty: {notes} total={penalty:.3f}",
+                context="brain_risk",
+            )
+
+        return penalty

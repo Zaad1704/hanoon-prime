@@ -122,13 +122,18 @@ class RealizedStats:
         return bool(n >= BAND_MIN_SAMPLES and wr < NASH_GATE_AUTHORITY_WR)
 
     def conf_band_wr(self, conf: float) -> tuple[float, float, int]:
-        """Return (win_rate, reliability, n) for a confidence bin."""
+        """Return (win_rate, reliability, n) for a confidence bin.
+
+        Thin data threshold: only return actual WR when n >= CONF_MIN_SAMPLES.
+        Otherwise fall back to 0.5 (neutral) with reliability 0.0.
+        """
         b = _conf_bin(conf)
         with self._lock:
             wins = self._conf_wins.get(b, 0)
             losses = self._conf_losses.get(b, 0)
         n = wins + losses
-        if n == 0:
+        # Thin data: fall back to structural prior (0.5 WR, 0.0 reliability)
+        if n < CONF_MIN_SAMPLES:
             return 0.5, 0.0, 0
         return wins / n, min(1.0, n / (n + CONF_MIN_SAMPLES)), n
 

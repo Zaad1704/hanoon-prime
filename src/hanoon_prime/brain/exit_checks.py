@@ -22,6 +22,7 @@ class ExitSignal:
     should_exit: bool = False
     reason: str = ""
     exit_type: str = "hold"
+    exit_score: float = 0.0  # Pillar combination score (0-1) when should_exit=True
 
 
 def check_profit_lock(entry: float, peak_pnl: float, pnl: float) -> ExitSignal:

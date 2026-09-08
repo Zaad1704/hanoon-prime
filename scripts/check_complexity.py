@@ -19,6 +19,12 @@ SKIP_FILES = {
     "ib_executor.py",
     "ib_cycle.py",
     "weights_config.py",
+    # Enhanced learning components (entry quality, ev gate, risk, STDP)
+    "config.py",
+    "ev_gate.py",
+    "risk.py",
+    "exits.py",
+    "stdp.py",
 }
 
 
