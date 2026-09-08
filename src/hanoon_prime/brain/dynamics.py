@@ -57,17 +57,21 @@ class Dynamics:
         )
 
     def _update_quintile_threshold(self) -> None:
-        """Widen threshold in volatile markets, tighten in trending."""
+        """Self-calibrating threshold from the live score distribution.
+
+        A fixed base (0.58) can sit ABOVE the entire achievable score
+        range — e.g. after a brain reset the blended pipeline tops out
+        near 0.55 and zero entries can ever fire. Instead, anchor the
+        trigger at the 90th percentile of recent |scores|: the top decile
+        of signals always clears the bar, noise never does. Blended with
+        the previous threshold for stability, clamped to config bounds.
+        """
         if len(self._quintile_history) < 20:
             return
         scores = sorted(self._quintile_history)
         n = len(scores)
-        q25 = scores[int(n * _QUINTILE_LOWER)]
-        q75 = scores[int(n * _QUINTILE_UPPER)]
-        spread = q75 - q25
-        # Wider spread = more volatile = higher threshold needed
-        q_threshold = self._base_threshold + spread * 0.2
-        q_threshold = max(THRESHOLD_MIN, min(THRESHOLD_MAX, q_threshold))
+        p90 = scores[int(n * 0.90)]
+        q_threshold = max(THRESHOLD_MIN, min(THRESHOLD_MAX, p90))
         self._threshold = (
             self._threshold * (1 - _QUINTILE_BLEND) + q_threshold * _QUINTILE_BLEND
         )
