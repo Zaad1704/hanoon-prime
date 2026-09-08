@@ -305,11 +305,10 @@ class RiskEngine:
 
         # Log quality notes for telemetry
         if notes:
-            from foundations.log import debug
+            import logging
 
-            debug(
-                f"Entry quality penalty: {notes} total={penalty:.3f}",
-                context="brain_risk",
+            logging.getLogger(__name__).debug(
+                "Entry quality penalty: %s total=%.3f", notes, penalty
             )
 
         return penalty

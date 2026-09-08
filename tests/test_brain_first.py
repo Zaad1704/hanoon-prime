@@ -65,8 +65,9 @@ class TestEVGateAdvisory:
 
     def test_mechanical_limits_still_refuse(self):
         """Position cap and NaN data remain MECHANICAL refusals."""
+        from hanoon_prime.immune import MAX_CONCURRENT_POSITIONS
         engine = RiskEngine()
-        capped = engine.evaluate(0.62, 0.7, 100.0, 2.0, open_positions=3)
+        capped = engine.evaluate(0.62, 0.7, 100.0, 2.0, open_positions=MAX_CONCURRENT_POSITIONS)
         assert capped.risk_pass is False and capped.shares == 0
         nan = engine.evaluate(float("nan"), 0.7, 100.0, 2.0, open_positions=0)
         assert nan.risk_pass is False and "non-finite" in nan.reason
