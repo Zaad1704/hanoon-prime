@@ -242,10 +242,14 @@ class BotCycleMixin:
 
         A symbol lands in ``_closing`` when a flatten/exit order is placed.
         If IB cancels that order (timer sweep, server reject, disconnect)
-        with filled=0, the position stays OPEN but every path that would
-        act on it (exits, protection, adoption) skips _closing symbols
-        forever. Detect that dead state and release it so the normal
-        exit/protect/adopt loop re-engages next cycle. Never blocks.
+        with filled=0, the position stays OPEN while every acting path
+        skips it forever. Detect the dead state and release it.
+
+        Safety: NEVER release a symbol that IB shows flat but ``_open_positions``
+        still holds (sync read it open earlier the same cycle, then the fill
+        landed). Dropping the flag there makes the exit evaluator re-fire a
+        duplicate order that flips the position. Let sync_from_ib drop the
+        stale position first.
         """
         if not self._closing:
             return
@@ -255,23 +259,21 @@ class BotCycleMixin:
                 for p in self.ib.positions()
                 if abs(int(p.position)) > 0
             }
-            active = {
-                t.contract.symbol
-                for t in self.ib.openTrades()
-                if not t.isDone()
-            }
+            active = {t.contract.symbol for t in self.ib.openTrades() if not t.isDone()}
         except Exception as exc:
             log.debug("RECONCILE closing scan unavailable: %s", exc)
             return
         for sym in list(self._closing):
             if sym in ib_positions and sym in active:
                 continue  # live close order still in flight
+            if sym in ib_positions:
+                self._closing.discard(sym)
+                log.warning("RECONCILE: orphan released %s (close died)", sym)
+                continue
+            if sym in self.hippocampus._open_positions:
+                continue  # stale in-memory position; sync_from_ib removes it
             self._closing.discard(sym)
-            log.warning(
-                "RECONCILE: released %s from closing (pos open=%s)",
-                sym,
-                sym in ib_positions,
-            )
+            log.warning("RECONCILE: released %s from closing (pos flat)", sym)
 
     def _sweep_one(self, order: Any, sym: str, now: float) -> None:
         """Cancel one stale pending parent (tracked ≥ 60s)."""
@@ -569,7 +571,10 @@ class BotCycleMixin:
             if px < PENNY_PRICE and abs(dec.get("score", 0.0)) < PENNY_SCORE_BAR:
                 log.info(
                     "SKIP %s sub_dollar_bar price=%.3f score=%.3f (need >= %.2f)",
-                    t, px, abs(dec.get("score", 0.0)), PENNY_SCORE_BAR,
+                    t,
+                    px,
+                    abs(dec.get("score", 0.0)),
+                    PENNY_SCORE_BAR,
                 )
                 return False
         # Check session (sleep_manager already gates overall, but double-check)

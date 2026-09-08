@@ -333,6 +333,8 @@ class TestReconcileClosing:
         mixin = BotCycleMixin.__new__(BotCycleMixin)
         mixin.ib = MagicMock()
         mixin._closing = {"NVD", "WHLR"}
+        mixin.hippocampus = MagicMock()
+        mixin.hippocampus._open_positions = {}
         mixin.log = MagicMock()
         return mixin
 
@@ -355,7 +357,7 @@ class TestReconcileClosing:
         assert mixin._closing == {"NVD", "WHLR"}
 
     def test_releases_flat_position(self):
-        """No IB position at all → stale closing flag is dropped."""
+        """No IB position at all + no in-memory position → stale flag dropped."""
         mixin = self._mixin()
         mixin.ib.positions.return_value = [
             SimpleNamespace(contract=SimpleNamespace(symbol="NVD"), position=0)
@@ -364,16 +366,34 @@ class TestReconcileClosing:
         mixin._reconcile_closing()
         assert mixin._closing == set()
 
+    def test_keeps_flat_flag_when_memory_position_stale(self):
+        """IB flat but _open_positions stale → flag MUST survive.
+
+        FIX-2026-09-08-02: sync reads the position as open at cycle start,
+        the exit fill then lands, and reconcile reads IB as flat. Dropping
+        the closing flag there let the exit evaluator re-fire and place a
+        duplicate order that flipped the position (NVD +27 → short via
+        double SELL). Release only once in-memory state agrees.
+        """
+        mixin = self._mixin()
+        mixin._closing = {"NVD"}
+        mixin.hippocampus._open_positions = {"NVD": object()}
+        mixin.ib.positions.return_value = []
+        mixin.ib.openTrades.return_value = []
+        mixin._reconcile_closing()
+        assert mixin._closing == {"NVD"}
+
     def test_releases_orphan_open_position_without_live_order(self):
         """Position open but close order died (no active trade) → released."""
         mixin = self._mixin()
+        mixin._closing = {"NVD"}
+        mixin.hippocampus._open_positions = {"NVD": object()}
         mixin.ib.positions.return_value = [
             SimpleNamespace(contract=SimpleNamespace(symbol="NVD"), position=5)
         ]
         mixin.ib.openTrades.return_value = []
         mixin._reconcile_closing()
-        assert "NVD" not in mixin._closing
-        assert "WHLR" not in mixin._closing
+        assert mixin._closing == set()
 
 
 class TestSweepStaleOrders:
