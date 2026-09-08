@@ -31,6 +31,13 @@ class EpisodicMemory:
         self._size = 0
         self._pointer = 0
 
+    def clear(self) -> None:
+        """Reset memory to empty (ironclade cleanup)."""
+        self._memory = np.zeros((self._capacity, len(EPISODIC_KEYS)), dtype=np.float32)
+        self._outcomes = np.zeros(self._capacity, dtype=np.float32)
+        self._size = 0
+        self._pointer = 0
+
     def add(self, alpha: dict[str, float], outcome: float) -> None:
         """Store a pattern and its trade outcome."""
         vec = self._build_vector(alpha)

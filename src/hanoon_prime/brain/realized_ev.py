@@ -69,6 +69,17 @@ class RealizedStats:
         if self._path is not None:
             self._load()
 
+    def reset(self) -> None:
+        """Clear all stats and delete persisted file (ironclade cleanup)."""
+        with self._lock:
+            self._band_wins = defaultdict(int)
+            self._band_losses = defaultdict(int)
+            self._conf_wins = defaultdict(int)
+            self._conf_losses = defaultdict(int)
+            self._rr = deque(maxlen=RR_MAX_LOOKBACK)
+        if self._path is not None and self._path.exists():
+            self._path.unlink()
+
     def add_outcome(
         self, score: float, won: bool, pnl_pct: float, direction: int = 1
     ) -> None:

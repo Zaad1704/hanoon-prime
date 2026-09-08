@@ -555,18 +555,16 @@ class NeuromorphicBrain:
     ) -> None:
         """All learning routes through neuromorphic brain — evolved per trade.
 
-        Single-writer guarantee: this method owns every learning write.
-        The consolidation buffer path (System 2) is telemetry/consolidation
-        only — it must NOT also write memory.
+        IRONYCLADE: ONLY real IB fills feed the learning system.
         """
         canon = regime or self._last_regime.get(ticker, "unknown")
         hz = horizon or self._last_horizon.get(ticker, "scalp")
         vp = self._last_vol_pct.get(ticker, vol_pct)
+        if not self._ironclade_gate(ticker, source):
+            return
         self.dynamics.adapt_threshold(self.memory.pred_error)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
-        # Episodic k-NN gets ONE entry per close (here, profit-signed);
-        # Reflector intentionally does not add a second entry.
         self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)
         if self._last_alpha.get(ticker):
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
@@ -575,11 +573,15 @@ class NeuromorphicBrain:
         self._learn_strategy_organs(ticker, won, pnl_pct, direction, canon, hz, vp)
         if exit_triggers is not None:
             self._learned_exit.record(0.0, exit_triggers, won)
-        # IRONYCLADE: the realized-EV feedback loop only learns from real
-        # executions (real_trade/ib_fill/ib_paper). Paper & synthetic fills
-        # are excluded so the live gate isn't trained on backtest noise.
+        self._learn_from_real(ticker, won, pnl_pct, direction, canon)
+
+    def _ironclade_gate(self, ticker: str, source: str) -> bool:
+        """Block non-IB sources from feeding the learning system."""
         if source in _IRONYCLADE:
-            self._learn_from_real(ticker, won, pnl_pct, direction, canon)
+            return True
+        log.info("LEARN BLOCKED %s source=%s", ticker, source)
+        self.exits.deregister(ticker)
+        return False
 
     def _learn_strategy_organs(
         self,
@@ -742,6 +744,46 @@ class NeuromorphicBrain:
                 "cycle_count": self._sleep_engine._cycle_count,
             }
         return result
+
+
+    def reset_learning(self) -> None:
+        """Reset all learning state to clean defaults.
+
+        Called after detecting poisoned data from synthetic/reconciled trades
+        that fed the learning system before ironclade protection was active.
+        Clears: episodic memory, nash patterns, realized-EV stats, meta-label,
+        horizon bandit, regime weights, learned exits, and indicator weights.
+        """
+        log.warning("IRONCLADE: resetting all learning state (poisoned data cleanup)")
+        # Episodic k-NN memory
+        self.episodic.clear()
+        # Nash pattern brain
+        self.nash = NashBrain()
+        # Realized-EV stats (band/conf bins)
+        self._realized.reset()
+        # Meta-label model
+        self._meta = MetaLabelModel()
+        # Horizon bandit
+        self._bandit = HorizonBandit()
+        # Per-regime weights
+        self._regime_weights = RegimeWeights()
+        # Learned exit policy
+        self._learned_exit = LearnedExitPolicy()
+        # Gate advisor
+        self._advisor = GateAdvisor()
+        # Reset indicator weights to immune defaults
+        from ..immune import INDICATOR_WEIGHTS
+        self.memory.set_weights(INDICATOR_WEIGHTS)
+        self.cortex.set_weights(INDICATOR_WEIGHTS)
+        # Clear decision context
+        self._last_alpha.clear()
+        self._last_score.clear()
+        self._last_conf.clear()
+        self._last_regime.clear()
+        self._last_vol_pct.clear()
+        self._last_horizon.clear()
+        self._decision_count = 0
+        log.warning("IRONCLADE: learning state reset complete")
 
 
 JuliBrain = NeuromorphicBrain  # Backwards compat alias
