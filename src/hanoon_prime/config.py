@@ -1,66 +1,12 @@
-"""config.py — Shared trading configuration for Juli.
+"""config.py — re-export shim for the brain-owned trading policy.
 
-Session toggles and direction mode. Both the telemetry API and
-ib_cycle read/write these. Thread-safe via simple attribute access.
+The decision configuration now lives in ``brain/policy/trading_policy.py``;
+this module keeps the historical import path (telemetry, ib_adapter, tests)
+working against the SAME singleton object.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from .brain.policy.trading_policy import TRADING_CONFIG, TradingConfig
 
-
-@dataclass
-class TradingConfig:
-    """Global trading config shared across bot components."""
-
-    # Session toggles (all start enabled)
-    session_pre_market: bool = True
-    session_rth: bool = True
-    session_post_market: bool = True
-    session_overnight: bool = True
-
-    # Direction mode: "both", "long_only", "short_only"
-    # Long-only by default — shorts are opt-in later via telemetry.
-    direction_mode: str = "long_only"
-
-    # EOD flatten
-    eod_flatten_enabled: bool = True
-    eod_flatten_minutes: float = 5.0  # minutes before close to flatten
-
-    # Horizons — scalp-only by default (brain-first rollout: the ladder is
-    # fully implemented; the webapp activates more rungs when ready).
-    horizons: set[str] = field(default_factory=lambda: {"scalp"})
-
-    def is_session_active(self, session: str) -> bool:
-        """Check if a session is enabled."""
-        return getattr(self, f"session_{session}", True)
-
-    def is_direction_allowed(self, side: str) -> bool:
-        """Check if a trade side is allowed."""
-        if self.direction_mode == "both":
-            return True
-        if self.direction_mode == "long_only":
-            return side.upper() in ("BUY", "LONG")
-        if self.direction_mode == "short_only":
-            return side.upper() in ("SELL", "SHORT")
-        return True
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for telemetry."""
-        return {
-            "sessions": {
-                "pre_market": self.session_pre_market,
-                "rth": self.session_rth,
-                "post_market": self.session_post_market,
-                "overnight": self.session_overnight,
-            },
-            "direction_mode": self.direction_mode,
-            "eod_flatten_enabled": self.eod_flatten_enabled,
-            "eod_flatten_minutes": self.eod_flatten_minutes,
-            "horizons": sorted(self.horizons),
-        }
-
-
-# Singleton — import this everywhere
-TRADING_CONFIG = TradingConfig()
+__all__ = ["TradingConfig", "TRADING_CONFIG"]

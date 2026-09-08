@@ -27,7 +27,7 @@ from .immune import (
     PENNY_PRICE,
     PENNY_SCORE_BAR,
 )
-from .monitor.portfolio_risk import PortfolioRiskManager
+from .brain.policy.portfolio_risk import PortfolioRiskManager
 from .monitor.sleep_manager import SleepManager
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence

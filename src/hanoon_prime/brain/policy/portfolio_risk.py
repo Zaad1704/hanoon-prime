@@ -1,8 +1,8 @@
-"""monitor.portfolio_risk — portfolio-level risk (rebuild risk/portfolio.py port).
+"""brain.policy.portfolio_risk — portfolio-level risk (slow-cortex owned).
 
-Continuous drawdown risk scalar, exposure + concentration caps, stress
-mode, size adjustment, and portfolio profit protection (peak unrealized
-P&L giveback -> exit weakest winners first). All inputs come from IB.
+Drawdown scalar, exposure/concentration caps, stress mode, size scaling,
+and profit protection (peak-unrealized giveback). Mutable only on the slow
+cortex; the fast path reads the published policy_state snapshot.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from ..immune import MAX_CONCURRENT_POSITIONS, MAX_POSITION_NOTIONAL
+from ...immune import MAX_CONCURRENT_POSITIONS, MAX_POSITION_NOTIONAL
 
 log = logging.getLogger(__name__)
 

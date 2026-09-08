@@ -23,6 +23,7 @@ from hanoon_prime.brain.deliberation import Deliberator, Modifiers
 from hanoon_prime.brain.episodic import EpisodicMemory
 from hanoon_prime.brain.indicators import CORE_NAMES, INDICATOR_NAMES, compute_all_alpha
 from hanoon_prime.brain.memory import JuliMemory
+from hanoon_prime.brain.policy.portfolio_risk import PortfolioRiskManager
 from hanoon_prime.brain.reflection import Reflector, TradeClose
 from hanoon_prime.brain.shared_state import BrainState
 from hanoon_prime.brain.thalamus import MarketQuote as ThalQuote
@@ -43,7 +44,6 @@ from hanoon_prime.monitor.enforcement import (
     HealthDiagnosis,
 )
 from hanoon_prime.monitor.exit_scoring import ExitScorer
-from hanoon_prime.monitor.portfolio_risk import PortfolioRiskManager
 from hanoon_prime.monitor.reconciliation import Reconciliation
 from hanoon_prime.monitor.watchdog import STALE_THRESHOLD, Watchdog
 from hanoon_prime.types import BarSeries, ExitLevels
