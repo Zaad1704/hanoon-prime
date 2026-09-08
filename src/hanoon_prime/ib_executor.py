@@ -114,6 +114,15 @@ class IBExecutor:
         )
         _brackets_from_trades(self.ib, self.tracked_tickers, self._brackets)
         ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
+        # Guard: if IB returns empty but brain knows about positions, the
+        # query flaked (e.g. during rapid OCA placement).  Never fire false
+        # exits — keep the previous brain state and retry next cycle.
+        if not ib_positions and self.brain._open_positions:
+            log.debug(
+                "sync_from_ib: IB returned 0 positions but brain has %d — skipping exit scan",
+                len(self.brain._open_positions),
+            )
+            return
         # Fire exit for any tracked position that IB no longer reports.
         # Use _open_positions (not just _brackets) so adopted/orphan
         # positions without OCA protection are still learned from.

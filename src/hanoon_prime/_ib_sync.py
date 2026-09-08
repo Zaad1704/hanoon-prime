@@ -6,11 +6,14 @@ IB is the single source of truth — these functions only READ from IB.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from .memory import Journal
 from .types import Position
+
+log = logging.getLogger(__name__)
 
 
 def get_ib_pnl(ib_client: Any, ticker: str, pos: Position) -> float:
@@ -106,8 +109,8 @@ def read_ib_positions(
                 score=0.0,
                 atr=0.0,
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("read_ib_positions failed: %s", exc)
     return result
 
 
