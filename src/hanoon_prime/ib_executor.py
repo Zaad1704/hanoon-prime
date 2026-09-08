@@ -181,15 +181,15 @@ class IBExecutor:
         is_synthetic = ticker in self._synthetic
         self._synthetic.discard(ticker)
         if is_synthetic:
-            log.info("EXIT %s (reconciled close, P&L=%.4f) — no Telegram/journal",
+            log.info("EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
                      ticker, pnl)
-            return
-        log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
-        trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
-        self.brain.record_trade(
-            ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
-        )
-        journal_exit(self.journal, ticker, pnl, pos)
+        else:
+            log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
+            trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
+            self.brain.record_trade(
+                ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
+            )
+            journal_exit(self.journal, ticker, pnl, pos)
         self._closed_trades.append(
             {
                 "ticker": ticker,
@@ -198,6 +198,7 @@ class IBExecutor:
                 "direction": pos.direction,
                 "entry_price": pos.entry_price,
                 "shares": pos.shares,
+                "source": "reconciled_exit" if is_synthetic else "ib_fill",
             }
         )
 

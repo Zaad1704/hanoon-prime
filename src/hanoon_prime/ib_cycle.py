@@ -471,22 +471,24 @@ class BotCycleMixin:
         """Route closed trades to neuromorphic brain for learning."""
         for trade in self.executor.get_newly_closed_trades():
             won = trade["pnl"] > 0
+            source = trade.get("source", "ib_fill")
             self.juli.brain.on_trade_close(
                 ticker=trade["ticker"],
                 won=won,
                 pnl_pct=trade["return_pct"],
                 direction=trade["direction"],
-                source="ib_fill",
+                source=source,
                 exit_triggers=[
                     self._exit_reasons.pop(trade["ticker"], "manual_or_bracket")
                 ],
             )
             self._closing.discard(trade["ticker"])
             log.info(
-                "REFLECT %s %s pnl=%.4f",
+                "REFLECT %s %s pnl=%.4f src=%s",
                 trade["ticker"],
                 "WIN" if won else "LOSS",
                 trade["pnl"],
+                source,
             )
 
     def _heartbeat(self) -> None:
