@@ -54,6 +54,7 @@ class IBStreamingBot(BotCycleMixin):
         self.monitor = PipelineMonitor(self, self.journal)
         self._running, self._last_beat = False, 0.0
         self._closing: set[str] = set()
+        self._watched: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
         self._last_bars: int = 0
         # Gateway supervision state (rebuild runner_gateway port)

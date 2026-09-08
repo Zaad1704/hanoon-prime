@@ -21,7 +21,11 @@ from .config import TRADING_CONFIG
 from .immune import (
     CONSECUTIVE_LOSSES_PAUSE,
     DAILY_LOSS_LIMIT,
+    ENTRY_REUSE_COOLDOWN_SEC,
     MAX_CONCURRENT_POSITIONS,
+    MAX_ENTRIES_PER_CYCLE,
+    PENNY_PRICE,
+    PENNY_SCORE_BAR,
 )
 from .monitor.portfolio_risk import PortfolioRiskManager
 from .monitor.sleep_manager import SleepManager
@@ -210,7 +214,7 @@ class BotCycleMixin:
         started = time.monotonic()
         try:
             self._supervise_gateway()
-            self.executor.sync_from_ib(self.streamer)
+            self.executor.sync_from_ib(self.streamer, closing=self._closing)
             self._sweep_stale_orders()
             self._check_safety(pnl)
             self._sync_subs()
@@ -244,6 +248,7 @@ class BotCycleMixin:
         meta: CycleMeta,
     ) -> None:
         """Process tickers, exits, decisions, reflect, wait."""
+        self._cycle_entries = 0  # reset per-cycle entry order cap
         self._last_bars = sum(
             1
             for tk in self.ib.pendingTickers()
@@ -267,13 +272,8 @@ class BotCycleMixin:
             self.hippocampus._daily_pnl = daily
         self._sync_portfolio_risk()
         elapsed = time.monotonic() - meta.started
-        remaining = meta.poll - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-        else:
-            # Cycle overran poll — enforce minimum gap so iterations
-            # don't run back-to-back without a breathing space.
-            time.sleep(CYCLE_FLOOR)
+        gap = max(CYCLE_FLOOR, meta.poll - elapsed)
+        time.sleep(gap)
         self._heartbeat()
         npos = len(self.hippocampus._open_positions)
         log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(decisions), len(exit_s))
@@ -376,6 +376,14 @@ class BotCycleMixin:
         if ib_count == 0:
             log.info("MANUAL FLATTEN: no IB positions to flatten")
             return False
+        # Mark every position as closing so adoption/protection skips them
+        # while the flatten market orders are in flight.
+        try:
+            for p in self.ib.positions():
+                if abs(int(p.position)) > 0:
+                    self._closing.add(p.contract.symbol)
+        except Exception as e:
+            log.debug("flatten closing-mark failed: %s", e)
         log.warning("MANUAL FLATTEN: closing %d IB positions", ib_count)
         closed = self.executor.close_all_positions(self.streamer)
         log.warning("MANUAL FLATTEN: sent market orders for %d positions", closed)
@@ -431,6 +439,21 @@ class BotCycleMixin:
                 TRADING_CONFIG.direction_mode,
             )
             return False
+        # Raise-the-bar for sub-dollar tickers: the brain must be EXTREMELY
+        # sure of a quick scalp before we accept a micro-cap setup. This is
+        # not a hard price block — the higher bar can still be cleared.
+        t = dec["ticker"]
+        tk = self.streamer.ticker_subs.get(t)
+        if tk is not None and tk.hasBidAsk:
+            last = float(tk.last or tk.close or 0)
+            mid = float((tk.bid + tk.ask) * 0.5) if tk.bid and tk.ask else 0.0
+            px = mid or last
+            if px < PENNY_PRICE and abs(dec.get("score", 0.0)) < PENNY_SCORE_BAR:
+                log.info(
+                    "SKIP %s sub_dollar_bar price=%.3f score=%.3f (need >= %.2f)",
+                    t, px, abs(dec.get("score", 0.0)), PENNY_SCORE_BAR,
+                )
+                return False
         # Check session (sleep_manager already gates overall, but double-check)
         state = _SLEEP_MGR.get_state()
         if not TRADING_CONFIG.is_session_active(state.session):
@@ -471,28 +494,51 @@ class BotCycleMixin:
                 return None
         return {"sizing": sizing, "price": price}
 
+    def _entry_throttled(self, t: str) -> bool:
+        """Full-parallel-throttle: cap entries per cycle + per-ticker cooldown.
+
+        Returns True if this entry should be deferred, False if it may
+        place. Kept as its own method to stay under the R3 40-line limit.
+        """
+        if getattr(self, "_cycle_entries", 0) >= MAX_ENTRIES_PER_CYCLE:
+            log.debug("THROTTLE %s: cycle order cap reached", t)
+            return True
+        last_enter = getattr(self, "_entry_reuse_ts", {}).get(t, 0.0)
+        if time.time() - last_enter < ENTRY_REUSE_COOLDOWN_SEC:
+            log.debug("THROTTLE %s: reuse cooldown", t)
+            return True
+        return False
+
+    def _entry_safety_cleared(self, t: str, tk: Any, dec: dict[str, Any]) -> bool:
+        """Death-spiral PROBE recovery (off-by-default; on in production):
+        one quality-gated entry bypasses the halt to re-establish edge and
+        resume learning. check_entry_allowed's halt is UNCHANGED while
+        PROBE_RECOVERY_ENABLED is False. Returns False to block the entry.
+        """
+        if self.hippocampus.check_entry_allowed():
+            return True
+        thought = dec.get("thought")
+        if _PROBE_RECOVERY.maybe_probe(
+            getattr(thought, "score", 0.0),
+            float(tk.bid),
+            float(tk.ask),
+            self.hippocampus.consecutive_losses,
+        ):
+            log.info("PROBE %s death_spiral_recovery", t)
+            return True
+        log.info("SKIP %s safety", t)
+        return False
+
     def _exec_decision(self, dec: dict[str, Any]) -> None:
-        """Execute an entry decision through IB."""
+        """Execute an entry decision through IB (throttled, fill-confirmed)."""
         tk = self.streamer.ticker_subs.get(dec["ticker"])
         if tk is None or not tk.hasBidAsk or math.isnan(tk.bid) or math.isnan(tk.ask):
             return
         t = dec["ticker"]
-        if not self.hippocampus.check_entry_allowed():
-            # Death-spiral PROBE recovery (off-by-default; on in production):
-            # one quality-gated entry bypasses the halt to re-establish edge
-            # and resume learning. check_entry_allowed's halt is UNCHANGED
-            # while PROBE_RECOVERY_ENABLED is False.
-            thought = dec.get("thought")
-            if _PROBE_RECOVERY.maybe_probe(
-                getattr(thought, "score", 0.0),
-                float(tk.bid),
-                float(tk.ask),
-                self.hippocampus.consecutive_losses,
-            ):
-                log.info("PROBE %s death_spiral_recovery", t)
-            else:
-                log.info("SKIP %s safety", t)
-                return
+        if self._entry_throttled(t):
+            return
+        if not self._entry_safety_cleared(t, tk, dec):
+            return
         if t in self.hippocampus._open_positions:
             log.info("SKIP %s open", t)
             return
@@ -511,6 +557,10 @@ class BotCycleMixin:
         self.executor.last_thoughts[t] = dec["thought"]
         self.juli.brain.register_position(t, exec_pack["price"], horizon=horizon)
         self._attach_position_watchers(t)
+        # Throttle accounting only after a real bracket was placed.
+        self._cycle_entries = getattr(self, "_cycle_entries", 0) + 1
+        self._entry_reuse_ts = getattr(self, "_entry_reuse_ts", {})
+        self._entry_reuse_ts[t] = time.time()
 
     def _attach_position_watchers(self, ticker: str) -> None:
         """Attach tick-driven exit watcher + per-position PnL stream.
@@ -550,6 +600,9 @@ class BotCycleMixin:
             self.executor.close_position(t, self.streamer)
             self._exit_reasons[t] = sig.get("reason", "event_exit")
             log.info("EXIT %s (event): %s", t, sig.get("reason", ""))
+
+    def _reflect_closed(self) -> None:
+        """Route closed trades to neuromorphic brain for learning."""
         for trade in self.executor.get_newly_closed_trades():
             won = trade["pnl"] > 0
             source = trade.get("source", "ib_fill")

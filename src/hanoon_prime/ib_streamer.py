@@ -128,6 +128,7 @@ class IBStreamer:
             log.debug("reqPnLSingle %s failed: %s", ticker, exc)
 
     def unwatch_pnl_single(self, ticker: str) -> None:
+        """Cancel the per-position PnL stream for ``ticker`` if present."""
         sub = self._pnl_singles.pop(ticker, None)
         if sub is not None:
             try:
@@ -175,7 +176,7 @@ class IBStreamer:
         # DOM (Level 2) not supported for US equities without subscription.
         # Skip silently to avoid IB error 10092 flooding logs.
         self.depth_subs[ticker] = None
-        log.info("Subscribed to %s (mkt data + DOM)", ticker)
+        log.info("Subscribed to %s (mkt data)", ticker)
 
     def seed_history(self, ticker: str) -> None:
         """Fetch 1-min historical bars for lookback seeding."""

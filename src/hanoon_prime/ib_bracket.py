@@ -28,9 +28,17 @@ def _extract_bracket_prices(t: Any) -> tuple[float, float] | None:
 def _brackets_from_trades(
     ib: Any, tracked: set[str], brackets: dict[str, tuple[float, float]]
 ) -> None:
-    """Update bracket levels from IB trades."""
+    """Update bracket levels from IB trades.
+
+    Only considers ACTIVE (non-done) bracket orders. A filled or
+    cancelled OCA pair from a previous session must NOT be treated as
+    live protection — otherwise protect_position() sees brackets and
+    skips re-protecting the position forever.
+    """
     try:
         for t in ib.trades():
+            if t.isDone():
+                continue
             if not _is_valid_bracket(t, tracked):
                 continue
             prices = _extract_bracket_prices(t)

@@ -79,7 +79,7 @@ def main() -> int:
                 port_was_up = True
                 down_since = None
             else:
-                if port_was_down:
+                if port_was_up:
                     down_since = time.time()
                     _log(f"IB Gateway port DOWN: {msg}")
                 port_was_up = False

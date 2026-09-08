@@ -167,6 +167,81 @@ monitor probes verify the monitors themselves run.
   depended on ambient `ib_insync` presence; now monkeypatches.
 - **mypy:** `ib_insync` optional-import override in pyproject.
 
+### FIX-2026-09-08-01 — Blocking history seeding delayed position protection
+- **Symptom:** 12 orphan positions adopted on restart; only the LAST one
+  (DVLT) got OCA protection. Others stayed unprotected for minutes.
+- **Root cause:** `_adopt_orphan_positions` called `streamer.seed_history()`
+  synchronously per ticker (≈2s each, 24s total). `protect_position` ran
+  after all seeds; the earliest tickers still lacked live price/ATR and
+  were silently skipped. Adoption also blocked the main loop (bursty
+  startup + late protection).
+- **Fix:** adoption now subscribes only; history seeding stays in
+  `_sync_subs` (one ticker/cycle, off the hot path). Protection sees
+  every position within ~1s → all 12 ADOPTed immediately.
+- **Class:** D (silent skip behind blocking hot path)
+- **Guard:** `test: tests/test_flow_throttle.py::test_closing_positions_skipped`
+
+### FIX-2026-09-08-02 — Entry evaluation scored all candidates in one burst
+- **Symptom:** THINK lines for every scanner candidate fired at once per
+  cycle, then silence — bursting, not a stable flow.
+- **Root cause:** `juli._evaluate_entries` looped over the whole tracked
+  universe every cycle.
+- **Fix:** rotating `EVAL_WINDOW` (4 tickers/cycle) with a persistent
+  cursor, so scoring is continuous and the loop never stalls on a batch.
+- **Class:** D (burst was the symptom; no systemic failure was hidden)
+- **Guard:** `test: tests/test_flow_throttle.py::test_eval_window_rotates_across_cycles`
+
+### FIX-2026-09-08-03 — `_watched` lazily initialized, crashed reflect
+- **Symptom:** `AttributeError: 'IBStreamingBot' object has no attribute
+  '_watched'` in `_reflect_closed` during flatten fill confirmation.
+- **Root cause:** `_watched` was created only in `_attach_position_watchers`,
+  but adopted (non-watched) positions reach `_reflect_closed`.
+- **Fix:** initialize `self._watched = set()` in the bot's `__init__`.
+- **Class:** E (unwired assumption — watched set assumed to exist)
+- **Guard:** `test: tests/test_flow_throttle.py::test_market_orders_and_no_cancel`
+
+### FIX-2026-09-08-04 — Positions mid-flatten were re-adopted/re-protected
+- **Symptom:** after a flatten request, the next cycle re-ADOPted and
+  re-protected positions that were being closed.
+- **Root cause:** `_adopt_orphan_positions` had no notion of a `closing`
+  set, so a still-open (fill pending) position was adopted again.
+- **Fix:** pass the bot's `_closing` set into sync/adoption and skip
+  those tickers; manual flatten also marks all positions as closing.
+- **Class:** B (single-writer race — two subsystems acting on one set)
+- **Guard:** `test: tests/test_flow_throttle.py::test_closing_positions_skipped`
+
+### FIX-2026-09-08-05 — Flatten retracted its own orders (limit + cancelAll)
+- **Symptom:** flatten appeared to "work" but most positions stayed open;
+  only a couple filled.
+- **Root cause:** `close_all_positions` placed limit orders then called
+  `cancelAllOrders` (retracting the very orders it just placed), and
+  low-liquidity limit orders didn't fill post-market.
+- **Fix:** flatten uses MKT orders (`_ib.Order(orderType="MKT", tif="DAY",
+  outsideRth=True)`) and never cancels; EOD/horizon-aware `only=` path
+  unchanged.
+- **Class:** B (cancelAllOrders clobbered another subsystem's in-flight orders)
+- **Guard:** `test: tests/test_flow_throttle.py::test_market_orders_and_no_cancel`
+
+### FIX-2026-09-08-06 — Sub-dollar bar: raise the bar, no hard block
+- **Symptom:** MOST_ACTIVE scanner fed sub-$1 micro-caps (DVLT $0.20,
+  WHLR $0.39) into scalp sizing; their 2×ATR brackets were meaningless
+  (stop 1 cent from entry).
+- **Root cause:** no confidence gate differentiated sub-$1 candidates.
+- **Fix:** `PENNY_PRICE`/`PENNY_SCORE_BAR` — below $1.00, |score| must
+  clear 0.85 (vs 0.65 base). Not a price block; a genuinely strong
+  setup can still qualify. Logged as `sub_dollar_bar`.
+- **Class:** E (unwired risk preference)
+- **Guard:** `test: tests/test_flow_throttle.py::test_bar_rejects_low_score_penny`
+
+### FIX-2026-09-08-07 — Long-only default; shorts opt-in via telemetry
+- **Symptom:** bot opened shorts by default while the operator wanted
+  long-only now and shorts later.
+- **Root cause:** `direction_mode` defaulted to `"both"`.
+- **Fix:** default `direction_mode = "long_only"`; the telemetry API
+  still toggles `both`/`short_only` on demand.
+- **Class:** E (policy default)
+- **Guard:** `test: tests/test_flow_throttle.py::test_direction_defaults_long_only`
+
 ## Standing defenses (why mid-session breakage should stay rare)
 
 1. **Smoke harness** — `scripts/smoke_live.py`: real Gateway, false

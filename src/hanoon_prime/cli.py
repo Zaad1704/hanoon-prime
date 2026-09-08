@@ -32,9 +32,10 @@ class _CleanFormatter(logging.Formatter):
     _PKG = "hanoon_prime."
 
     def format(self, record: logging.LogRecord) -> str:
+        """Strip package prefix from logger name, then format."""
         name = record.name
         if name.startswith(self._PKG):
-            name = name[len(self._PKG):]
+            name = name[len(self._PKG) :]
         record.name = name
         return super().format(record)
 

@@ -23,15 +23,26 @@ def _is_valid_protection(trades: list[Any]) -> bool:
 
 
 def sweep_zombies(ib_client: Any) -> None:
-    """Validate JULI_* OCA orders and fix broken ones."""
+    """Validate JULI_* OCA orders and fix broken ones.
+
+    Filters out cancelled/filled orders before checking group validity.
+    When an OCA leg is cancelled (by OCA mechanism, fill, or server),
+    the remaining leg stays in openTrades() with status Cancelled —
+    that's valid, not broken. Without this filter, every cancelled order
+    triggers a re-cancel attempt every cycle (infinite SWEEP loop).
+    """
     try:
         all_trades = ib_client.openTrades()
     except Exception:
         return
+    # Filter: only ACTIVE orders (not Cancelled/Filled/PendingCancel)
+    ACTIVE_STATUSES = {"PendingSubmit", "PreSubmitted", "Submitted", "Active"}
     juli = [
         t
         for t in all_trades
-        if t.order.ocaGroup and t.order.ocaGroup.startswith("JULI_")
+        if t.order.ocaGroup
+        and t.order.ocaGroup.startswith("JULI_")
+        and t.orderStatus.status in ACTIVE_STATUSES
     ]
     if not juli:
         return
@@ -45,14 +56,20 @@ def sweep_zombies(ib_client: Any) -> None:
             continue
         sym = grp.replace("JULI_", "")
         types = {t.order.orderType for t in trades}
-        log.info("SWEEP %s: %d orders (%s) — fixing", sym, len(trades), types)
+        log.info("SWEEP %s: %d active orders (%s) — fixing", sym, len(trades), types)
         _cancel_oca(ib_client, trades)
 
 
 def _get_oca_orders(ib_client: Any, sym: str) -> list[Any]:
-    """Get all open trades for a JULI_* OCA group."""
+    """Get active trades for a JULI_* OCA group (excludes cancelled/filled)."""
+    ACTIVE_STATUSES = {"PendingSubmit", "PreSubmitted", "Submitted", "Active"}
     try:
-        return [t for t in ib_client.openTrades() if t.order.ocaGroup == f"JULI_{sym}"]
+        return [
+            t
+            for t in ib_client.openTrades()
+            if t.order.ocaGroup == f"JULI_{sym}"
+            and t.orderStatus.status in ACTIVE_STATUSES
+        ]
     except Exception:
         return []
 
@@ -85,8 +102,12 @@ def _validate_protection(
 def _place_oca(ib_client: Any, contract: Any, order: BracketOrder) -> None:
     """Place OCA STP+LMT pair as position protection."""
     if math.isnan(order.stop) or math.isnan(order.target):
-        log.warning("OCA skip %s: NaN stop=%.4f target=%.4f",
-                    order.oca, order.stop, order.target)
+        log.warning(
+            "OCA skip %s: NaN stop=%.4f target=%.4f",
+            order.oca,
+            order.stop,
+            order.target,
+        )
         return
     kw = dict(
         action=order.action,

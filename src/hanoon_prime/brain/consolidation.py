@@ -174,7 +174,10 @@ class ConsolidationEngine:
 
     def _apply_halim_recommendations(self) -> None:
         """Fetch HALIM recommendations and store in shared state for orchestrator."""
-        from .halim_recommendations import fetch_recommendations, validate_recommendation
+        from .halim_recommendations import (
+            fetch_recommendations,
+            validate_recommendation,
+        )
 
         try:
             recs = fetch_recommendations(self.halim._base_url)
@@ -265,7 +268,12 @@ class ConsolidationEngine:
         self._halim_postmortem(ticker, won, pnl_pct, direction, alpha)
 
     def _halim_postmortem(
-        self, ticker: str, won: bool, pnl_pct: float, direction: int, alpha: dict
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int,
+        alpha: dict[str, Any],
     ) -> None:
         """Ask HALIM to analyze a closed trade (async, non-blocking)."""
         try:

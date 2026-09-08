@@ -21,7 +21,8 @@ class TradingConfig:
     session_overnight: bool = True
 
     # Direction mode: "both", "long_only", "short_only"
-    direction_mode: str = "both"
+    # Long-only by default — shorts are opt-in later via telemetry.
+    direction_mode: str = "long_only"
 
     # EOD flatten
     eod_flatten_enabled: bool = True

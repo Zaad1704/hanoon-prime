@@ -30,15 +30,37 @@ _ACTIONS = {
 }
 
 # Valid weight names (must match immune.py INDICATOR_WEIGHTS)
-_VALID_WEIGHTS = frozenset({
-    "vpin", "orderbook_imbalance", "institutional_flow", "momentum",
-    "vwap_deviation", "rsi", "macd_hist", "bollinger_position", "adx",
-    "stoch_k", "mfi", "ad_signal", "obv_divergence", "volume_profile_proximity",
-    "spread_tightness", "trade_intensity", "hurst_exponent", "mean_reversion",
-    "trend_strength", "sr_proximity", "elliott_wave", "institutional_wave",
-    "keltner_position", "vw_macd_hist", "microstructure", "fib_proximity",
-    "kelly_fraction",
-})
+_VALID_WEIGHTS = frozenset(
+    {
+        "vpin",
+        "orderbook_imbalance",
+        "institutional_flow",
+        "momentum",
+        "vwap_deviation",
+        "rsi",
+        "macd_hist",
+        "bollinger_position",
+        "adx",
+        "stoch_k",
+        "mfi",
+        "ad_signal",
+        "obv_divergence",
+        "volume_profile_proximity",
+        "spread_tightness",
+        "trade_intensity",
+        "hurst_exponent",
+        "mean_reversion",
+        "trend_strength",
+        "sr_proximity",
+        "elliott_wave",
+        "institutional_wave",
+        "keltner_position",
+        "vw_macd_hist",
+        "microstructure",
+        "fib_proximity",
+        "kelly_fraction",
+    }
+)
 
 
 def fetch_recommendations(base_url: str) -> list[dict[str, Any]]:
@@ -51,10 +73,12 @@ def fetch_recommendations(base_url: str) -> list[dict[str, Any]]:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw: dict[str, Any] = resp.read().decode()
             import json
-            data = json.loads(raw)
-            return data.get("recommendations", [])
+
+            raw = resp.read().decode()
+            payload: dict[str, Any] = json.loads(raw)
+            recs: list[dict[str, Any]] = payload.get("recommendations", [])
+            return recs
     except Exception as e:
         log.debug("HALIM recommendations fetch failed: %s", e)
         return []

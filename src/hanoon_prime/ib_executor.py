@@ -16,6 +16,7 @@ from .brain.risk import SizingResult
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_bracket import _brackets_from_trades
+from .ib_compat import ib as _ib
 from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
 from .types import ExitLevels
@@ -98,13 +99,13 @@ class IBExecutor:
             shares,
         )
 
-    def sync_from_ib(self, streamer: Any) -> None:
+    def sync_from_ib(self, streamer: Any, closing: set[str] | None = None) -> None:
         """Sync everything from IB — IB is source of truth."""
         if not self.ib.isConnected():
             return
         sweep_zombies(self.ib)
         # Adopt orphan positions (not placed by this bot session)
-        self._adopt_orphan_positions(streamer)
+        self._adopt_orphan_positions(streamer, closing or set())
         protect_position(
             self.ib,
             self.tracked_tickers,
@@ -134,14 +135,19 @@ class IBExecutor:
             self._last_snapshot = now
             journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
 
-    def _adopt_orphan_positions(self, streamer: Any) -> None:
+    def _adopt_orphan_positions(
+        self, streamer: Any, closing: set[str] | None = None
+    ) -> None:
         """Adopt IB positions not placed by this bot session.
 
         Reads all IB positions, seeds synthetic entries for orphans,
         adds them to tracked_tickers, subscribes market data, and
         registers them for exit monitoring so the brain learns from
-        their full lifecycle.
+        their full lifecycle. Positions currently being closed
+        (``closing``) are skipped — never adopt a position that is in
+        the middle of a flatten, or we re-protect what we're selling.
         """
+        closing = closing or set()
         try:
             ib_positions = self.ib.positions()
         except Exception:
@@ -153,13 +159,18 @@ class IBExecutor:
                 continue
             if sym in self.last_thoughts:
                 continue
+            if sym in closing:
+                log.debug("RECONCILE: skip %s (closing)", sym)
+                continue
             if sym not in self.tracked_tickers:
                 self.tracked_tickers.add(sym)
                 log.info("RECONCILE: adopted %s (qty=%d, avg=%.2f)",
                          sym, qty, pos.avgCost)
                 try:
+                    # Subscribe only — history seeding happens one ticker
+                    # per cycle off the hot path in _sync_subs, so adoption
+                    # of many orphans no longer blocks the main loop.
                     streamer.subscribe(sym)
-                    streamer.seed_history(sym)
                 except Exception as e:
                     log.debug("RECONCILE sub %s failed: %s", sym, e)
             self.last_thoughts[sym] = {
@@ -323,12 +334,14 @@ class IBExecutor:
             log.warning("close_position failed %s: %s", ticker, e)
 
     def close_all_positions(self, _streamer: Any, only: set[str] | None = None) -> int:
-        """Flatten open positions via limit orders (post-market safe).
+        """Flatten open positions via market orders.
 
         ``only`` restricts the flatten to specific tickers (horizon-aware
-        EOD: intraday rungs close, overnight rungs hold). When ``only`` is
-        None, ALL orders are cancelled afterwards; with a filter, surviving
-        positions keep their protection and order children are left alone.
+        EOD: intraday rungs close, overnight rungs hold). Market orders are
+        used so low-liquidity positions actually fill instead of sitting
+        as unfilled limit orders. The just-placed orders are NEVER
+        cancelled — doing so (cancelAllOrders) retracted flatten orders
+        mid-flight and stranded positions open.
         """
         count = 0
         try:
@@ -343,24 +356,19 @@ class IBExecutor:
             if qty == 0:
                 continue
             action = "SELL" if pos.position > 0 else "BUY"
-            # Use market price with small offset for limit fill
-            mp = float(getattr(pos, "marketPrice", pos.avgCost))
-            if mp <= 0:
-                mp = pos.avgCost
-            # SELL limit slightly above, BUY limit slightly below
-            offset = 0.02 if action == "SELL" else -0.02
-            limit_price = round(mp + offset, 2)
             try:
-                from ib_insync import LimitOrder
-
-                order = LimitOrder(action, qty, limit_price, tif="DAY", outsideRth=True)
+                order = _ib.Order(
+                    orderType="MKT",
+                    action=action,
+                    totalQuantity=qty,
+                    tif="DAY",
+                    outsideRth=True,
+                )
                 self.ib.placeOrder(pos.contract, order)
-                log.info("FLATTEN %s %s %d @ %.2f", action, sym, qty, limit_price)
+                log.info("FLATTEN %s %s %d", action, sym, qty)
                 count += 1
             except Exception as e:
                 log.warning("FLATTEN failed %s: %s", sym, e)
-        if only is None:
-            self.cancel_all()
         return count
 
     def cancel_all(self) -> None:

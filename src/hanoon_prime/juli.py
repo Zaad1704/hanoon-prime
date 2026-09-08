@@ -18,6 +18,10 @@ from .juli_feed import JuliFeed, check_tick_latency, compute_alpha_from_snap, en
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
+# Full-parallel-throttle: how many tickers get entry-scored per cycle.
+# Rotating a small window keeps the flow continuous; the main loop never
+# stalls on a fixed batch (no THINK burst, then silence).
+EVAL_WINDOW: int = 4
 
 
 class JuliBrain:
@@ -102,9 +106,23 @@ class JuliBrain:
     def _evaluate_entries(
         self, positions: set[str], get_snapshot: Any
     ) -> list[dict[str, Any]]:
-        """Evaluate all tracked tickers for entry decisions."""
+        """Evaluate a rotating subset of tracked tickers for entry decisions.
+
+        Full parallel throttle: instead of scoring every candidate every
+        cycle (which produced a THINK burst, then silence), rotate through
+        the tracked universe a few at a time so scoring is smooth and the
+        main loop never stalls on a fixed batch.
+        """
+        universe = sorted(self.budget.get_all_tracked() | positions)
+        if not universe:
+            return []
+        # Re-own the rotation cursor (persisted across cycles on self)
+        off = getattr(self, "_eval_off", 0) % len(universe)
+        window = EVAL_WINDOW
+        slice_ = universe[off : off + window]
+        self._eval_off = (off + window) % len(universe)
         decisions = []
-        for ticker in self.budget.get_all_tracked() | positions:
+        for ticker in slice_:
             snap = get_snapshot(ticker)
             if snap is None:
                 continue

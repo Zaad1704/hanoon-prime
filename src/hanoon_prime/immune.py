@@ -36,6 +36,20 @@ ATR_TARGET_MULT: float = 6.0  # target = 6.0 × ATR(14)  → R:R = 3:1
 TIMEOUT_BARS: int = 999  # disabled — ATR barriers decide
 MAX_SPREAD_BPS: float = 5.0  # max bid/ask spread in basis points
 
+# ── Sub-dollar confidence bar (raise the bar, no hard block) ──────────
+# Below PENNY_PRICE the brain must be EXTREMELY sure of a quick scalp,
+# so the |score| must clear PENNY_SCORE_BAR (>> ENTRY_THRESHOLD). This
+# dissuades the MOST_ACTIVE scanner from feeding junk micro-caps into
+# scalp sizing while still leaving the door open for a genuinely strong
+# setup. Not a hard price floor — just a much higher confidence bar.
+PENNY_PRICE: float = 1.00  # price below this is "sub-dollar"
+PENNY_SCORE_BAR: float = 0.85  # required |score| below PENNY_PRICE
+PENNY_PREMIUM_BPS: float = 25.0  # extra spread allowance for micro-caps
+
+# ── Full-parallel-throttle order pacing ───────────────────────────────
+MAX_ENTRIES_PER_CYCLE: int = 2  # hard cap on new bracket entries per cycle
+ENTRY_REUSE_COOLDOWN_SEC: float = 60.0  # min gap re-entering same ticker
+
 # ── Direction ─────────────────────────────────────────────────────────
 SHORT_ALLOWED: bool = True  # dual-screen: LONG + SHORT
 

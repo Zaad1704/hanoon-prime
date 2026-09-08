@@ -34,7 +34,8 @@ def _fake_trade(
     return SimpleNamespace(
         order=SimpleNamespace(
             orderType=order_type, action=action, totalQuantity=qty, ocaGroup=oca
-        )
+        ),
+        orderStatus=SimpleNamespace(status="Submitted"),
     )
 
 
