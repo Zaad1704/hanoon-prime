@@ -425,8 +425,12 @@ class BotCycleMixin:
 
     def _exec_decision(self, dec: dict[str, Any]) -> None:
         """Execute an entry decision through IB."""
+        import math
+
         tk = self.streamer.ticker_subs.get(dec["ticker"])
         if tk is None or not tk.hasBidAsk:
+            return
+        if math.isnan(tk.bid) or math.isnan(tk.ask):
             return
         t = dec["ticker"]
         if not self.hippocampus.check_entry_allowed():

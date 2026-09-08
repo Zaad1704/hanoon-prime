@@ -144,7 +144,7 @@ def _reprotect_position(
         log.info(f"HEAL {sym}: {len(trades)} broken orders cancelled")
     px = streamer.get_last_price(sym)
     atr = streamer.buffer_atr(sym)
-    if not px or atr <= 0.0 or math.isnan(atr):
+    if not px or atr <= 0.0 or math.isnan(atr) or math.isnan(px):
         return
     try:
         c = ib_client.qualifyContracts(_ib.Stock(sym, "SMART", "USD"))[0]

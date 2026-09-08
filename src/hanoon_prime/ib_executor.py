@@ -61,8 +61,8 @@ class IBExecutor:
         legacy hippocampus sizing is used as a fallback.
         """
         atr = streamer.buffer_atr(ticker)
-        if atr <= 0.0 or np.isnan(atr):
-            log.warning("ATR invalid for %s", ticker)
+        if atr <= 0.0 or np.isnan(atr) or np.isnan(price):
+            log.warning("ATR/price invalid for %s (atr=%.4f price=%.4f)", ticker, atr, price)
             return
         d = thought.direction
         if sizing is not None and getattr(sizing, "risk_pass", False):
