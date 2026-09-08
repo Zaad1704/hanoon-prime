@@ -97,6 +97,7 @@ class ConsolidationEngine:
         self._update_regime()
         self._update_halim()
         self._run_thinker()
+        self._apply_halim_recommendations()
         self.news.maybe_refresh()
         self._persist_state()
         log.info(
@@ -171,6 +172,21 @@ class ConsolidationEngine:
         mod = self.halim.get_modifier(ticker, alpha, 0.0, "SCAN")
         self.state.update(halim_modifier=mod)
 
+    def _apply_halim_recommendations(self) -> None:
+        """Fetch HALIM recommendations and store in shared state for orchestrator."""
+        from .halim_recommendations import fetch_recommendations, validate_recommendation
+
+        try:
+            recs = fetch_recommendations(self.halim._base_url)
+            if not recs:
+                return
+            valid = [r for r in recs if validate_recommendation(r) is None]
+            if valid:
+                self.state.update(halim_recommendations=valid)
+                log.info("HALIM: %d valid recommendations fetched", len(valid))
+        except Exception as e:
+            log.debug("HALIM recommendations fetch failed: %s", e)
+
     def _run_thinker(self) -> None:
         """Run thinker deliberation and write to shared state."""
         alpha = self._get_latest_alpha()
@@ -224,7 +240,7 @@ class ConsolidationEngine:
         direction: int = 1,
         fill: FillInfo | None = None,
     ) -> None:
-        """Route trade close to thinker + buffer (slow path learning)."""
+        """Route trade close to thinker + buffer + HALIM postmortem."""
         from ..reflection.buffer import BUY, SELL
 
         alpha = self._get_latest_alpha() or {}
@@ -245,6 +261,28 @@ class ConsolidationEngine:
                 commission=fees,
             )
         )
+        # HALIM postmortem: ask the LLM to analyze this trade
+        self._halim_postmortem(ticker, won, pnl_pct, direction, alpha)
+
+    def _halim_postmortem(
+        self, ticker: str, won: bool, pnl_pct: float, direction: int, alpha: dict
+    ) -> None:
+        """Ask HALIM to analyze a closed trade (async, non-blocking)."""
+        try:
+            trade_data = {
+                "ticker": ticker,
+                "won": won,
+                "pnl_pct": pnl_pct,
+                "direction": direction,
+                "alpha": alpha,
+                "regime": self.state.get("regime_label", "unknown"),
+            }
+            result = self.halim.analyze_trade(trade_data)
+            if result.get("insight"):
+                log.info("HALIM POSTMORTEM %s: %s", ticker, result["insight"])
+                self.state.update(halim_last_insight=result)
+        except Exception as e:
+            log.debug("HALIM postmortem failed: %s", e)
 
     def _on_trade_closed(self, trade: Trade) -> None:
         """Callback from TradeBuffer when a round-trip closes."""

@@ -29,6 +29,7 @@ ROUTES_GET = {
     "/pipeline": "_pipeline_state",
     "/risk": "_risk_state",
     "/config": "_config",
+    "/halim": "_halim_state",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -307,6 +308,22 @@ class _H(BaseHTTPRequestHandler):
         d["minutes_to_close"] = round(sm.minutes_to_close(), 1)
         d["eod_window_active"] = sm.is_eod_window(TRADING_CONFIG.eod_flatten_minutes)
         return d
+
+    def _halim_state(self) -> dict[str, Any]:
+        """HALIM state: regime, modifier, postmortem, recommendations."""
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        brain = getattr(juli, "brain", None) if juli else None
+        state = getattr(brain, "state", None) if brain else None
+        if state is None:
+            return {}
+        s = state.snapshot()
+        return {
+            "regime_label": s.get("regime_label", "unknown"),
+            "regime_multiplier": s.get("regime_multiplier", 1.0),
+            "halim_modifier": s.get("halim_modifier", 0.0),
+            "halim_last_insight": s.get("halim_last_insight", {}),
+            "halim_recommendations": s.get("halim_recommendations", []),
+        }
 
     def _journal(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():

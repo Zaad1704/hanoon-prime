@@ -650,6 +650,22 @@ class NeuromorphicBrain:
         self._realized.add_confidence_outcome(conf, won)
         self.exits.adapt_from_realized(self._realized)
         self._advisor.record_outcome(won)
+        # Apply any pending HALIM recommendations (fetched by consolidation)
+        self._apply_halim_recommendations()
+
+    def _apply_halim_recommendations(self) -> None:
+        """Apply pending HALIM recommendations to Juli parameters."""
+        from .halim_recommendations import apply_recommendation
+
+        recs = self.state.get("halim_recommendations", [])
+        if not recs:
+            return
+        self.state.update(halim_recommendations=[])  # consume
+        for rec in recs:
+            try:
+                apply_recommendation(rec, self.dynamics, self.memory)
+            except Exception as e:
+                log.warning("HALIM rec apply failed: %s", e)
 
     def _learned_exit_trade_count(self) -> int:
         """Real exits recorded by the learned-exit attributor."""
