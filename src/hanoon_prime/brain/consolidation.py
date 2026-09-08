@@ -22,6 +22,8 @@ from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .news_sources import NewsFeedEngine
+from .policy.portfolio_risk import PortfolioRiskManager
+from .policy.safety import SafetyProducer
 from .regime import RegimeDetector
 from .shared_state import BrainState
 from .thinker import Signal, Thinker
@@ -56,6 +58,8 @@ class ConsolidationEngine:
         # is unreachable, so the label never stays "unknown" for long.
         self._detector = RegimeDetector()
         self._sleep_engine = sleep_engine
+        self.portfolio_risk = PortfolioRiskManager()
+        self.safety = SafetyProducer()
         self._thread: Optional[threading.Thread] = None
         self._running = False
 
@@ -92,12 +96,63 @@ class ConsolidationEngine:
                 log.error("System 2 cycle error: %s", e)
             time.sleep(self.interval)
 
+    def _update_policy(self) -> None:
+        """Slow-cortex policy pulse: publish safety + portfolio risk state."""
+        feed = self.state.get("account_feed") or {}
+        self.safety.begin_call()
+        self.safety.on_daily_pnl(float(feed.get("daily_pnl", 0.0)))
+        self.safety.on_consecutive_losses(int(self.state.get("consecutive_losses", 0)))
+        self.safety.on_position_count(len(self.state.get("positions_open") or {}))
+        risk = self._portfolio_policy_state(feed)
+        self._publish_giveback_exits()
+        self.state.update(policy_state=risk)
+
+    def _portfolio_policy_state(self, feed: dict[str, Any]) -> dict[str, Any]:
+        """Fold portfolio risk + safety authorization into policy_state."""
+        positions = feed.get("positions") or {}
+        if positions:
+            self.portfolio_risk.update_positions(positions)
+        equity = feed.get("equity")
+        if equity is not None:
+            self.portfolio_risk.update_equity(float(equity))
+        risk: dict[str, Any] = self.portfolio_risk.get_risk_state()
+        auth, reason = self.safety.authorized()
+        risk.update(
+            holdings={
+                sym: abs(float(p.get("value", 0.0) or 0.0))
+                for sym, p in positions.items()
+            },
+            authorized=auth,
+            enabled=self.safety.enabled,
+            halted=self.safety.halted,
+            pause_reason=reason if not auth else "",
+            consecutive_losses=int(self.state.get("consecutive_losses", 0)),
+            daily_pnl=float(feed.get("daily_pnl", 0.0)),
+        )
+        return risk
+
+    def _publish_giveback_exits(self) -> None:
+        """Publish giveback exits from the portfolio risk pulse."""
+        gb = self.portfolio_risk.check_portfolio_giveback()
+        exits: list[dict[str, Any]] = []
+        if gb.fired:
+            for t in gb.tickers:
+                exits.append(
+                    {
+                        "type": "portfolio_giveback",
+                        "ticker": t,
+                        "reason": "giveback_fade",
+                    }
+                )
+        self.state.update(policy_exits=exits)
+
     def _cycle(self) -> None:
         """One full System 2 cognitive cycle."""
         self._update_regime()
         self._update_halim()
         self._run_thinker()
         self._apply_halim_recommendations()
+        self._update_policy()
         self.news.maybe_refresh()
         self._persist_state()
         log.info(

@@ -10,6 +10,24 @@ import threading
 import time
 from typing import Any
 
+DEFAULT_POLICY_STATE: dict[str, Any] = {
+    "equity": 0.0,
+    "equity_synced": False,
+    "risk_scalar": 1.0,
+    "drawdown": 0.0,
+    "stress_mode": False,
+    "exposure": 0.0,
+    "position_count": 0,
+    "max_positions": 30,
+    "holdings": {},
+    "authorized": True,
+    "enabled": True,
+    "halted": False,
+    "pause_reason": "",
+    "daily_pnl": 0.0,
+    "consecutive_losses": 0,
+}
+
 
 class BrainState:
     """Thread-safe shared state between System 1 and System 2."""
@@ -36,6 +54,10 @@ class BrainState:
             "exit_signals": [],
             "session_state": "rth",
             "panic_mode": False,
+            "policy_state": dict(DEFAULT_POLICY_STATE),
+            "policy_exits": [],
+            "account_feed": {},
+            "consecutive_losses": 0,
             "timestamp": 0.0,
         }
 
