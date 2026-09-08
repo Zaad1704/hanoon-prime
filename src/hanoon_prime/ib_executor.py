@@ -39,6 +39,7 @@ class IBExecutor:
         self.tracked_tickers: set[str] = set(tracked_tickers or [])
         self._brackets: dict[str, tuple[float, float]] = {}
         self._pending_parent: set[str] = set()
+        self._synthetic: set[str] = set()  # reconciled positions (not real IB fills)
         self._horizons: dict[str, str] = {}  # ticker → trading horizon
         self._last_snapshot: float = 0.0
         self._closed_trades: list[dict[str, Any]] = []
@@ -72,8 +73,8 @@ class IBExecutor:
         else:
             raw = self.brain.size_position(score_to_win_prob(thought.score), price, atr)
             shares = max(1, int(raw))
-            stop = round(price - d * ATR_STOP_MULT * atr, 2)
-            target = round(price + d * ATR_TARGET_MULT * atr, 2)
+            stop = max(0.01, round(price - d * ATR_STOP_MULT * atr, 2))
+            target = max(0.01, round(price + d * ATR_TARGET_MULT * atr, 2))
         if shares <= 0:
             return
         action = "BUY" if d > 0 else "SELL"
@@ -159,6 +160,7 @@ class IBExecutor:
                 "shares": abs(qty),
                 "synthetic": True,
             }
+            self._synthetic.add(sym)
             self._horizons[sym] = "scalp"
 
     def _ping_ib(self) -> bool:
@@ -176,6 +178,12 @@ class IBExecutor:
         if pos is None:
             return
         pnl = get_ib_pnl(self.ib, ticker, pos)
+        is_synthetic = ticker in self._synthetic
+        self._synthetic.discard(ticker)
+        if is_synthetic:
+            log.info("EXIT %s (reconciled close, P&L=%.4f) — no Telegram/journal",
+                     ticker, pnl)
+            return
         log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
         trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
         self.brain.record_trade(

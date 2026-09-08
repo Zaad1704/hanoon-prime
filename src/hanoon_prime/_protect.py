@@ -121,13 +121,15 @@ def protect_position(
 
 
 def _atr_levels(px: float, atr: float, d: int) -> tuple[float, float]:
-    """Compute ATR stop/target for the position direction."""
+    """Compute ATR stop/target for the position direction.
+
+    Floors at $0.01 to prevent negative prices on penny stocks.
+    """
     from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
 
-    return (
-        round(px - d * ATR_STOP_MULT * atr, 2),
-        round(px + d * ATR_TARGET_MULT * atr, 2),
-    )
+    stop = max(0.01, round(px - d * ATR_STOP_MULT * atr, 2))
+    target = max(0.01, round(px + d * ATR_TARGET_MULT * atr, 2))
+    return stop, target
 
 
 def _reprotect_position(

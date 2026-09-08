@@ -129,11 +129,11 @@ class BotCycleMixin:
                 log.debug("re-seed %s failed: %s", t, exc)
 
     def _sweep_stale_orders(self) -> None:
-        """Cancel JULI parents that have been pending too long.
+        """Cancel stale JULI entry parents that have been pending too long.
 
-        IB queues bracket parents that never fill (Error 201 territory in
-        rebuild — a stacked order book). Sweeping keeps the book clean and
-        lets the brain re-decide with fresh data.
+        Only sweeps DAY-tif entry parents (from place_bracket), NOT GTC
+        protection orders (STP+LMT from _protect.py). Protection orders
+        must survive until the position closes.
         """
         pending = ("PendingSubmit", "PreSubmitted")
         try:
@@ -144,12 +144,15 @@ class BotCycleMixin:
         now = time.time()
         for trade in trades:
             order = getattr(trade, "order", None)
-            group = getattr(order, "ocaGroup", "") if order else ""
-            if not order or order.parentId or not group.startswith("JULI_"):
+            if not order or order.parentId:
+                continue
+            # Only sweep DAY-tif entry parents — GTC protection stays
+            if getattr(order, "tif", "") != "DAY":
                 continue
             if trade.orderStatus.status not in pending:
                 continue
-            self._sweep_one(order, group.replace("JULI_", ""), now)
+            sym = trade.contract.symbol if trade.contract else "?"
+            self._sweep_one(order, sym, now)
 
     def _sweep_one(self, order: Any, sym: str, now: float) -> None:
         """Cancel one stale pending parent (tracked ≥ 60s)."""
