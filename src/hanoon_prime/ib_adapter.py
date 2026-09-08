@@ -46,6 +46,9 @@ class IBStreamingBot(BotCycleMixin):
         self.juli = JuliBrain(self.ib)
         repo_root = Path(__file__).resolve().parents[2]
         self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
+        consolidation = getattr(self.juli.brain, "_consolidation", None)
+        if consolidation is not None:
+            consolidation.safety.attach_journal(self.journal)
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
         # Telegram chat (read-only queries answered from brain state)

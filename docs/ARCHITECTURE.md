@@ -30,20 +30,21 @@
 | Component | File(s) | Lines | Role |
 |-----------|---------|-------|------|
 | **Entry Point** | `cli.py` | 88 | Sets up logging, creates bot, calls `run()` |
-| **Bot Core** | `ib_adapter.py` | 170 | `IBStreamingBot` class, owns all components |
-| **Main Loop** | `ib_cycle.py` | 623 | `BotCycleMixin`: cycle, sync, execution, safety |
+| **Bot Core** | `ib_adapter.py` | 171 | `IBStreamingBot` class, owns all components |
+| **Main Loop** | `ib_cycle.py` | 646 | `BotCycleMixin`: cycle, brain tick, verdict execution |
 | **Data Layer** | `ib_streamer.py` | 334 | `IBStreamer`: market data, DOM, history seeding |
-| **Brain Interface** | `juli.py` | 179 | `JuliBrain`: evaluates tickers, routes to orchestrator |
-| **Brain Core** | `brain/orchestrator.py` | 806 | `NeuromorphicBrain`: scoring, sizing, verdicts |
+| **Brain Interface** | `juli.py` | 197 | `JuliBrain`: data preamble, voting window, verdict loop |
+| **Brain Core** | `brain/orchestrator.py` | 1128 | `NeuromorphicBrain`: decide_entry gates, policy, sizing, portfolio |
+| **Decision Policy** | `brain/policy/` | ≤200 ea | `TradingPolicy`, `SafetyProducer`, `ProbeRecovery`, `Governor`: entry gates |
 | **Cortex** | `cortex.py` | ~200 | `Cortex.evaluate()`: alpha → score + direction |
 | **Risk Engine** | `brain/risk.py` | ~320 | `RiskEngine.evaluate()`: sizing + risk gate |
 | **Execution** | `ib_executor.py` | 377 | `IBExecutor`: bracket orders, position tracking |
 | **Protection** | `_protect.py` | ~180 | `protect_position()`: OCA brackets (STP+LMT) |
-| **System 2** | `brain/consolidation.py` | 304 | `ConsolidationEngine`: HALIM, thinker, persistence |
-| **Telemetry** | `telemetry.py` | ~200 | `TelemetryAPI`: Flask app on :8080 |
+| **System 2** | `brain/consolidation.py` | 369 | `ConsolidationEngine`: HALIM, thinker, portfolio/safety state |
+| **Telemetry** | `telemetry.py` | 410 | `TelemetryAPI`: Flask app on :8080 |
 | **Pipeline Monitor** | `monitor/pipeline.py` | ~160 | `PipelineMonitor`: health checks, alerts |
-| **Portfolio Risk** | `monitor/portfolio_risk.py` | ~120 | `PortfolioRiskManager`: drawdown → risk scalar |
-| **Immune System** | `immune.py` | ~80 | Hard limits: MAX_POSITIONS, LOSS_LIMIT, etc. |
+| **Immune System** | `immune.py` | ~80 | Hard limits: MAX_POSITIONS, LOSS_LIMIT, etc. (legacy reference) |
+| **Learning Buffer** | `hippocampus.py` | 199 | `Hippocampus`: account PnL feed, open-position mirror (2nd instance here) |
 | **Dynamics** | `brain/dynamics.py` | 119 | `Dynamics`: hysteresis, velocity, adaptive threshold |
 
 ---
@@ -63,10 +64,9 @@ CYCLE START (every ~1s)
 ├─── _sweep_stale_orders()
 │    └── Cancel DAY-tif entry parents pending > 60s
 │         (GTC protection orders NEVER swept)
-│
-├─── _check_safety(pnl)
-│    └── Check daily loss, consecutive losses → _halt() if breached
-│         (safety_enabled=False by default; user activates via webapp)
+│    (daily-loss / position-cap safety now lives in the slow-cortex
+│     SafetyProducer — see decide_entry gates below; safety_enabled is
+│     OFF by default, activated via the webapp /safety-net command)
 │
 ├─── _sync_subs()
 │    ├── Subscribe missing tickers (async reqMktData — no block)
@@ -77,96 +77,66 @@ CYCLE START (every ~1s)
 ├─── _check_manual_flatten() — webapp flatten request
 ├─── _check_eod_flatten() — force-close intraday positions near close
 │
-├─── juli.tick(positions, snapshot, streamer, closing)
+├─── juli.tick(watch, snapshot, streamer, held_positions, closing, pos_info, session)
 │    │
 │    │   ╔═══════════════════════════════════════════════════╗
 │    │   ║              BRAIN EVALUATION PATH               ║
 │    │   ╚═══════════════════════════════════════════════════╝
+│    │   (NeuromorphicBrain.start() at JuliBrain construction
+│    │    spawns the slow-cortex consolidation thread once)
 │    │
-│    ├─── juli._sync_and_scan() — sync scanner results
-│    ├─── juli._maybe_screen(snapshot) — screen candidates
-│    ├─── juli._maybe_allocate(positions) — data budget allocation
+│    ├─── _data_preamble(streamer, snapshot, held_positions)
+│    │    ├─── feed.ensure_refs() — SPY/QQQ/VXX ref prices
+│    │    ├─── _sync_and_scan() — sync scanner results
+│    │    ├─── _maybe_screen(snapshot) — screen candidates
+│    │    ├─── feed.fallback_regime() — local regime when HALIM stale
+│    │    └─── _maybe_allocate() — cycle data budget
 │    │
 │    ├─── EXIT EVALUATION:
 │    │    juli._evaluate_exits(positions, snapshot, closing)
-│    │    └── For each open position:
-│    │         brain.check_exit(ticker, last_price, direction)
-│    │         └── exit_checks.py → exit_ladder.py → learned_exit.py
+│    │    ├─── brain.check_exit(ticker, last_price, direction)
+│    │    │    └── exit_checks.py → exit_ladder.py → learned_exit.py
+│    │    └─── policy_exits from brain.state["policy_exits"]
+│    │         └── slow-cortex staged exits (consolidation publishes)
 │    │
-│    └─── ENTRY EVALUATION:
-│         juli._evaluate_entries(positions, snapshot)
-│         └── For each tracked ticker:
+│    └─── ENTRY EVALUATION (verdict loop):
+│         universe = sorted(watch ∪ held_positions)
+│         For each ticker:
 │              │
-│              ├── juli._eval_one(ticker, snap, open_count)
+│              ├── juli._snap_for(ticker, snapshot) → window of bars
+│              ├── juli._lock_held(ticker, held_positions)
+│              ├── juli._eval_window(ticker, snap, held_positions, session)
 │              │    │
-│              │    ├── len(prices) < 20 → SKIP (no data)
-│              │    │
-│              │    ├── brain.tick(alpha, ticker, price, atr, open_positions, bars)
+│              │    ├── governor.begin_cycle() — MAX_ENTRIES_PER_CYCLE budget
+│              │    ├── rotating EVAL_WINDOW=4 slice scored via
+│              │    │    brain.decide_entry(alpha, bars, price, atr, ...)
 │              │    │    │
 │              │    │    │  ╔═══════════════════════════════════════════╗
 │              │    │    │  ║      NEUROMORPHIC BRAIN (orchestrator)  ║
 │              │    │    │  ╚═══════════════════════════════════════════╝
 │              │    │    │
-│              │    │    ├── Refractory check → skip if cooling down
-│              │    │    │
-│              │    │    └── _evaluate_fast():
-│              │    │         │
-│              │    │         ├── Get regime data from BrainState
-│              │    │         │   (HALIM modifier, episodic bias, nash mod)
-│              │    │         │
-│              │    │         ├── _local_regime_fallback()
-│              │    │         │   └── If HALIM label unknown → numpy detector
-│              │    │         │
-│              │    │         ├── _cross_asset.update(ticker, price, ref_prices)
-│              │    │         │   └── SPY/QQQ/IWM/VXX lead-lag modifier
-│              │    │         │
-│              │    │         ├── _classify_horizon(bars)
-│              │    │         │   └── scalp / multihour / swing
-│              │    │         │
-│              │    │         └── _score_pipeline(ticker, alpha, regime_mul, halim, episodic, cross)
-│              │    │              │
-│              │    │              ├── base = cortex.evaluate(alpha)
-│              │    │              │   └── ScoreResult(score, direction, confidence, verdict)
-│              │    │              │
-│              │    │              ├── nash_pred = nash.predict(alpha, base.score, base.direction)
-│              │    │              ├── nash_op = _compute_nash_mod(nash_pred)
-│              │    │              ├── neuro_score = _compute_neuro_score(alpha, ticker)
-│              │    │              ├── cal_adj = _calibration_nudge(base.score)
-│              │    │              │
-│              │    │              ├── blended = (1-NEURO_BLEND)*(base.score+cal_adj) + NEURO_BLEND*neuro_score
-│              │    │              ├── advisor_delta = _advisor.threshold_delta()
-│              │    │              ├── news_bias = _news_bias(ticker)
-│              │    │              │
-│              │    │              ├── raw = blended * regime_mul + halim + episodic + nash_op + news_bias + cross - advisor_delta
-│              │    │              │
-│              │    │              └── _stabilize(raw, nash_pred)
-│              │    │                   ├── direction = sign(raw)
-│              │    │                   ├── score = _apply_nash_gate(raw, direction, nash_pred)
-│              │    │                   ├── score = 0.0 if EOD penalty
-│              │    │                   ├── stabilized = dynamics.process(score, direction)
-│              │    │                   │   └── hysteresis + velocity + refractory + threshold adaptation
-│              │    │                   └── final_dir = sign(stabilized)
+│              │    │    ├── Validity gates (data, regime)
+│              │    │    ├── Signal: cortex.evaluate → stabilize → dynamics
+│              │    │    ├── TradingPolicy verdict (approved/denied/reason)
+│              │    │    ├── SafetyProducer (enabled/halted/authorized)
+│              │    │    ├── ProbeRecovery (position cap, stress)
+│              │    │    ├── Governor (halted? budget? reuse cooldown?)
+│              │    │    ├── RiskEngine sizing (Kelly, EV gate, quality)
+│              │    │    ├── Portfolio gate (position cap, exposure)
+│              │    │    └── Scale (regime multiplier) → Verdict
+│              │    │         Verdict(ticker, action, reason, sizing,
+│              │    │                 horizon, thought, trace)
+│              │    │         └── actions: ENTER / HOLD / VETOED
 │              │    │
+│              │    ├── Verdict appended to _recent_verdicts (maxlen 200)
+│              │    │    └── served at GET /verdicts (telemetry)
 │              │    │
-│              │    │    └── _maybe_size(ctx, entry_price, atr, open_positions)
-│              │    │         ├── abs(score) <= dynamics.threshold * patience → SizingResult() (empty)
-│              │    │         └── risk.evaluate(score, confidence, price, atr, open_positions)
-│              │    │              ├── NaN guard → reject
-│              │    │              ├── Position cap → reject
-│              │    │              ├── Win probability from edge.py
-│              │    │              ├── Kelly sizing
-│              │    │              ├── EV gate (minimum EV threshold)
-│              │    │              ├── Quality penalty (spread, volume)
-│              │    │              └── Returns SizingResult(shares, stop, target, risk_pass, ...)
-│              │    │
-│              │    │
-│              │    └── Returns decision dict:
-│              │         {ticker, direction, score, sizing, verdict, horizon, trace}
+│              │    └── governor.note_entry() stamps the reuse cooldown
+│              │         AFTER execution confirms an entry
 │              │
-│              └── juli._build_decision(ticker, direction, result)
-│                   └── decision dict with thought=SimpleNamespace(...)
+│              └── returns (exits, verdicts) — decisions only, no orders
 │
-├─── _finish_cycle(exit_s, decisions, pnl, meta)
+├─── _finish_cycle(exit_s, verdicts, pnl, meta)
 │    │
 │    ├─── bars = count pendingTickers → update_bar (aggregate 1-min bars)
 │    │
@@ -178,29 +148,39 @@ CYCLE START (every ~1s)
 │    │    For each exit_s:
 │    │         executor.close_position(ticker, streamer)
 │    │
-│    ├─── Process entry decisions:
-│    │    For each decision:
-│    │         if market_open AND _can_trade(dec):
-│    │              _exec_decision(dec)
-│    │              │
-│    │              ├── _halted check → skip
-│    │              ├── _can_trade(): direction allowed, session active
-│    │              ├── _portfolio_gate_and_size(): risk gate + size adjustment
-│    │              ├── _check_safety(): position cap, loss limits
-│    │              ├── executor.place_bracket(ticker, thought, price, streamer, sizing, horizon)
-│    │              │   ├── IB order: MOC/LMT parent + STP + LMT GTC
-│    │              │   ├── _brackets[ticker] = (stop, target)
-│    │              │   └── _protect.protect_position() → OCA group
-│    │              ├── juli.brain.register_position(ticker, price, horizon)
-│    │              └── _attach_position_watchers(ticker)
-│    │                   ├── streamer.attach_exit_watcher(ticker, check)
-│    │                   │   └── tick.updateEvent → enqueue exit signal if stop breached
-│    │                   └── streamer.watch_pnl_single(ticker, account)
+│    ├─── Journal verdicts (observability):
+│    │    For each verdict:
+│    │         journal {"event": "verdict", ts, **v.to_dict()}
+│    │
+│    ├─── Execute ENTER verdicts:
+│    │    For each verdict, ONLY IF market_open AND v.action == ENTER:
+│    │         _execute_verdict(v)
+│    │         │
+│    │         ├── Sizing guard: sizing is None or shares ≤ 0 → SKIP
+│    │         ├── Live bid/ask (else "VERDICT UNEXECUTABLE")
+│    │         ├── Skip if ticker already open
+│    │         ├── price = (bid + ask) * 0.5
+│    │         ├── executor.place_bracket(ticker, v.thought, price, streamer,
+│    │         │                          sizing=v.sizing, horizon=v.horizon)
+│    │         │   ├── IB order: LMT parent DAY + STP/LMT GTC
+│    │         │   ├── _brackets[ticker] = (stop, target)
+│    │         │   └── _protect.protect_position() → OCA group
+│    │         ├── juli.last_thoughts[ticker] = v.thought
+│    │         ├── juli.brain.register_position(ticker, price, horizon=v.horizon)
+│    │         ├── _attach_position_watchers(ticker)
+│    │         │    ├── streamer.attach_exit_watcher(ticker, check)
+│    │         │    └── streamer.watch_pnl_single(ticker, account)
+│    │         └── governor.note_entry(ticker) — reuse cooldown
+│    │
+│    ├─── _publish_account_feed(pnl)
+│    │    └── Set juli._state["account_feed"] = {daily_pnl, ts}
+│    │         └── Every RISK_SYNC_SECS: also equity + positions
+│    │              └── Slow cortex _update_policy consumes it
 │    │
 │    ├─── _reflect_closed()
 │    │    └── For each newly closed trade:
 │    │         ├── juli.brain.on_trade_close(ticker, won, pnl_pct, direction, source)
-│    │         │   └── ironclade gate → only ib_fill/real_trade/ib_paper/reconciled_exit pass
+│    │         │   └── ironclad gate → only ib_fill/real_trade/ib_paper/reconciled_exit pass
 │    │         │        ├── episodic.add(alpha, outcome)
 │    │         │        ├── nash.record_pattern(...)
 │    │         │        ├── realized.record_outcome(...)
@@ -210,8 +190,6 @@ CYCLE START (every ~1s)
 │    │         └── streamer.unwatch_pnl_single(ticker)
 │    │
 │    ├─── monitor.record_cycle(market_open)
-│    ├─── _sync_portfolio_risk() (throttled every 30s)
-│    │    └── Read NetLiquidation → drawdown → risk_scalar → adjust entry size
 │    ├─── time.sleep(max(0.2, poll - elapsed))  ← minimum 0.2s gap
 │    └─── _heartbeat() (every 60s)
 │
@@ -324,6 +302,18 @@ ConsolidationEngine.start()  (every 30s)
 └─── Persist State:
      ├─── brain_state.to_dict() → runtime/state.json
      └─── memory.save() → persisted weights/params
+
+└─── _update_policy() (slow-cortex ownership of portfolio + safety)
+     ├─── Begin safety call: enabled?/daily_pnl/consecutive_losses/position_count
+     ├─── SafetyProducer.authorized() → (authorized, pause_reason)
+     ├─── Build policy_state:
+     │    {enabled, halted, authorized, pause_reason, equity, drawdown,
+     │     exposure, stress_mode, risk_scalar, position_count, max_positions,
+     │     daily_pnl, consecutive_losses}
+     │    └── Published to BrainState → read by telemetry /health, /risk,
+     │         /safety-net and by decide_entry gates (halt blocks entries)
+     ├─── Stage policy_exits (e.g. stress-de-risking) → merged by juli
+     └─── Journal snapshot → safety producer recall
 ```
 
 ---
@@ -386,16 +376,14 @@ SizingResult (brain/risk.py)
 ├── ev_scale: float, ev_reason: str
 └── quality_penalty: float
 
-Decision Dict (returned by brain.tick)
+Verdict (brain/policy/verdict.py — returned by brain.decide_entry)
 ├── ticker: str
-├── direction: int (+1/-1/0)
-├── score: float (stabilized)
-├── sizing: SizingResult
-├── verdict: str (BUY/SELL/REFRACTORY)
+├── action: str (ENTER / HOLD / VETOED)
+├── reason: str (e.g. "sized_to_zero", "security_halted", "admitted")
+├── sizing: SizingResult | None
 ├── horizon: str (scalp/multihour/swing)
-├── confidence: float
-├── trace: {base, neuro, nash, halim}
-└── thought: SimpleNamespace(direction, score, verdict, confidence)
+├── thought: SimpleNamespace(direction, score, confidence, ...)
+└── trace: {base, neuro, nash, halim} (observer-only)
 ```
 
 ---
@@ -442,19 +430,26 @@ cli.py
         │     │     │     ├── brain/regime.py (RegimeDetector)
         │     │     │     ├── brain/cross_asset.py (CrossAsset)
         │     │     │     ├── brain/gate_advisor.py (GateAdvisor)
-        │     │     │     └── brain/neurons/ (NeuromorphicNetwork)
+        │     │     │     ├── brain/neurons/ (NeuromorphicNetwork)
+        │     │     │     └── brain/policy/  ←── DECISION GATES
+        │     │     │          ├── trading_policy.py (TradingPolicy)
+        │     │     │          ├── safety.py (SafetyProducer)
+        │     │     │          ├── governor.py (Governor)
+        │     │     │          └── probe_recovery.py (ProbeRecovery)
         │     │     ├── juli_feed.py (tick → snapshot conversion)
         │     │     └── brain/exit_checks.py → exit_ladder.py
         │     └── monitor/pipeline.py (PipelineMonitor)
         │
-        ├── brain/consolidation.py (System 2)
+        ├── brain/consolidation.py (System 2 — slow cortex, every ~30s)
+        │     ├── SafetyProducer (portfolio/safety policy_state owner)
         │     ├── brain/halim_adapter.py (HALIM)
         │     ├── brain/thinker.py (Thinker)
         │     ├── brain/news_sources.py (NewsFeed)
         │     ├── reflection/buffer.py (TradeBuffer)
         │     └── reflection/supervisor.py (LearningSupervisor)
         │
-        ├── hippocampus.py (Hippocampus — safety state)
-        ├── telemetry.py (TelemetryAPI — Flask :8080)
-        └── monitor/portfolio_risk.py (PortfolioRiskManager)
+        ├── hippocampus.py (Hippocampus — account PnL feed + position mirror)
+        ├── telemetry.py (TelemetryAPI — Flask :8080, observer of policy_state
+        │                + /verdicts from juli._recent_verdicts)
+        └── (no top-level decision organs: brain-first, all gates inside brain/)
 ```

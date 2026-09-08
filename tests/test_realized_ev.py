@@ -118,7 +118,9 @@ def test_on_trade_close_ironyclade_filter() -> None:
     brain.on_trade_close("T", won=False, pnl_pct=-0.02, direction=-1, source="backtest")
     assert brain._realized.total_trades == 1
     assert "backtest" not in _IRONYCLADE
-    assert _IRONYCLADE == frozenset({"real_trade", "ib_fill", "ib_paper", "reconciled_exit"})
+    assert _IRONYCLADE == frozenset(
+        {"real_trade", "ib_fill", "ib_paper", "reconciled_exit"}
+    )
 
 
 def test_on_trade_close_ib_fill_updates_realized() -> None:

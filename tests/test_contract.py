@@ -614,7 +614,9 @@ def test_R19_realized_ev_gate_integrated():
     # IRONYCLADE source filter must exist as a typed constant.
     from hanoon_prime.brain.config import _IRONYCLADE
 
-    assert _IRONYCLADE == frozenset({"real_trade", "ib_fill", "ib_paper", "reconciled_exit"})
+    assert _IRONYCLADE == frozenset(
+        {"real_trade", "ib_fill", "ib_paper", "reconciled_exit"}
+    )
 
 
 # ── R20: Tiered exits integrated ────────────────────────────────────────
