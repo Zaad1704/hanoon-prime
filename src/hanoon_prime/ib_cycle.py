@@ -371,6 +371,8 @@ class BotCycleMixin:
 
     def _can_trade(self, dec: dict[str, Any]) -> bool:
         """Check session and direction config before trading."""
+        if self._halted:
+            return False
         # Check direction mode
         side = dec.get("thought", {}).get("verdict", "BUY")
         if not TRADING_CONFIG.is_direction_allowed(side):
@@ -512,10 +514,10 @@ class BotCycleMixin:
             self._halt("consecutive_losses")
 
     def _halt(self, reason: str) -> None:
-        """Emergency halt — persist and shutdown."""
+        """Emergency halt — block new entries, never stop the bot."""
+        self._halted = True
         self.journal.append({"event": "halt", "reason": reason, "ts": time.time()})
         safety_halt(reason)
-        self._running = False
 
     def _cleanup(self, pnl: Any) -> None:
         """Shutdown all subsystems."""

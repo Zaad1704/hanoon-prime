@@ -52,6 +52,7 @@ class _FakeBot:
         entries: list[dict[str, Any]] | None = None,
     ) -> None:
         self.hippocampus = _FakeBrain(safety_enabled=safety_enabled)
+        self._halted: bool = False
         self.ib = MagicMock()
         self.ib.isConnected.return_value = True
         self.ib.positions.return_value = []
@@ -160,4 +161,21 @@ class TestSafetyNetToggle:
         code, body = _get(server, "/health")
         assert code == 200
         assert "safety_net_enabled" in body
+        assert "halted" in body
         assert body["connected"] is True
+
+    def test_post_resume_clears_halt(self, server):
+        """POST /safety-net {action: resume} clears halted state."""
+        bot = _FakeBot()
+        bot._halted = True
+        _H.bot = bot
+        code, body = _post(server, "/safety-net", {"action": "resume"})
+        assert code == 200
+        assert body["halted"] is False
+        assert bot._halted is False
+
+    def test_safety_net_status_includes_halted(self, server):
+        """GET /safety-net includes halted field."""
+        code, body = _get(server, "/safety-net")
+        assert code == 200
+        assert "halted" in body

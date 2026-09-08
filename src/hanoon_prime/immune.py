@@ -40,9 +40,9 @@ MAX_SPREAD_BPS: float = 5.0  # max bid/ask spread in basis points
 SHORT_ALLOWED: bool = True  # dual-screen: LONG + SHORT
 
 # ── Position sizing ───────────────────────────────────────────────────
-MAX_POSITION_NOTIONAL: float = 5_000.0  # $5,000 max per trade
-MAX_LOSS_PER_TRADE: float = 50.0  # $50 hard cap per trade
-MAX_CONCURRENT_POSITIONS: int = 3  # max open positions
+MAX_POSITION_NOTIONAL: float = 25_000.0  # $25,000 max per trade
+MAX_LOSS_PER_TRADE: float = 250.0  # $250 hard cap per trade
+MAX_CONCURRENT_POSITIONS: int = 30  # max open positions (brain decides)
 DAILY_LOSS_LIMIT: float = 200.0  # $200 daily loss → halt
 CONSECUTIVE_LOSSES_PAUSE: int = 3  # 3 consec losses → pause
 PAUSE_DURATION_MIN: int = 60  # pause duration in minutes

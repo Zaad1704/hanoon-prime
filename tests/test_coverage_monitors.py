@@ -316,9 +316,11 @@ class TestPortfolioRisk:
         assert mgr.get_risk_state()["equity_synced"] is True
 
     def test_max_positions_blocks(self):
-        pos = {s: {"value": 1000.0} for s in ["A", "B", "C", "D"]}
+        from hanoon_prime.immune import MAX_CONCURRENT_POSITIONS
+
+        pos = {f"T{i}": {"value": 1000.0} for i in range(MAX_CONCURRENT_POSITIONS)}
         mgr = self._mgr(holdings=pos)
-        assert mgr.pre_trade_risk_gate("E", 100.0)[0] is False
+        assert mgr.pre_trade_risk_gate("NEW", 100.0)[0] is False
 
     def test_drawdown_scales_and_blocks(self):
         mgr = PortfolioRiskManager()
@@ -337,17 +339,22 @@ class TestPortfolioRisk:
         assert mgr.pre_trade_risk_gate("TSLA", 6000.0)[0] is False
 
     def test_exposure_cap_blocks(self):
-        # Budget = MAX_POSITION_NOTIONAL x MAX_CONCURRENT_POSITIONS = $15k.
-        # Holding $15.5k = 103% of budget -> over the 100% exposure cap.
-        mgr = self._mgr(holdings={"TSLA": {"value": 15500.0}})
+        # Budget = MAX_POSITION_NOTIONAL x MAX_CONCURRENT_POSITIONS.
+        # Holding > budget -> over the 100% exposure cap.
+        from hanoon_prime.immune import MAX_CONCURRENT_POSITIONS, MAX_POSITION_NOTIONAL
+
+        budget = MAX_POSITION_NOTIONAL * MAX_CONCURRENT_POSITIONS
+        over = int(budget * 1.03)
+        under = int(budget * 0.93)
+        mgr = self._mgr(holdings={"TSLA": {"value": over}})
         allowed, reason = mgr.pre_trade_risk_gate("AAPL", 2000.0)
         assert allowed is False and reason == "exposure_cap"
         # 93% of budget is still allowed (cap is >= 100%)
-        mgr = self._mgr(holdings={"TSLA": {"value": 14000.0}})
+        mgr = self._mgr(holdings={"TSLA": {"value": under}})
         assert mgr.pre_trade_risk_gate("AAPL", 500.0)[0] is True
 
     def test_concentration_cap_blocks(self):
-        # Holding $2k of a $15k budget (exposure 13%); new $24k + held $2k
+        # Holding $2k of budget (exposure 13%); new $24k + held $2k
         # = 26% of the $100k equity > 25% concentration cap -> blocked.
         mgr = self._mgr(holdings={"TSLA": {"value": 2000.0}})
         allowed, reason = mgr.pre_trade_risk_gate("TSLA", 24000.0)

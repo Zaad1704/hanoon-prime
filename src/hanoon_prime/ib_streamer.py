@@ -225,7 +225,25 @@ class IBStreamer:
             pass
 
     def cancel_all(self) -> None:
-        """Cancel all MD + depth subscriptions."""
+        """Cancel all MD + depth subscriptions.
+
+        Suppress ib_insync's 'No reqId found' warnings when subscriptions
+        were already dropped by IB (reconnect, error, or server-side cancel).
+        The error is harmless — ib_insync logs it at ERROR level because it
+        can't find the reqId in its internal map after a disconnect.
+        """
+        ib_logger = __import__("logging").getLogger("ib_insync.ib")
+        prev_level = ib_logger.level
+        ib_logger.setLevel(__import__("logging").WARNING)
+        try:
+            self._cancel_mkt_subs()
+        finally:
+            ib_logger.setLevel(prev_level)
+        self.ticker_subs.clear()
+        self.depth_subs.clear()
+
+    def _cancel_mkt_subs(self) -> None:
+        """Cancel market data and depth subs (silences ib_insync warnings)."""
         for sub in self.ticker_subs.values():
             try:
                 self.ib.cancelMktData(sub)
@@ -236,5 +254,3 @@ class IBStreamer:
                 self.ib.cancelMktDepth(sub)
             except Exception:
                 pass
-        self.ticker_subs.clear()
-        self.depth_subs.clear()

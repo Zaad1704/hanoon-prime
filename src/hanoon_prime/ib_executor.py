@@ -102,6 +102,8 @@ class IBExecutor:
         if not self.ib.isConnected():
             return
         sweep_zombies(self.ib)
+        # Adopt orphan positions (not placed by this bot session)
+        self._adopt_orphan_positions(streamer)
         protect_position(
             self.ib,
             self.tracked_tickers,
@@ -111,13 +113,53 @@ class IBExecutor:
         )
         _brackets_from_trades(self.ib, self.tracked_tickers, self._brackets)
         ib_positions = read_ib_positions(self.ib, self.tracked_tickers, self._brackets)
-        for t in set(self._brackets) - set(ib_positions):
+        # Fire exit for any tracked position that IB no longer reports.
+        # Use _open_positions (not just _brackets) so adopted/orphan
+        # positions without OCA protection are still learned from.
+        for t in set(self.brain._open_positions) - set(ib_positions):
             self._record_exit(t, streamer)
         self.brain._open_positions = ib_positions
         now = time.monotonic()
         if now - self._last_snapshot >= 10.0:
             self._last_snapshot = now
             journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
+
+    def _adopt_orphan_positions(self, streamer: Any) -> None:
+        """Adopt IB positions not placed by this bot session.
+
+        Reads all IB positions, seeds synthetic entries for orphans,
+        adds them to tracked_tickers, subscribes market data, and
+        registers them for exit monitoring so the brain learns from
+        their full lifecycle.
+        """
+        try:
+            ib_positions = self.ib.positions()
+        except Exception:
+            return
+        for pos in ib_positions:
+            sym = pos.contract.symbol
+            qty = int(pos.position)
+            if qty == 0:
+                continue
+            if sym in self.last_thoughts:
+                continue
+            if sym not in self.tracked_tickers:
+                self.tracked_tickers.add(sym)
+                log.info("RECONCILE: adopted %s (qty=%d, avg=%.2f)",
+                         sym, qty, pos.avgCost)
+                try:
+                    streamer.subscribe(sym)
+                    streamer.seed_history(sym)
+                except Exception as e:
+                    log.debug("RECONCILE sub %s failed: %s", sym, e)
+            self.last_thoughts[sym] = {
+                "ticker": sym,
+                "direction": 1 if qty > 0 else -1,
+                "price": pos.avgCost,
+                "shares": abs(qty),
+                "synthetic": True,
+            }
+            self._horizons[sym] = "scalp"
 
     def _ping_ib(self) -> bool:
         """Verify IB connection is alive (safety before sync)."""

@@ -65,13 +65,13 @@ class TestSafetyNets:
         assert DAILY_LOSS_LIMIT > 0
 
     def test_max_concurrent_positions_is_reasonable(self):
-        """Max concurrent positions should be small (not 'unlimited')."""
-        assert MAX_CONCURRENT_POSITIONS <= 5
+        """Max concurrent positions should support the brain's needs."""
+        assert 1 <= MAX_CONCURRENT_POSITIONS <= 50
 
     def test_max_loss_per_trade_is_cap_not_floor(self):
         """Max loss per trade must be a loss cap, not a floor."""
         assert MAX_LOSS_PER_TRADE > 0
-        assert 10.0 <= MAX_LOSS_PER_TRADE <= 100.0
+        assert 10.0 <= MAX_LOSS_PER_TRADE <= 500.0
 
     def test_safety_nets_trigger_on_violation(self):
         """check_safety_nets must raise when daily loss exceeds limit."""

@@ -38,11 +38,10 @@ class IBStreamingBot(BotCycleMixin):
             raise ImportError("ib_insync required")
         self.ib: Any = ib.IB()
         self.account = account
-        # Safety nets ENABLED in live mode: check_entry_allowed() now enforces
-        # the immune.py constants (daily-loss, consecutive-loss pause, position
-        # cap) on every live entry. Previously constructed with
-        # safety_enabled=False — the nets never ran on the live path.
-        self.hippocampus = Hippocampus(safety_enabled=True)
+        # Safety nets OFF by default — user activates via webapp telemetry.
+        # When triggered, the bot blocks new entries but NEVER stops.
+        self.hippocampus = Hippocampus(safety_enabled=False)
+        self._halted: bool = False
         self.brain_state = BrainState()
         self.juli = JuliBrain(self.ib)
         repo_root = Path(__file__).resolve().parents[2]

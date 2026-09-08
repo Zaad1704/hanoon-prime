@@ -68,7 +68,7 @@ class _H(BaseHTTPRequestHandler):
             self._r(404, {"error": "not found", "path": self.path})
 
     def _handle_safety_net(self) -> None:
-        """Toggle safety net on/off."""
+        """Toggle safety net on/off, or resume from a halt."""
         action = self._body().get("action", "")
         if action in ("enable", "disable"):
             en = action == "enable"
@@ -77,8 +77,13 @@ class _H(BaseHTTPRequestHandler):
                 hp.safety_enabled = en
                 log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
             self._r(200, {"safety_net_enabled": en})
+        elif action == "resume":
+            if self.bot and hasattr(self.bot, "_halted"):
+                self.bot._halted = False
+                log.info("Halt CLEARED via webapp")
+            self._r(200, {"halted": getattr(self.bot, "_halted", False)})
         else:
-            self._r(400, {"error": 'expected {"action": "enable"|"disable"}'})
+            self._r(400, {"error": 'expected {"action": "enable"|"disable"|"resume"}'})
 
     def _handle_config(self) -> None:
         """GET: return config. POST: update config fields."""
@@ -166,6 +171,7 @@ class _H(BaseHTTPRequestHandler):
             "position_count": len(self._ib_positions()),
             "journal_entries": j.count() if j else 0,
             "safety_net_enabled": getattr(hp, "safety_enabled", False) if hp else False,
+            "halted": getattr(bot, "_halted", False) if bot else False,
             "uptime": time.time(),
         }
 
@@ -261,6 +267,7 @@ class _H(BaseHTTPRequestHandler):
             }
         return {
             "enabled": getattr(hp, "safety_enabled", False),
+            "halted": getattr(self.bot, "_halted", False) if self.bot else False,
             "daily_pnl": round(getattr(hp, "_daily_pnl", 0.0), 2),
             "limit": DAILY_LOSS_LIMIT,
             "consecutive_losses": getattr(hp, "_consecutive_losses", 0),
