@@ -60,6 +60,7 @@ class JuliBrain:
         self._lock_held = True
         self.brain.begin_entry_cycle()
         try:
+            self._data_preamble(streamer, snapshot, held_positions)
             universe = sorted(set(watch) | set(held_positions or ()))
             if not universe:
                 self._eval_off = 0
@@ -77,6 +78,17 @@ class JuliBrain:
             return exits, verdicts
         finally:
             self._lock_held = False
+
+    def _data_preamble(
+        self, streamer: Any, snapshot: Any, held_positions: set[str] | list[str]
+    ) -> None:
+        """Scanner + reference-feed upkeep (idempotent, tolerant)."""
+        self.feed.ensure_refs(streamer)
+        self._sync_and_scan()
+        if callable(snapshot):
+            self._maybe_screen(snapshot)
+        self.feed.fallback_regime()
+        self._maybe_allocate(set(held_positions or ()))
 
     def _eval_window(
         self,

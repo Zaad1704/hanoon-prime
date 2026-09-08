@@ -48,8 +48,15 @@ class TestRotatingEvalWindow:
         brain = JuliBrain.__new__(JuliBrain)
         brain.brain = _FakeBrain()
         brain.budget = SimpleNamespace(
-            get_all_tracked=lambda: {f"S{i}" for i in range(10)}
+            get_all_tracked=lambda: {f"S{i}" for i in range(10)},
+            allocate=lambda *a, **k: None,
         )
+        brain.feed = MagicMock()
+        brain.scanner = MagicMock()
+        brain.scanner.should_scan.return_value = False
+        brain.scanner.collect.return_value = []
+        brain._candidates = []
+        brain._last_alloc = 0.0
         brain._state = SimpleNamespace()
         brain._eval_off = 0
         brain._lock_held = False
