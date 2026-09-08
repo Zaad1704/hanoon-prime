@@ -477,6 +477,8 @@ class NeuromorphicBrain:
 
     def resume(self) -> None:
         """Clear the brain-side halt state (webapp resume command)."""
+        if self._consolidation is not None:
+            self._consolidation.safety.resume()
         policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
         if not isinstance(policy, dict):
             policy = dict(DEFAULT_POLICY_STATE)
@@ -490,7 +492,9 @@ class NeuromorphicBrain:
         )
 
     def set_safety_enabled(self, enabled: bool) -> None:
-        """Toggle safety via brain state so the slow cortex honors it."""
+        """Toggle safety via the producer so the slow cortex honors it."""
+        if self._consolidation is not None:
+            self._consolidation.safety.set_enabled(bool(enabled))
         policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
         if not isinstance(policy, dict):
             policy = dict(DEFAULT_POLICY_STATE)

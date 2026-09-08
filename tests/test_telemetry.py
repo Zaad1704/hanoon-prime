@@ -179,3 +179,100 @@ class TestSafetyNetToggle:
         code, body = _get(server, "/safety-net")
         assert code == 200
         assert "halted" in body
+
+
+def _policy_bot(policy: dict[str, Any] | None, verdicts: list[Any] | None = None):
+    """Build a _FakeBot whose juli.brain publishes policy_state/verdicts."""
+    bot = _FakeBot()
+
+    class _State:
+        def __init__(self, p: dict[str, Any] | None) -> None:
+            self.policy: dict[str, Any] = {"policy_state": p or {}}
+
+        def get(self, k: str, d: Any = None) -> Any:
+            return self.policy.get(k, d)
+
+        def update(self, **_k: Any) -> None:
+            return None
+
+    class _Brain:
+        def __init__(self, p: dict[str, Any] | None) -> None:
+            self.state = _State(p)
+            self.resume = MagicMock()
+            self.set_safety_enabled = MagicMock()
+
+        def snapshot(self) -> dict[str, Any]:
+            return {}
+
+    class _Juli:
+        def __init__(self, brain: _Brain, rv: list[Any] | None) -> None:
+            self.brain = brain
+            self._recent_verdicts = rv or []
+
+    bot.juli = _Juli(_Brain(policy), verdicts)
+    return bot
+
+
+class TestBrainBackedTelemetry:
+    """Task 11: telemetry reads policy_state + serves /verdicts."""
+
+    def test_health_reads_policy_state_when_present(self, server):
+        """GET /health reflects halted from the brain's policy_state."""
+        bot = _policy_bot({"halted": True, "authorized": False, "enabled": True})
+        _H.bot = bot
+        code, body = _get(server, "/health")
+        assert code == 200
+        assert body["halted"] is True
+        assert body["authorized"] is False
+
+    def test_resume_calls_brain_resume(self, server):
+        """POST /safety-net {action: resume} invokes the brain resume."""
+        bot = _policy_bot({"halted": True, "authorized": False})
+        _H.bot = bot
+        code, body = _post(server, "/safety-net", {"action": "resume"})
+        assert code == 200
+        bot.juli.brain.resume.assert_called_once()
+
+    def test_toggle_calls_brain_set_safety_enabled(self, server):
+        """POST /safety-net {action: enable} reaches the brain toggle."""
+        bot = _policy_bot({})
+        _H.bot = bot
+        code, body = _post(server, "/safety-net", {"action": "enable"})
+        assert code == 200
+        bot.juli.brain.set_safety_enabled.assert_called_once_with(True)
+
+    def test_verdicts_endpoint_lists_recent(self, server):
+        """GET /verdicts returns seeded Verdicts with action + reason."""
+        from hanoon_prime.brain.policy.verdict import Verdict
+
+        bot = _policy_bot(
+            {},
+            verdicts=[
+                Verdict(ticker="TSLA", action="ENTER", reason="admitted"),
+                Verdict(ticker="AAPL", action="VETOED", reason="sized_to_zero"),
+            ],
+        )
+        _H.bot = bot
+        code, body = _get(server, "/verdicts")
+        assert code == 200
+        assert body["count"] == 2
+        assert body["verdicts"][0]["ticker"] == "TSLA"
+        assert body["verdicts"][0]["action"] == "ENTER"
+        assert body["verdicts"][0]["reason"] == "admitted"
+
+    def test_risk_state_subset_keys(self, server):
+        """GET /risk returns the policy_state subset (no private fields)."""
+        bot = _policy_bot(
+            {
+                "equity": 100000.0,
+                "risk_scalar": 0.5,
+                "halted": True,
+                "pause_reason": "daily_loss_limit",
+            }
+        )
+        _H.bot = bot
+        code, body = _get(server, "/risk")
+        assert code == 200
+        assert body["risk_scalar"] == 0.5
+        assert "halted" not in body
+        assert "pause_reason" not in body

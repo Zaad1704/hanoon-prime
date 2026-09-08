@@ -30,6 +30,7 @@ ROUTES_GET = {
     "/risk": "_risk_state",
     "/config": "_config",
     "/halim": "_halim_state",
+    "/verdicts": "_verdicts",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -69,16 +70,26 @@ class _H(BaseHTTPRequestHandler):
             self._r(404, {"error": "not found", "path": self.path})
 
     def _handle_safety_net(self) -> None:
-        """Toggle safety net on/off, or resume from a halt."""
+        """Toggle safety net on/off, or resume from a halt (brain commands)."""
         action = self._body().get("action", "")
         if action in ("enable", "disable"):
             en = action == "enable"
-            hp = getattr(self.bot, "hippocampus", None) if self.bot else None
-            if hp is not None:
-                hp.safety_enabled = en
-                log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
-            self._r(200, {"safety_net_enabled": en})
+            brain = self._brain()
+            if brain is not None:
+                brain.set_safety_enabled(en)
+            else:
+                hp = getattr(self.bot, "hippocampus", None) if self.bot else None
+                if hp is not None:
+                    hp.safety_enabled = en
+            log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
+            self._r(200, {"safety_net_enabled": en, "halting": False})
         elif action == "resume":
+            brain = self._brain()
+            if brain is not None:
+                brain.resume()
+                policy = self._policy_state()
+                self._r(200, {"halted": policy.get("halted", False)})
+                return
             if self.bot and hasattr(self.bot, "_halted"):
                 self.bot._halted = False
                 log.info("Halt CLEARED via webapp")
@@ -148,6 +159,19 @@ class _H(BaseHTTPRequestHandler):
     def _ib(self) -> Any:
         return getattr(self.bot, "ib", None) if self.bot else None
 
+    def _brain(self) -> Any:
+        """NeuromorphicBrain instance (decision state owner) or None."""
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        return getattr(juli, "brain", None) if juli else None
+
+    def _policy_state(self) -> dict[str, Any]:
+        """policy_state published by the slow cortex (or {} when absent)."""
+        brain = self._brain()
+        if brain is None:
+            return {}
+        policy = brain.state.get("policy_state")
+        return policy if isinstance(policy, dict) else {}
+
     def _ib_positions(self) -> list[Any]:
         ib = self._ib()
         return list(ib.positions()) if ib else []
@@ -159,6 +183,7 @@ class _H(BaseHTTPRequestHandler):
         con = ib.isConnected() if ib else False
         j = getattr(bot, "journal", None)
         hp = getattr(bot, "hippocampus", None)
+        policy = self._policy_state()
         ts_keys = (
             list(bot.streamer.ticker_subs.keys())
             if bot and hasattr(bot.streamer.ticker_subs, "keys")
@@ -171,8 +196,14 @@ class _H(BaseHTTPRequestHandler):
             "positions": [p.contract.symbol for p in self._ib_positions()],
             "position_count": len(self._ib_positions()),
             "journal_entries": j.count() if j else 0,
-            "safety_net_enabled": getattr(hp, "safety_enabled", False) if hp else False,
-            "halted": getattr(bot, "_halted", False) if bot else False,
+            "safety_net_enabled": policy.get(
+                "enabled",
+                getattr(hp, "safety_enabled", False) if hp else False,
+            ),
+            "halted": policy.get("halted", getattr(bot, "_halted", False)),
+            "authorized": policy.get("authorized", True),
+            "pause_reason": policy.get("pause_reason", ""),
+            "last_beat": round(float(getattr(bot, "_last_beat", 0.0)), 1),
             "uptime": time.time(),
         }
 
@@ -220,13 +251,21 @@ class _H(BaseHTTPRequestHandler):
         return snap
 
     def _risk_state(self) -> dict[str, Any]:
-        """Portfolio risk snapshot (slow cortex publishes policy_state)."""
-        juli = getattr(self.bot, "juli", None) if self.bot else None
-        brain = getattr(juli, "brain", None) if juli else None
-        if brain is None:
-            return {}
-        policy = brain.state.get("policy_state")
-        return dict(policy) if isinstance(policy, dict) else {}
+        """Portfolio risk snapshot (policy_state, observer-safe subset)."""
+        policy = self._policy_state()
+        keep = (
+            "equity",
+            "equity_synced",
+            "drawdown",
+            "exposure",
+            "stress_mode",
+            "risk_scalar",
+            "position_count",
+            "max_positions",
+            "daily_pnl",
+            "consecutive_losses",
+        )
+        return {k: policy.get(k) for k in keep if k in policy}
 
     def _brain_state(self) -> dict[str, Any]:
         juli = getattr(self.bot, "juli", None) if self.bot else None
@@ -261,20 +300,20 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _safety_net_status(self) -> dict[str, Any]:
+        policy = self._policy_state()
         hp = getattr(self.bot, "hippocampus", None) if self.bot else None
-        if hp is None:
-            return {
-                "enabled": False,
-                "daily_pnl": 0.0,
-                "limit": DAILY_LOSS_LIMIT,
-                "consecutive_losses": 0,
-            }
         return {
-            "enabled": getattr(hp, "safety_enabled", False),
-            "halted": getattr(self.bot, "_halted", False) if self.bot else False,
-            "daily_pnl": round(getattr(hp, "_daily_pnl", 0.0), 2),
+            "enabled": policy.get(
+                "enabled", getattr(hp, "safety_enabled", False) if hp else False
+            ),
+            "halted": policy.get("halted", getattr(self.bot, "_halted", False)),
+            "authorized": policy.get("authorized", True),
+            "pause_reason": policy.get("pause_reason", ""),
+            "daily_pnl": policy.get("daily_pnl", getattr(hp, "_daily_pnl", 0.0)),
             "limit": DAILY_LOSS_LIMIT,
-            "consecutive_losses": getattr(hp, "_consecutive_losses", 0),
+            "consecutive_losses": policy.get(
+                "consecutive_losses", getattr(hp, "_consecutive_losses", 0)
+            ),
         }
 
     def _handle_flatten(self) -> None:
@@ -327,6 +366,15 @@ class _H(BaseHTTPRequestHandler):
             "halim_last_insight": s.get("halim_last_insight", {}),
             "halim_recommendations": s.get("halim_recommendations", []),
         }
+
+    def _verdicts(self) -> dict[str, Any]:
+        """Recent brain Verdicts (observer view of decision state)."""
+        juli = getattr(self.bot, "juli", None) if self.bot else None
+        rv = getattr(juli, "_recent_verdicts", None) if juli else None
+        recent: list[dict[str, Any]] = []
+        if rv:
+            recent = [v.to_dict() for v in list(rv)[-50:]]
+        return {"count": len(recent), "verdicts": recent}
 
     def _journal(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():
