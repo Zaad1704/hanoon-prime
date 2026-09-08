@@ -23,16 +23,37 @@ from .telemetry import TelemetryAPI
 log = logging.getLogger(__name__)
 
 
+class _CleanFormatter(logging.Formatter):
+    """Strip the package prefix from logger names and format cleanly.
+
+    hanoon_prime.juli → juli, hanoon_prime.ib_cycle → ib_cycle, etc.
+    """
+
+    _PKG = "hanoon_prime."
+
+    def format(self, record: logging.LogRecord) -> str:
+        name = record.name
+        if name.startswith(self._PKG):
+            name = name[len(self._PKG):]
+        record.name = name
+        return super().format(record)
+
+
 def _setup_logging() -> None:
-    """Configure logging — suppress verbose ib_insync messages."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    """Configure logging with clean formatting and noise suppression."""
+    fmt = _CleanFormatter(
+        fmt="%(asctime)s.%(msecs)03d  %(levelname)-5s  %(name)-16s  %(message)s",
+        datefmt="%H:%M:%S",
     )
-    # Suppress verbose ib_insync.wrapper messages (portfolio updates, etc.)
-    logging.getLogger("ib_insync.wrapper").setLevel(logging.WARNING)
-    # Suppress ib_insync internal messages
-    logging.getLogger("ib_insync.ib").setLevel(logging.WARNING)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(fmt)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    # ib_insync noise: suppress verbose wrappers + cancelMktData Ticker dumps
+    logging.getLogger("ib_insync.wrapper").setLevel(logging.CRITICAL)
+    logging.getLogger("ib_insync.ib").setLevel(logging.CRITICAL)
+    logging.getLogger("ib_insync.client").setLevel(logging.WARNING)
 
 
 def main() -> None:
