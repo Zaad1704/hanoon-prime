@@ -7,11 +7,15 @@ Slow path: ConsolidationEngine for background work.
 from __future__ import annotations
 
 import logging
+import math
+import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from ..cortex import Cortex
 from ..hippocampus import Hippocampus
+from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from ..types import FillInfo
 from . import horizons
 from .affective import Affective
@@ -42,12 +46,17 @@ from .meta_label import MetaLabelModel
 from .meta_label import feature_vector as meta_features
 from .neurons.bridge import NeuromorphicBridge
 from .neurons.sleep import SleepReplayEngine, SleepResult
+from .policy.governor import Governor
+from .policy.portfolio_gate import portfolio_gate, scale_shares
+from .policy.trading_policy import TRADING_CONFIG
+from .policy.verdict import ENTER, HOLD, VETOED, Verdict
+from .probe_recovery import ProbeRecovery
 from .realized_ev import RealizedStats
 from .reflection import Reflector, TradeClose
 from .regime import RegimeDetector
 from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
-from .shared_state import BrainState
+from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .strategy_genome import StrategyGenome
 
 log = logging.getLogger(__name__)
@@ -93,6 +102,9 @@ class NeuromorphicBrain:
         self._exit_ladder = ExitLadder(self.exits)
         self._reflector = Reflector(self.memory, self.episodic)
         self._advisor = GateAdvisor(realized=self._realized)
+        self.governor = Governor()
+        self.probe = ProbeRecovery()
+        self.trading_policy = TRADING_CONFIG
         self._init_strategy_organs()
         self._neuromorphic: Optional[NeuromorphicBridge] = None
         self._sleep_engine: Optional[SleepReplayEngine] = None
@@ -177,6 +189,282 @@ class NeuromorphicBrain:
             "regime": "refractory",
             "trace": {},
         }
+
+    def begin_entry_cycle(self) -> None:
+        """Start one entry cycle: fresh governor budget (called by juli)."""
+        self.governor.begin_cycle()
+
+    def decide_entry(
+        self,
+        ticker: str,
+        snap: dict[str, Any] | None,
+        open_positions: set[str] | dict[str, Any],
+        session: str = "rth",
+    ) -> Verdict:
+        """THE single entry decision point (fast path, policy from snapshot)."""
+        veto = self._check_snapshot_valid(snap)
+        if veto:
+            return Verdict(ticker=ticker, action=VETOED, reason=veto, stage="validity")
+        assert snap is not None
+        self.state.set_latest_prices(snap.get("prices") or [])
+        outcome = self._score_candidate(ticker, snap, len(open_positions))
+        if isinstance(outcome, Verdict):
+            return outcome
+        result, bars, thought = outcome
+        policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
+        if not isinstance(policy, dict):
+            policy = dict(DEFAULT_POLICY_STATE)
+        admitted = self._apply_fast_gates(ticker, snap, thought, policy, session)
+        if admitted is not None:
+            return admitted
+        ok, reason = self.governor.may_enter(ticker)
+        if not ok:
+            return Verdict(
+                ticker=ticker, action=VETOED, reason=reason, stage="governor"
+            )
+        return self._admit_verdict(
+            ticker, snap, result, bars, thought, policy, len(open_positions)
+        )
+
+    def _check_snapshot_valid(self, snap: dict[str, Any] | None) -> str:
+        """Return a veto reason when the snapshot is unusable, else ''."""
+        if snap is None or not isinstance(snap, dict):
+            return "no_data"
+        prices = snap.get("prices") or []
+        if len(prices) < 20:
+            return "no_data"
+        for key in ("last", "bid", "ask", "mid"):
+            value = snap.get(key)
+            if value is not None and isinstance(value, (int, float)):
+                if math.isnan(float(value)):
+                    return "no_data"
+        return ""
+
+    def _score_candidate(
+        self, ticker: str, snap: dict[str, Any], open_count: int
+    ) -> tuple[dict[str, Any], dict[str, Any], SimpleNamespace] | Verdict:
+        """Score through the brain; Verdict short-circuit on failure."""
+        prices = snap.get("prices") or []
+        t0 = time.perf_counter_ns()
+        try:
+            alpha = compute_alpha_from_snap(snap)
+            bars = entry_bars(snap, prices, self.state.get("regime_label", "unknown"))
+            result = self.tick(
+                alpha,
+                ticker,
+                entry_price=float(prices[-1]),
+                atr=float(snap.get("atr", 1.0)),
+                open_positions=open_count,
+                bars=bars,
+            )
+            check_tick_latency(t0, ticker)
+        except Exception as e:
+            self.note_eval_failure(ticker, e)
+            log.warning("Entry eval failed for %s: %s", ticker, e)
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason="eval_error",
+                stage="pipeline",
+            )
+        thought_raw = result.get("thought")
+        if isinstance(thought_raw, SimpleNamespace):
+            direction = int(thought_raw.direction)
+            score = float(getattr(thought_raw, "score", 0.0))
+            confidence = float(getattr(thought_raw, "confidence", 0.5))
+        else:
+            direction = int(result.get("direction", 0))
+            score = float(result.get("score", 0.0))
+            confidence = float(result.get("confidence", 0.5))
+        if direction == 0:
+            return Verdict(
+                ticker=ticker, action=HOLD, reason="no_signal", stage="pipeline"
+            )
+        thought = SimpleNamespace(
+            direction=direction, score=score, confidence=confidence
+        )
+        return result, bars, thought
+
+    def _apply_fast_gates(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        thought: SimpleNamespace,
+        policy: dict[str, Any],
+        session: str,
+    ) -> Verdict | None:
+        """Session/direction/penny/safety gates; None = admitted through."""
+        if not self.trading_policy.is_session_active(session):
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason="session_disabled",
+                stage="trading_policy",
+            )
+        side = "BUY" if thought.direction > 0 else "SELL"
+        if not self.trading_policy.is_direction_allowed(side):
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason="direction_rejected",
+                stage="trading_policy",
+            )
+        price = float(snap.get("last") or 0.0)
+        cleared, penalty = self.trading_policy.is_penny_bar_cleared(
+            ticker, price, float(thought.score)
+        )
+        if not cleared:
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason=penalty,
+                stage="trading_policy",
+            )
+        if policy.get("authorized", True) is False:
+            probe = self.probe.maybe_probe(
+                float(thought.score),
+                float(snap.get("bid", 0.0)),
+                float(snap.get("ask", 0.0)),
+                int(policy.get("consecutive_losses", 0)),
+            )
+            if probe:
+                log.info("PROBE %s: recovery entry admitted", ticker)
+                return Verdict(
+                    ticker=ticker,
+                    action=ENTER,
+                    reason="probe_recovery",
+                    stage="probe_recovery",
+                    direction=thought.direction,
+                    score=float(thought.score),
+                )
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason=str(policy.get("pause_reason") or "halted"),
+                stage="safety",
+            )
+        return None
+
+    def _admit_verdict(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        result: dict[str, Any],
+        bars: dict[str, Any],
+        thought: SimpleNamespace,
+        policy: dict[str, Any],
+        open_count: int,
+    ) -> Verdict:
+        """Governor admitted: size, portfolio-gate, scale, build ENTER."""
+        sizing = result.get("sizing")
+        if not isinstance(sizing, SizingResult):
+            sizing = self._size_entry(ticker, snap, bars, thought, open_count)
+        if sizing is None or not sizing.risk_pass or int(sizing.shares) <= 0:
+            return Verdict(
+                ticker=ticker, action=HOLD, reason="not_sized", stage="pipeline"
+            )
+        prices = snap.get("prices") or []
+        price = float(snap.get("last") or snap.get("mid") or prices[-1])
+        notional = float(sizing.shares) * price
+        ok, reason = portfolio_gate(ticker, notional, policy)
+        if not ok:
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason=reason,
+                stage="portfolio_risk",
+            )
+        shares = scale_shares(
+            int(sizing.shares),
+            price,
+            float(policy.get("risk_scalar", 1.0)),
+            float(policy.get("exposure", 0.0)),
+        )
+        if shares <= 0:
+            return Verdict(
+                ticker=ticker,
+                action=VETOED,
+                reason="sized_to_zero",
+                stage="portfolio_risk",
+            )
+        return self._build_enter(ticker, thought, sizing, shares)
+
+    def _size_entry(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        bars: dict[str, Any],
+        thought: SimpleNamespace,
+        open_count: int,
+    ) -> SizingResult:
+        """Size an admitted candidate from thought (mirrors _maybe_size)."""
+        prices = snap.get("prices") or []
+        horizon = self._classify_horizon(bars)
+        patience = horizons.params_for(horizon).patience
+        if abs(float(thought.score)) <= self.dynamics.threshold * patience:
+            return SizingResult()
+        return self.risk.evaluate(
+            float(thought.score),
+            float(thought.confidence),
+            float(prices[-1]),
+            float(snap.get("atr", 1.0)),
+            open_count,
+            horizon=horizon,
+        )
+
+    @staticmethod
+    def _build_enter(
+        ticker: str,
+        thought: SimpleNamespace,
+        sizing: SizingResult,
+        shares: int,
+    ) -> Verdict:
+        """Log the admission and build the ENTER Verdict."""
+        log.info(
+            "THINK %s %s score=%.3f shares=%d",
+            ticker,
+            "BUY" if thought.direction > 0 else "SELL",
+            float(thought.score),
+            shares,
+        )
+        return Verdict(
+            ticker=ticker,
+            action=ENTER,
+            reason="admitted",
+            stage="entry",
+            sizing=sizing,
+            stop=sizing.stop_price,
+            target=sizing.target_price,
+            horizon=getattr(sizing, "horizon", "scalp"),
+            score=float(thought.score),
+            direction=int(thought.direction),
+            thought=thought,
+        )
+
+    def note_entry(self, ticker: str) -> None:
+        """Register an executed entry with the governor (post-fill)."""
+        self.governor.note_entry(ticker)
+
+    def resume(self) -> None:
+        """Clear the brain-side halt state (webapp resume command)."""
+        policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
+        if not isinstance(policy, dict):
+            policy = dict(DEFAULT_POLICY_STATE)
+        self.state.update(
+            policy_state={
+                **policy,
+                "authorized": True,
+                "halted": False,
+                "pause_reason": "",
+            }
+        )
+
+    def set_safety_enabled(self, enabled: bool) -> None:
+        """Toggle safety via brain state so the slow cortex honors it."""
+        policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
+        if not isinstance(policy, dict):
+            policy = dict(DEFAULT_POLICY_STATE)
+        self.state.update(policy_state={**policy, "enabled": bool(enabled)})
 
     def _get_regime_data(self) -> tuple[float, str, str, float, float, float]:
         """Get regime modifiers from shared state."""
@@ -761,7 +1049,6 @@ class NeuromorphicBrain:
             }
         return result
 
-
     def reset_learning(self) -> None:
         """Reset all learning state to clean defaults.
 
@@ -789,6 +1076,7 @@ class NeuromorphicBrain:
         self._advisor = GateAdvisor()
         # Reset indicator weights to immune defaults
         from ..immune import INDICATOR_WEIGHTS
+
         self.memory.set_weights(INDICATOR_WEIGHTS)
         self.cortex.set_weights(INDICATOR_WEIGHTS)
         # Clear decision context
