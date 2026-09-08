@@ -27,6 +27,7 @@ from .monitor.portfolio_risk import PortfolioRiskManager
 from .monitor.sleep_manager import SleepManager
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
+STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
@@ -111,7 +112,11 @@ class BotCycleMixin:
         if ok:
             self._gw_was_connected = True
             self._gw_attempts = 0
-            log.warning("GATEWAY: reconnected — re-subscribing streams")
+            # History seeded pre-disconnect is stale — force re-seed with
+            # positions first (they take priority in _sync_subs ordering).
+            self.__dict__.setdefault("_seeded_subs", set()).clear()
+            self.streamer.touch(set(self.hippocampus._open_positions))
+            log.warning("GATEWAY: reconnected — re-seeding position history")
         return ok
 
     def _resubscribe_all(self) -> None:
@@ -243,6 +248,7 @@ class BotCycleMixin:
             for tk in self.ib.pendingTickers()
             if self.streamer.update_bar(tk.contract.symbol if tk.contract else "")
         )
+        self._drain_event_exits()
         for es in exit_s:
             t = es["ticker"]
             if t not in self._closing:
@@ -263,13 +269,8 @@ class BotCycleMixin:
         if elapsed < meta.poll:
             time.sleep(meta.poll - elapsed)
         self._heartbeat()
-        log.info(
-            "CYCLE bars=%d open=%d d=%d x=%d",
-            self._last_bars,
-            len(self.hippocampus._open_positions),
-            len(decisions),
-            len(exit_s),
-        )
+        npos = len(self.hippocampus._open_positions)
+        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(decisions), len(exit_s))
 
     def _sync_portfolio_risk(self) -> None:
         """Feed IB-reported equity into the portfolio risk manager (throttled).
@@ -306,24 +307,23 @@ class BotCycleMixin:
             log.debug("Portfolio risk sync skipped: %s", e)
 
     def _sync_subs(self) -> None:
-        """Sync subscriptions with scanner and open positions.
+        """Sync subscriptions: async mkt data for all, one seed per cycle.
 
-        Fast path: reqMktData is async, so ALL missing tickers subscribe
-        immediately. Slow path: history seeding (blocking reqHistoricalData
-        + sleep) runs ONE ticker per cycle so the loop never stalls —
-        position monitoring and entry evaluation keep running every cycle.
+        GC unsubscribes stale scanner tickers to free MD lines.
+        Positions are always touched (never collected).
         """
         tracked = self.juli.budget.get_all_tracked()
         scanner = {c.symbol for c in self.juli._candidates[:20]}
         needed = tracked | scanner | set(self.hippocampus._open_positions.keys())
         self.executor.tracked_tickers = tracked
+        self.streamer.touch(needed)
         missing = [s for s in sorted(needed) if s not in self.streamer.ticker_subs]
-        # Async market data for everything missing — no cycle stall.
         for s in missing:
             try:
                 self.streamer.subscribe(s)
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
+        self._gc_stale_subs()
         # Seed history one ticker per cycle (blocking call kept out of
         # the hot path); positions take priority over scanner candidates.
         seeded = self.__dict__.setdefault("_seeded_subs", set())
@@ -340,6 +340,20 @@ class BotCycleMixin:
                 seeded.add(s)
             except Exception as e:
                 log.debug("Seed %s fail: %s", s, e)
+
+    def _gc_stale_subs(self) -> None:
+        """Unsubscribe tickers not seen in STALE_SUB_SECS (frees MD lines)."""
+        now = time.time()
+        stale = [
+            t
+            for t, seen in self.streamer.last_seen.items()
+            if now - seen > STALE_SUB_SECS
+        ]
+        for t in stale:
+            if t in set(self.hippocampus._open_positions):
+                self.streamer.touch({t})  # positions are never collected
+                continue
+            self.streamer.unsubscribe(t)
 
     def _check_manual_flatten(self) -> bool:
         """Check if webapp requested a manual flatten."""
@@ -400,8 +414,9 @@ class BotCycleMixin:
         """Check session and direction config before trading."""
         if self._halted:
             return False
-        # Check direction mode
-        side = dec.get("thought", {}).get("verdict", "BUY")
+        # Check direction mode (thought is a SimpleNamespace, not dict)
+        thought = dec.get("thought")
+        side = getattr(thought, "verdict", "BUY") if thought else "BUY"
         if not TRADING_CONFIG.is_direction_allowed(side):
             log.debug(
                 "SKIP %s direction=%s mode=%s",
@@ -489,9 +504,46 @@ class BotCycleMixin:
         )
         self.executor.last_thoughts[t] = dec["thought"]
         self.juli.brain.register_position(t, exec_pack["price"], horizon=horizon)
+        self._attach_position_watchers(t)
 
-    def _reflect_closed(self) -> None:
-        """Route closed trades to neuromorphic brain for learning."""
+    def _attach_position_watchers(self, ticker: str) -> None:
+        """Attach tick-driven exit watcher + per-position PnL stream.
+
+        The watcher checks the bracket stop level on every tick (IB push,
+        sub-cycle latency) and enqueues an exit signal — the main cycle
+        drains it. Never blocks the socket thread.
+        """
+        if getattr(self, "_watched", None) is None:
+            self._watched: set[str] = set()
+        if ticker in self._watched:
+            return
+        self._watched.add(ticker)
+        brackets = self.executor._brackets
+        account = getattr(self, "account", "")
+
+        def check(t: str, last: float, _tk: Any) -> str | None:
+            """Return exit reason if stop breached, else None."""
+            levels = brackets.get(t)
+            if levels is None:
+                return None
+            stop, _target = levels
+            return "hard_stop_breach" if last <= stop else None
+
+        self.streamer.attach_exit_watcher(ticker, check)
+        self.streamer.watch_pnl_single(ticker, account)
+
+    def _drain_event_exits(self) -> None:
+        """Process exit signals queued by tick watchers (non-blocking)."""
+        for sig in self.streamer.drain_signals():
+            if sig.get("type") != "exit":
+                continue
+            t = sig["ticker"]
+            if t in self._closing or t not in self.hippocampus._open_positions:
+                continue
+            self._closing.add(t)
+            self.executor.close_position(t, self.streamer)
+            self._exit_reasons[t] = sig.get("reason", "event_exit")
+            log.info("EXIT %s (event): %s", t, sig.get("reason", ""))
         for trade in self.executor.get_newly_closed_trades():
             won = trade["pnl"] > 0
             source = trade.get("source", "ib_fill")
@@ -506,6 +558,8 @@ class BotCycleMixin:
                 ],
             )
             self._closing.discard(trade["ticker"])
+            self._watched.discard(trade["ticker"])
+            self.streamer.unwatch_pnl_single(trade["ticker"])
             log.info(
                 "REFLECT %s %s pnl=%.4f src=%s",
                 trade["ticker"],

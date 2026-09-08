@@ -7,6 +7,7 @@ Tracks executions and commissions for journal carbon copy.
 from __future__ import annotations
 
 import logging
+import queue
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -86,6 +87,83 @@ class IBStreamer:
         self._minutely: dict[str, list[Any]] = {}
         self.executions: list[dict[str, Any]] = []
         self.commissions: dict[str, float] = {}
+        self.last_seen: dict[str, float] = {}  # per-sub freshness (GC input)
+        # Event-driven signals: producers (tick/PnL callbacks on the IB
+        # socket thread) enqueue; the main cycle drains. Must stay cheap.
+        self.signal_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        self._pnl_singles: dict[str, Any] = {}
+
+    def attach_exit_watcher(self, ticker: str, check: Any) -> None:
+        """Push exit signals on every tick for an open position.
+
+        `check(ticker, last_price, tk)` returns a reason string or None.
+        Runs on the IB socket thread — enqueue only, no blocking work.
+        """
+        tk = self.ticker_subs.get(ticker)
+        if tk is None:
+            return
+
+        def _on_tick(_t: Any) -> None:
+            try:
+                last = float(_t.last or _t.close or _t.bid or 0.0)
+                if last <= 0:
+                    return
+                reason = check(ticker, last, _t)
+                if reason:
+                    self.signal_queue.put(
+                        {"type": "exit", "ticker": ticker, "reason": reason}
+                    )
+            except Exception as exc:
+                log.debug("exit watcher %s error: %s", ticker, exc)
+
+        tk.updateEvent += _on_tick
+
+    def watch_pnl_single(self, ticker: str, account: str) -> None:
+        """Stream per-position unrealized P&L (IB push, not polled)."""
+        if ticker in self._pnl_singles:
+            return
+        try:
+            self._pnl_singles[ticker] = self.ib.reqPnLSingle(account, "", ticker)
+        except Exception as exc:
+            log.debug("reqPnLSingle %s failed: %s", ticker, exc)
+
+    def unwatch_pnl_single(self, ticker: str) -> None:
+        sub = self._pnl_singles.pop(ticker, None)
+        if sub is not None:
+            try:
+                self.ib.cancelPnLSingle(sub)
+            except Exception as exc:
+                log.debug("cancelPnLSingle %s failed: %s", ticker, exc)
+
+    def drain_signals(self) -> list[dict[str, Any]]:
+        """Drain all queued signals (main cycle, non-blocking)."""
+        out: list[dict[str, Any]] = []
+        while True:
+            try:
+                out.append(self.signal_queue.get_nowait())
+            except queue.Empty:
+                return out
+
+    def touch(self, tickers: set[str]) -> None:
+        """Mark tickers as wanted now (keeps them alive against GC)."""
+        now = time.time()
+        for t in tickers:
+            self.last_seen[t] = now
+
+    def unsubscribe(self, ticker: str) -> None:
+        """Cancel one subscription and drop its state (frees an MD line)."""
+        sub = self.ticker_subs.pop(ticker, None)
+        if sub is not None:
+            try:
+                self.ib.cancelMktData(sub)
+            except Exception as exc:
+                log.debug("cancelMktData %s failed: %s", ticker, exc)
+        self.depth_subs.pop(ticker, None)
+        self.contracts.pop(ticker, None)
+        self.buffers.pop(ticker, None)
+        self._minutely.pop(ticker, None)
+        self.last_seen.pop(ticker, None)
+        log.info("Unsubscribed %s (GC)", ticker)
 
     def subscribe(self, ticker: str) -> None:
         """Subscribe to live market data + order book depth."""
