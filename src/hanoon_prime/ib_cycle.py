@@ -8,6 +8,7 @@ that IBStreamingBot mixes in. Also provides connect helpers.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -425,12 +426,8 @@ class BotCycleMixin:
 
     def _exec_decision(self, dec: dict[str, Any]) -> None:
         """Execute an entry decision through IB."""
-        import math
-
         tk = self.streamer.ticker_subs.get(dec["ticker"])
-        if tk is None or not tk.hasBidAsk:
-            return
-        if math.isnan(tk.bid) or math.isnan(tk.ask):
+        if tk is None or not tk.hasBidAsk or math.isnan(tk.bid) or math.isnan(tk.ask):
             return
         t = dec["ticker"]
         if not self.hippocampus.check_entry_allowed():
