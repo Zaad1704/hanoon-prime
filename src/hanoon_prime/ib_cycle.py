@@ -28,6 +28,7 @@ from .monitor.sleep_manager import SleepManager
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
+CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
@@ -266,8 +267,13 @@ class BotCycleMixin:
             self.hippocampus._daily_pnl = daily
         self._sync_portfolio_risk()
         elapsed = time.monotonic() - meta.started
-        if elapsed < meta.poll:
-            time.sleep(meta.poll - elapsed)
+        remaining = meta.poll - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        else:
+            # Cycle overran poll — enforce minimum gap so iterations
+            # don't run back-to-back without a breathing space.
+            time.sleep(CYCLE_FLOOR)
         self._heartbeat()
         npos = len(self.hippocampus._open_positions)
         log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(decisions), len(exit_s))
