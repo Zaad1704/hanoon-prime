@@ -12,8 +12,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from ._ib_sync import read_portfolio
 from ._telegram import safety_halt, shutdown
 from .brain.horizons import holds_through_close
+from .brain.probe_recovery import probe_recovery as _PROBE_RECOVERY
 from .config import TRADING_CONFIG
 from .immune import (
     CONSECUTIVE_LOSSES_PAUSE,
@@ -281,8 +283,21 @@ class BotCycleMixin:
                 (float(i.value) for i in summary if i.tag == "NetLiquidation"),
                 0.0,
             )
-            if net_liq > 0:
-                _PORTFOLIO_RISK.update(net_liq, {})
+            _PORTFOLIO_RISK.update_equity(net_liq)
+            _PORTFOLIO_RISK.update_positions(read_portfolio(self.ib))
+            giveback = _PORTFOLIO_RISK.check_portfolio_giveback()
+            for t in giveback.tickers:
+                if t not in self._closing:
+                    self._closing.add(t)
+                    self._exit_reasons[t] = "portfolio_giveback"
+                    self.executor.close_position(t, self.streamer)
+                    log.warning(
+                        "GIVEBACK EXIT %s (fade=%.0f%% peak=$%.0f now=$%.0f)",
+                        t,
+                        giveback.fade * 100,
+                        giveback.peak,
+                        giveback.unrealized,
+                    )
         except Exception as e:
             log.debug("Portfolio risk sync skipped: %s", e)
 
@@ -373,6 +388,39 @@ class BotCycleMixin:
             return False
         return True
 
+    def _portfolio_gate_and_size(
+        self, t: str, tk: Any, dec: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Portfolio risk gate + size adjustment (rebuild port).
+
+        Returns the (possibly resized) sizing dict to execute, or None
+        when the entry is blocked or sized to zero.
+        """
+        sizing = dec.get("sizing")
+        if sizing is None or getattr(sizing, "shares", 0) <= 0:
+            log.debug("SKIP %s sizing=0", t)
+            return None
+        price = float((tk.bid + tk.ask) * 0.5)
+        shares = int(sizing.shares)
+        allowed, reason = _PORTFOLIO_RISK.pre_trade_risk_gate(t, abs(shares * price))
+        if not allowed:
+            log.info("SKIP %s portfolio_risk (%s)", t, reason)
+            return None
+        adj = _PORTFOLIO_RISK.adjust_size(shares, price)
+        if adj != shares:
+            log.info(
+                "SIZE %s %d->%d (scalar=%.2f)",
+                t,
+                shares,
+                adj,
+                _PORTFOLIO_RISK._risk_scalar,
+            )
+            sizing.shares = adj
+            if adj <= 0:
+                log.info("SKIP %s sized_to_zero", t)
+                return None
+        return {"sizing": sizing, "price": price}
+
     def _exec_decision(self, dec: dict[str, Any]) -> None:
         """Execute an entry decision through IB."""
         tk = self.streamer.ticker_subs.get(dec["ticker"])
@@ -380,34 +428,38 @@ class BotCycleMixin:
             return
         t = dec["ticker"]
         if not self.hippocampus.check_entry_allowed():
-            log.info("SKIP %s safety", t)
-            return
+            # Death-spiral PROBE recovery (off-by-default; on in production):
+            # one quality-gated entry bypasses the halt to re-establish edge
+            # and resume learning. check_entry_allowed's halt is UNCHANGED
+            # while PROBE_RECOVERY_ENABLED is False.
+            thought = dec.get("thought")
+            if _PROBE_RECOVERY.maybe_probe(
+                getattr(thought, "score", 0.0),
+                float(tk.bid),
+                float(tk.ask),
+                self.hippocampus.consecutive_losses,
+            ):
+                log.info("PROBE %s death_spiral_recovery", t)
+            else:
+                log.info("SKIP %s safety", t)
+                return
         if t in self.hippocampus._open_positions:
             log.info("SKIP %s open", t)
             return
-        # Portfolio risk gate (drawdown scalar + hard block) — wired from
-        # monitor/portfolio_risk.py, which was previously orphaned.
-        if _PORTFOLIO_RISK.pre_trade_risk_gate() is False:
-            log.info(
-                "SKIP %s portfolio_risk (scalar=%.2f)", t, _PORTFOLIO_RISK._risk_scalar
-            )
+        exec_pack = self._portfolio_gate_and_size(t, tk, dec)
+        if exec_pack is None:
             return
-        sizing = dec.get("sizing")
-        if sizing is None or getattr(sizing, "shares", 0) <= 0:
-            log.debug("SKIP %s sizing=0", t)
-            return
-        price = float((tk.bid + tk.ask) * 0.5)
         horizon = str(dec.get("horizon", "scalp"))
         self.executor.place_bracket(
             t,
             dec["thought"],
-            price,
+            exec_pack["price"],
             self.streamer,
-            sizing=dec["sizing"],
+            sizing=exec_pack["sizing"],
             horizon=horizon,
         )
         self.executor.last_thoughts[t] = dec["thought"]
-        self.juli.brain.register_position(t, price, horizon=horizon)
+        self.juli.brain.register_position(t, exec_pack["price"], horizon=horizon)
 
     def _reflect_closed(self) -> None:
         """Route closed trades to neuromorphic brain for learning."""

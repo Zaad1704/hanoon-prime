@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hanoon-prime"
-version = "2.0.0"
-description = "JULI 2.0: Minimal neuro-morphic trading system. IB → Eyes → Cerebellum → Cortex → Hands → Hippocampus"
+version = "2.3.0"
+description = "JULI 2.0 'Aegis': Minimal neuro-morphic trading system. IB → Eyes → Cerebellum → Cortex → Hands → Hippocampus"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
@@ -110,6 +110,9 @@ ignore = ["E501", "E701"]
 # R16 bans inline noqa, so the allowance lives here, scoped per file.
 "src/hanoon_prime/brain/orchestrator.py" = ["PLR0913"]
 "src/hanoon_prime/brain/risk.py" = ["PLR0913"]
+"src/hanoon_prime/brain/exit_ladder.py" = ["PLR0913"]
+"src/hanoon_prime/brain/adaptive_learning.py" = ["PLR0913", "ARG001"]
+"src/hanoon_prime/brain/adaptive_thresholds.py" = ["PLR0913"]
 "src/hanoon_prime/ib_executor.py" = ["PLR0913"]
 
 [tool.setuptools.packages.find]

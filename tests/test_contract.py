@@ -607,18 +607,33 @@ def test_R19_realized_ev_gate_integrated():
 
 # ── R20: Tiered exits integrated ────────────────────────────────────────
 def test_R20_tiered_exits_integrated():
-    """brain/exits.py ExitPolicy.evaluate must exist and the orchestrator's
-    check_exit must delegate to it."""
+    """brain/exits.py ExitPolicy.evaluate (TIER3 mechanical) must exist and
+    the orchestrator's check_exit must delegate to the 3-tier ExitLadder
+    (TIER1 hard stop, TIER2 JULI verdict, TIER3 = ExitPolicy mechanical)."""
     exits_tree = ast.parse((SRC / "hanoon_prime" / "brain" / "exits.py").read_text())
     assert any(
         isinstance(n, ast.FunctionDef) and n.name == "evaluate"
         for n in ast.walk(exits_tree)
-    ), "R20 VIOLATION: ExitPolicy.evaluate missing"
+    ), "R20 VIOLATION: ExitPolicy.evaluate (TIER3 base) missing"
 
     orch_src = (SRC / "hanoon_prime" / "brain" / "orchestrator.py").read_text()
+    assert "def check_exit" in orch_src, "R20: orchestrator must expose check_exit"
     assert (
-        "self.exits.evaluate" in orch_src
-    ), "R20: check_exit must delegate to exits.evaluate"
+        "self._exit_ladder" in orch_src
+    ), "R20: check_exit must delegate to the ExitLadder"
+
+    ladder_path = SRC / "hanoon_prime" / "brain" / "exit_ladder.py"
+    assert ladder_path.exists(), "R20: brain/exit_ladder.py missing"
+    ladder_src = ladder_path.read_text()
+    ladder_tree = ast.parse(ladder_src)
+    assert any(
+        isinstance(n, ast.FunctionDef) and n.name == "evaluate"
+        for n in ast.walk(ladder_tree)
+    ), "R20 VIOLATION: ExitLadder.evaluate missing"
+    # R20 doctrine: TIER3 mechanical is still ExitPolicy — never replaced.
+    assert (
+        "self._policy.evaluate" in ladder_src
+    ), "R20: ladder TIER3 must delegate mechanical exits to ExitPolicy.evaluate"
 
     from hanoon_prime.brain.exit_checks import ExitSignal
     from hanoon_prime.brain.exits import ExitPolicy
@@ -685,3 +700,74 @@ def test_R22_nash_veto_bands_fire():
     pred = nash.predict({"vpin": 0.9}, 0.8, 1)
     assert pred.gate_authority is True, "losing pattern must carry veto authority"
     assert pred.win_prob < 0.45
+
+
+# ── R23: Dynamic PRIOR doctrine ─────────────────────────────────────────
+def test_R23_dynamic_prior_bounded_wired():
+    """PRIOR_TOP may only WIDEN from realized wins — never past PRIOR_TOP_MAX
+    (R5 runtime guard). Cold-start stays static; the earned cap reaches the
+    entry gate (risk.py) and cortex via the orchestrator's realized feed."""
+    from hanoon_prime.brain.realized_ev import RealizedStats
+    from hanoon_prime.edge import get_dynamic_prior_top, score_to_win_prob
+    from hanoon_prime.immune import PRIOR_BOTTOM, PRIOR_TOP, PRIOR_TOP_MAX
+
+    # Pure math: bounded by PRIOR_TOP_MAX (R5), cold-starts on static.
+    assert get_dynamic_prior_top(0.40, 0) == PRIOR_TOP  # cold start
+    hot = get_dynamic_prior_top(0.80, 50)
+    assert PRIOR_TOP < hot <= PRIOR_TOP_MAX  # earns UP, capped at 0.65
+    assert get_dynamic_prior_top(0.10, 50) < PRIOR_TOP  # losing tightens
+
+    # win_prob widens to the dynamic cap but never above it (R5).
+    wp = score_to_win_prob(1.0, prior_top=hot)
+    assert PRIOR_BOTTOM <= wp <= hot
+
+    # RealizedStats exposes the cap + cold-starts on the structural prior.
+    rs = RealizedStats(persist=False)
+    assert rs.dynamic_prior_top() == PRIOR_TOP
+    assert rs.recent_win_rate() == (0.5, 0)  # empty ⇒ neutral, not a crash
+
+    # Wiring: gate (risk.py), cortex, and orchestrator feed the realized cap.
+    risk_src = (SRC / "hanoon_prime" / "brain" / "risk.py").read_text()
+    cortex_src = (SRC / "hanoon_prime" / "cortex.py").read_text()
+    orch_src = (SRC / "hanoon_prime" / "brain" / "orchestrator.py").read_text()
+    rv_src = (SRC / "hanoon_prime" / "brain" / "realized_ev.py").read_text()
+    assert (
+        "score_to_win_prob(score, prior_top=pt)" in risk_src
+    ), "R23: entry gate must use the dynamic prior"
+    assert "prior_top=prior_top" in cortex_src, "R23: cortex must accept prior_top"
+    assert "dynamic_prior_top" in rv_src, "R23: RealizedStats lacks dynamic_prior_top"
+    assert (
+        "self._realized.dynamic_prior_top()" in orch_src
+    ), "R23: orchestrator must feed realized cap to cortex"
+
+
+# ── R24: Exit ladder TIER semantics ─────────────────────────────────────
+def test_R24_exit_ladder_tier_semantics():
+    """3-tier ladder: non-breaking defaults (dormant TIER2 → TIER3 =
+    ExitPolicy), TIER1 hard stop is absolute, TIER2 reads a NUMERIC
+    exit_likelihood (never a string verdict — R13 safe), TIER3 = ExitPolicy."""
+    from hanoon_prime.brain.adaptive_thresholds import get_adaptive_thresholds
+    from hanoon_prime.brain.exit_checks import ExitSignal
+    from hanoon_prime.brain.exit_ladder import ExitLadder
+    from hanoon_prime.brain.exits import ExitPolicy
+
+    ladder = ExitLadder(ExitPolicy(), thresholds=get_adaptive_thresholds())
+
+    # Non-breaking: defaults ⇒ TIER2 dormant ⇒ TIER3 = current ExitPolicy path.
+    sig = ladder.evaluate("TSLA", 100.0, ib_pnl=0.0, direction=1)
+    assert isinstance(sig, ExitSignal)
+    assert sig.should_exit is False  # unregistered ⇒ no exit (preserves prior)
+
+    # TIER1 hard stop is absolute: price breaches stop ⇒ force exit.
+    hard = ladder.evaluate("TSLA", 90.0, ib_pnl=0.0, direction=1, stop_price=91.0)
+    assert hard.should_exit is True
+    assert hard.exit_type == "exit"
+
+    # TIER2 is numeric exit_likelihood (no string verdict — R13 safe).
+    tier2 = ladder.evaluate("TSLA", 100.0, ib_pnl=0.0, direction=1, exit_likelihood=1.0)
+    assert tier2.should_exit is True
+    assert tier2.exit_type == "exit"
+
+    # TIER3 mechanical is still ExitPolicy (R20/R24 doctrine).
+    src = (SRC / "hanoon_prime" / "brain" / "exit_ladder.py").read_text()
+    assert "self._policy.evaluate" in src, "R24: TIER3 must be ExitPolicy"

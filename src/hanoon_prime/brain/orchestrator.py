@@ -31,6 +31,7 @@ from .deliberation import Deliberator
 from .dynamics import Dynamics
 from .episodic import EpisodicMemory
 from .exit_checks import ExitSignal
+from .exit_ladder import ExitLadder
 from .exits import ExitPolicy
 from .gate_advisor import GateAdvisor
 from .horizon_bandit import HorizonBandit
@@ -89,6 +90,7 @@ class NeuromorphicBrain:
         self.nash = NashBrain()
         self.risk = RiskEngine(realized=self._realized)
         self.exits = ExitPolicy()
+        self._exit_ladder = ExitLadder(self.exits)
         self._reflector = Reflector(self.memory, self.episodic)
         self._advisor = GateAdvisor(realized=self._realized)
         self._init_strategy_organs()
@@ -420,14 +422,13 @@ class NeuromorphicBrain:
         cross: float = 0.0,
     ) -> dict[str, Any]:
         """Compute the blended stabilized score and decision intermediates."""
-        base = self.cortex.evaluate(alpha)
+        base = self.cortex.evaluate(alpha, prior_top=self._realized.dynamic_prior_top())
         nash_pred = self.nash.predict(alpha, base.score, base.direction)
         nash_op = self._compute_nash_mod(nash_pred)
         neuro_score = self._compute_neuro_score(alpha, ticker)
-        blended = (1 - NEURO_BLEND) * base.score + NEURO_BLEND * neuro_score
-        # Gate advisor: learned threshold delta (tighten after losing streaks,
-        # relieve after winning ones). Advisory — folds into the score before
-        # the dynamics stabilize it.
+        cal_adj = self._calibration_nudge(base.score)
+        blended = (1 - NEURO_BLEND) * (base.score + cal_adj) + NEURO_BLEND * neuro_score
+        # Gate advisor: learned, bounded threshold delta from realized WR.
         advisor_delta = self._advisor.threshold_delta()
         news_bias = self._news_bias(ticker)
         raw = blended * regime_mul + halim + episodic + nash_op
@@ -446,6 +447,18 @@ class NeuromorphicBrain:
             "nash_win_prob": nash_pred.win_prob,
             "advisor_delta": advisor_delta,
         }
+
+    def _calibration_nudge(self, score: float) -> float:
+        """Prediction-error nudge (rebuild ``prediction_error_adjustment``).
+
+        Realized band WR minus the predicted win prob, applied along the
+        score's own direction so it shapes sizing + final_dir — never
+        cortex verdicts (R1: cortex is the sole verdict emitter). When the
+        opt-in flag is off, or data is thin, returns 0.0 → the live path is
+        byte-identical until ``CALIBRATION_NUDGE_ENABLED`` is opted in.
+        """
+        adj = self._realized.calibration_adjustment(abs(score))
+        return adj if score >= 0 else -adj
 
     def _stabilize(
         self, raw: float, nash_pred: NashPrediction
@@ -676,10 +689,33 @@ class NeuromorphicBrain:
         )
 
     def check_exit(
-        self, ticker: str, current_price: float, ib_pnl: float = 0.0, direction: int = 1
+        self,
+        ticker: str,
+        current_price: float,
+        ib_pnl: float = 0.0,
+        direction: int = 1,
+        *,
+        exit_likelihood: float = 0.0,
+        win_rate: float = 0.5,
+        stop_price: Optional[float] = None,
+        force_exit: bool = False,
     ) -> ExitSignal:
-        """Check if position should be exited."""
-        return self.exits.evaluate(ticker, current_price, ib_pnl, direction)
+        """Check if position should be exited via the 3-tier exit ladder.
+
+        Defaults keep behavior identical to the mechanical ExitPolicy
+        (TIER1/TIER2 dormant). Pass exit_likelihood/win_rate/stop_price
+        to activate adaptive JULI verdicts and hard stops.
+        """
+        return self._exit_ladder.evaluate(
+            ticker,
+            current_price,
+            ib_pnl,
+            direction,
+            exit_likelihood=exit_likelihood,
+            win_rate=win_rate,
+            stop_price=stop_price,
+            force_exit=force_exit,
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """Full brain snapshot for telemetry."""

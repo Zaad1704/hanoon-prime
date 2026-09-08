@@ -77,6 +77,10 @@ class TestBug1ThresholdBypass:
     def test_places_bracket_when_sizing_valid(self):
         """Decision with valid sizing MUST place bracket."""
         mixin = self._make_mixin()
+        # Portfolio risk gate needs synced equity to allow the entry
+        from hanoon_prime.ib_cycle import _PORTFOLIO_RISK
+
+        _PORTFOLIO_RISK.update_equity(1_000_000.0)
         tk = MagicMock()
         tk.hasBidAsk = True
         tk.bid, tk.ask = 100.0, 101.0

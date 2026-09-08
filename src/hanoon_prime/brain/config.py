@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# ── Build identity ───────────────────────────────────────────────────
+BUILD_NAME: str = "Aegis"
+BUILD_VERSION: str = "2.3.0"
+# Aegis = the shield. Name for this Prime line: disciplined hard-halt
+# entry gate + bounded, self-auditing exits, ported cleanly off rebuild.
+# Separate lineage from rebuild's "Snowflake" (v3.0.0) — no version clash.
+
 # ── Paths ────────────────────────────────────────────────────────────
 STATE_DIR = Path(__file__).resolve().parents[3] / "runtime"
 JULI_STATE_FILE = STATE_DIR / "juli_state.json"

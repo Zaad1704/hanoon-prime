@@ -16,8 +16,6 @@ brain/reflection.py and hot-swapped here via ``set_weights`` after each
 trade close — the live tanh therefore evolves with every trade. Backtests
 keep the historical 5-core behavior via ``core_weights_only=True`` so the
 calibration pipeline and legacy backtests are unchanged.
-
-No modifiers, no gates, no percentile trickery. Just the math.
 """
 
 from __future__ import annotations
@@ -29,6 +27,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .cerebellum import INDICATOR_NAMES, compute_alpha
+from .contrarian import contrarian_direction
 from .edge import compute_ev, kelly_fraction, score_to_win_prob
 from .immune import (
     CONFIDENCE_FLOOR,
@@ -87,8 +86,10 @@ class Cortex:
         """Current effective weights (live view for the strategy genome)."""
         return dict(self._weights)
 
-    def evaluate(self, raw: dict[str, float]) -> Thought:
-        """Z-score normalize raw indicators → tanh score → verdict."""
+    def evaluate(
+        self, raw: dict[str, float], prior_top: float | None = None
+    ) -> Thought:
+        """Z-score normalize → tanh score → verdict (prior_top widens cap)."""
         z_scores: dict[str, float] = {}
         for name, raw_val in raw.items():
             hist = self._z_history.get(name)
@@ -101,7 +102,9 @@ class Cortex:
 
         score = self._tanh_score(z_scores, present=set(raw.keys()))
         verdict, direction = self._verdict(score)
-        win_prob = score_to_win_prob(score)
+        if cdir := contrarian_direction(z_scores):
+            verdict, direction = ("BUY", cdir) if cdir > 0 else ("SELL", cdir)
+        win_prob = score_to_win_prob(score, prior_top=prior_top)
         ev = compute_ev(win_prob)
         kelly = kelly_fraction(win_prob)
         confidence = self._confidence(abs(score))

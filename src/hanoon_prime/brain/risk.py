@@ -123,7 +123,9 @@ class RiskEngine:
         bad = self._invalid_inputs(score, entry_price, atr)
         if bad is not None:
             return bad, 0.0, 0.0, {}
-        win_prob = score_to_win_prob(score)
+        # Dynamic PRIOR_TOP widens the win-prob cap; cold/unbound ⇒ static (R5).
+        pt = self._realized.dynamic_prior_top() if self._realized is not None else None
+        win_prob = score_to_win_prob(score, prior_top=pt)
         kelly = kelly_fraction(win_prob) * KELLY_FRACTION
         if not math.isfinite(kelly) or kelly <= 0:
             return "Invalid Kelly (non-finite or zero)", 0.0, 0.0, {}

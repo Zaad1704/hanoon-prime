@@ -54,6 +54,55 @@ PRIOR_TOP: float = 0.60  # best-case win probability
 PRIOR_TOP_MAX: float = 0.65  # dynamic cap never exceeds this
 CONFIDENCE_FLOOR: float = 0.50  # JULI never reports below 50-50
 
+# ── Dynamic PRIOR_TOP (faithful rebuild port, immune-bounded) ──────────
+# The brain EARNs a higher PRIOR_TOP cap from realized win rate, then
+# blames down when losing. The 70/30 blend dampens short winning streaks
+# from over-confidence. Hard-clamped to [DYNAMIC_PRIOR_TOP_MIN,
+# DYNAMIC_PRIOR_TOP_MAX] — the ceiling is PRIOR_TOP_MAX (0.65), so the
+# entry gate (R5) can NEVER over-believe beyond 0.65.
+DYNAMIC_PRIOR_TOP_ENABLED: bool = True
+DYNAMIC_PRIOR_TOP_MIN: float = 0.35  # floor — never below original structural cap
+DYNAMIC_PRIOR_TOP_MAX: float = 0.65  # ceiling == PRIOR_TOP_MAX (R5 runtime guard)
+DYNAMIC_PRIOR_TOP_SCALE: float = 0.6  # WR deviation × this = dynamic delta
+DYNAMIC_PRIOR_TOP_MIN_TRADES: int = 20  # cold start — use static PRIOR_TOP
+DYNAMIC_PRIOR_TOP_BLEND: float = 0.7  # 70% dynamic + 30% static (dampened learning)
+
+# ── Death-spiral PROBE recovery (off-by-default; halt stays on) ─────────
+# Faithful port of rebuild's death-spiral admission (ops/admission.py:150-152
+# + ops/candidate.py:240-252 + memory_calibration.py:detect_death_spiral).
+# When enabled, a HALT yields to ONE quality-gated PROBE entry so the
+# organism can re-establish edge and resume learning; otherwise the halt
+# (brain.hippocampus.check_safety_nets) is untouched. Off until production.
+PROBE_RECOVERY_ENABLED: bool = False  # R6: literal switch, no env bypass
+DEATH_SPIRAL_PROBE_MIN_LOSSES: int = 3  # consecutive-loss streak to qualify
+PROBE_SCORE_FLOOR: float = 0.55  # quality gate: |score| must clear this
+PROBE_PRICE_FLOOR: float = 5.0  # quality gate: price must clear this ($5)
+DEATH_SPIRAL_COOLDOWN_SEC: float = 600.0  # 10-min cooldown between probes
+
+# ── MoE port: Contrarian mean-reversion override (off-by-default) ───
+# Faithful Prime translation of rebuild moe_meanrev_extreme → decision_short:1.0
+# (overbought extreme → contrarian SHORT; oversold → contrarian LONG). Keeps the
+# halt-safe default; only flips the entry verdict when CONTRARIAN_MODE is on.
+CONTRARIAN_MODE_ENABLED: bool = False
+CONTRARIAN_EXTREME_Z: float = 2.0  # |vwap_deviation z| >= this triggers override
+
+# ── Calibration / prediction-error score nudge (MoE port) ────────────
+# Faithful port of rebuild prediction_error_adjustment: the score band's
+# realized WR minus its predicted win_prob, clamped to ±CALIB_BOUND. Nudges
+# the pipeline score (sizing + final_dir) toward where realized data says,
+# NOT the cortex verdict (verdicts stay cortex-only, R1). Off-by-default:
+# zero live change until opted in.
+CALIBRATION_NUDGE_ENABLED: bool = False
+CALIB_BOUND: float = 0.10  # rebuild CALIB_BOUND / SCORE_CALIB_BOUND
+
+# ── Exit hysteresis (rebuild HYSTERESIS_BARS, faithful) ──────────────
+# A SOFT (TIER2 JULI) exit must persist HYSTERESIS_BARS consecutive
+# evaluations before confirming; TIER1 hard stops always fire immediately
+# (rebuild HYSTERESIS_HARD_OVERRIDE = True). Off-by-default: 1 (disabled)
+# makes every soft-exit immediate, identical to prior behavior.
+HYSTERESIS_EXIT_ENABLED: bool = False
+HYSTERESIS_BARS: int = 3  # consecutive bars a soft exit trigger must persist
+
 # ── R:R and fees ──────────────────────────────────────────────────────
 TARGET_R_R: float = 3.0  # 2.0×ATR stop : 6.0×ATR target = 3:1
 FEE_RATE: float = 0.0001  # 0.01% per leg (institutional ECN)

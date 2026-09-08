@@ -297,25 +297,122 @@ class TestDecisionHealth:
         assert len(health.issues) >= 0
 
 
-# ── Portfolio risk ───────────────────────────────────────────────────────
+# ── Portfolio risk (rebuild risk/portfolio.py port) ─────────────────────
+# Regression: FIX-2026-09-07-07
 class TestPortfolioRisk:
-    def test_safe_market(self):
+    def _mgr(self, equity: float = 100000.0, holdings: dict | None = None):
         mgr = PortfolioRiskManager()
-        st = mgr.update(equity=100000.0, positions={"TSLA": 5000})
-        assert st.blocked is False
-        assert mgr.pre_trade_risk_gate() is True
+        mgr.update_equity(equity)
+        mgr.update_positions(holdings or {})
+        return mgr
+
+    def test_unsynced_equity_blocks(self):
+        mgr = PortfolioRiskManager()
+        assert mgr.pre_trade_risk_gate("TSLA", 1000.0) == (False, "equity_unsynced")
+
+    def test_safe_market_passes(self):
+        mgr = self._mgr(holdings={"TSLA": {"value": 5000.0, "pnl": 10.0}})
+        assert mgr.pre_trade_risk_gate("AAPL", 1000.0) == (True, "")
+        assert mgr.get_risk_state()["equity_synced"] is True
 
     def test_max_positions_blocks(self):
-        mgr = PortfolioRiskManager()
-        mgr.update(100000.0, {"A": 1, "B": 2, "C": 3})
-        st = mgr.update(100000.0, {"A": 1, "B": 2, "C": 3, "D": 4})
-        assert st.blocked is True
+        pos = {s: {"value": 1000.0} for s in ["A", "B", "C", "D"]}
+        mgr = self._mgr(holdings=pos)
+        assert mgr.pre_trade_risk_gate("E", 100.0)[0] is False
 
-    def test_drawdown_blocks(self):
+    def test_drawdown_scales_and_blocks(self):
         mgr = PortfolioRiskManager()
-        mgr.update(100000.0, {"TSLA": 1000})
-        st = mgr.update(89000.0, {"TSLA": 1000})  # -11% drawdown
-        assert st.blocked is True
+        mgr.update_equity(100000.0)
+        mgr.update_equity(89000.0)  # -11% drawdown
+        assert mgr.get_risk_state()["drawdown"] > 0.10
+        assert mgr.get_risk_state()["risk_scalar"] < 1.0
+        mgr.update_equity(60000.0)  # -40% -> stress mode
+        assert mgr.get_risk_state()["stress_mode"] is True
+        assert mgr.pre_trade_risk_gate("TSLA", 100.0)[0] is False
+
+    def test_stress_size_cap_blocks(self):
+        mgr = PortfolioRiskManager()
+        mgr.update_equity(100000.0)
+        mgr.update_equity(60000.0)  # stress
+        assert mgr.pre_trade_risk_gate("TSLA", 6000.0)[0] is False
+
+    def test_exposure_cap_blocks(self):
+        # Budget = MAX_POSITION_NOTIONAL x MAX_CONCURRENT_POSITIONS = $15k.
+        # Holding $15.5k = 103% of budget -> over the 100% exposure cap.
+        mgr = self._mgr(holdings={"TSLA": {"value": 15500.0}})
+        allowed, reason = mgr.pre_trade_risk_gate("AAPL", 2000.0)
+        assert allowed is False and reason == "exposure_cap"
+        # 93% of budget is still allowed (cap is >= 100%)
+        mgr = self._mgr(holdings={"TSLA": {"value": 14000.0}})
+        assert mgr.pre_trade_risk_gate("AAPL", 500.0)[0] is True
+
+    def test_concentration_cap_blocks(self):
+        # Holding $2k of a $15k budget (exposure 13%); new $24k + held $2k
+        # = 26% of the $100k equity > 25% concentration cap -> blocked.
+        mgr = self._mgr(holdings={"TSLA": {"value": 2000.0}})
+        allowed, reason = mgr.pre_trade_risk_gate("TSLA", 24000.0)
+        assert allowed is False and reason.startswith("concentration")
+        # A small new entry stays under the cap
+        assert mgr.pre_trade_risk_gate("TSLA", 2000.0) == (True, "")
+
+    def test_adjust_size_scales_with_risk(self):
+        mgr = PortfolioRiskManager()
+        mgr.update_equity(100000.0)
+        assert mgr.adjust_size(100, 10.0) == 100  # scalar 1.0
+        mgr.update_equity(85000.0)  # scalar ~0.55
+        assert mgr.adjust_size(100, 10.0) < 100
+
+    def test_equity_never_fabricated(self):
+        mgr = PortfolioRiskManager()
+        mgr.update_equity(0.0)
+        mgr.update_equity(-5.0)
+        assert mgr.get_risk_state()["equity_synced"] is False
+
+    def test_giveback_fires_weakest_first(self):
+        mgr = PortfolioRiskManager()
+        mgr.update_positions(
+            {
+                "AAA": {"value": 1000.0, "pnl": 40.0, "pct": 4.0},
+                "BBB": {"value": 1000.0, "pnl": 15.0, "pct": 1.5},
+                "CCC": {"value": 1000.0, "pnl": -5.0, "pct": -0.5},
+            }
+        )
+        d1 = mgr.check_portfolio_giveback()  # peak = 50
+        assert d1.tickers == []  # no fade yet
+        mgr.update_positions(
+            {
+                "AAA": {"value": 1000.0, "pnl": 30.0, "pct": 3.0},
+                "BBB": {"value": 1000.0, "pnl": 7.0, "pct": 0.7},
+                "CCC": {"value": 1000.0, "pnl": -5.0, "pct": -0.5},
+            }
+        )  # total 32 vs peak 50 -> fade 36% > 25%
+        d2 = mgr.check_portfolio_giveback()
+        assert d2.fired is True
+        # Weakest winners first; the loser (CCC) is never exited
+        assert "BBB" in d2.tickers and "CCC" not in d2.tickers
+        assert d2.tickers.index("BBB") < d2.tickers.index("AAA")
+
+    def test_giveback_cooldown_and_min_peak(self):
+        mgr = PortfolioRiskManager()
+        mgr.update_positions({"AAA": {"value": 1000.0, "pnl": 10.0, "pct": 1.0}})
+        d = mgr.check_portfolio_giveback()
+        assert d.fired is False  # peak $10 < $20 min
+
+    def test_risk_state_snapshot_shape(self):
+        mgr = self._mgr(holdings={"TSLA": {"value": 5000.0, "pnl": 10.0}})
+        s = mgr.get_risk_state()
+        for k in (
+            "equity",
+            "equity_synced",
+            "risk_scalar",
+            "drawdown",
+            "stress_mode",
+            "exposure",
+            "position_count",
+            "peak_unrealized",
+            "unrealized",
+        ):
+            assert k in s
 
 
 # ── Exit scoring ─────────────────────────────────────────────────────────

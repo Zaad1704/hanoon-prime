@@ -124,6 +124,33 @@ monitor probes verify the monitors themselves run.
   `(exits, entries)`. Docstring fixed to match callers.
 - **Guard:** docs-only (no behavioral change)
 
+### FIX-2026-09-07-07 — Portfolio risk manager was a stub with dead inputs
+- **Symptom:** `_sync_portfolio_risk` called
+  `update(net_liq, {})` — the positions dict was hardcoded empty, so
+  exposure, concentration, and position-count logic could never fire;
+  the entry gate took no arguments (no per-trade check); rebuild's
+  portfolio profit protection (peak unrealized-P&L giveback) was
+  entirely absent. Class E (unwired capability assumed working).
+- **Fix:** full port of rebuild `risk/portfolio.py`: IB-fed equity +
+  `read_portfolio(ib)` holdings, parameterized gate (stress size cap,
+  exposure cap, concentration cap, position count, stress block),
+  size adjustment (scalar x concentration dampening), and
+  `check_portfolio_giveback()` — exit weakest winners when total
+  unrealized P&L fades 25% from peak (min $20 peak, batch of 3,
+  60s cooldown, losers never exited). Wired into `_sync_portfolio_risk`
+  (giveback exits via `_closing`/`_exit_reasons` so reflection sees the
+  reason) and `_exec_decision` (per-entry gate + size adjustment).
+  Telemetry: `/risk` endpoint.
+- **Class:** E, B (the empty-positions feed was a silent single-writer
+  style data loss — IB positions never reached the risk layer)
+- **Guard:**
+  `test: tests/test_coverage_monitors.py::TestPortfolioRisk`
+  (12 tests: unsynced block, safe pass, max positions, drawdown scalar
+  + stress, stress size cap, exposure cap, concentration cap, size
+  adjustment, equity never fabricated, giveback weakest-first,
+  giveback min-peak, snapshot shape) + smoke `giveback_unit`/
+  `giveback_no_losers` checks exercise the decision on live IB data.
+
 ## 2026-09-07 — earlier commits (same session, pre-smoke)
 
 ### FIX-2026-09-07-00 — test-environment hardening

@@ -14,7 +14,8 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Optional
 
-from ..immune import TARGET_R_R
+from ..edge import get_dynamic_prior_top, score_to_win_prob
+from ..immune import CALIB_BOUND, CALIBRATION_NUDGE_ENABLED, TARGET_R_R
 from .config import (
     BAND_MIN_SAMPLES,
     CONF_MIN_SAMPLES,
@@ -143,6 +144,54 @@ class RealizedStats:
         """Total number of recorded real trades."""
         with self._lock:
             return sum(self._band_wins.values()) + sum(self._band_losses.values())
+
+    def recent_win_rate(self) -> tuple[float, int]:
+        """Overall recent realized win rate and trade count, cold-safe.
+
+        Folded from the realized-R:R ring (win flags) — mirrors rebuild
+        ``memory._recent_wr`` without a separate deque. Empty store returns
+        (0.5, 0) so callers fall back to the structural prior, never a crash.
+        """
+        with self._lock:
+            samples = list(self._rr)
+        if not samples:
+            return 0.5, 0
+        wins = sum(1 for f, _p, _d in samples if f)
+        return wins / len(samples), len(samples)
+
+    def dynamic_prior_top(self) -> float:
+        """Dynamic PRIOR_TOP for the brain's confidence cap (see edge).
+
+        Cold-start returns the static PRIOR_TOP until
+        DYNAMIC_PRIOR_TOP_MIN_TRADES real trades accumulate. Hard-clamped
+        to [DYNAMIC_PRIOR_TOP_MIN, DYNAMIC_PRIOR_TOP_MAX] whose ceiling is
+        PRIOR_TOP_MAX, so the entry gate (R5) never over-believes past 0.65.
+        """
+        wr, n = self.recent_win_rate()
+        return get_dynamic_prior_top(wr, n)
+
+    def calibration_adjustment(self, score: float) -> float:
+        """Faithful port of rebuild ``prediction_error_adjustment``.
+
+        Returns ``realized_band_wr - predicted_win_prob``, clamped to
+        ±``CALIB_BOUND``. Positive => the score band beat its prediction
+        (lean in); negative => it underperformed (pull back). When the flag
+        is off or data is thin, returns 0.0 (no-op) so live behavior is
+        unchanged until opted in.
+
+        Prime mapping: rebuild's ``predicted_win_prob`` (linear
+        THRESHOLD_MIN..THRESHOLD_MAX → PRIOR_BOTTOM..PRIOR_TOP) is approximated
+        by Prime's own ``score_to_win_prob``, and the band WR by
+        :meth:`band_wr` (same realization source the ev_gate trusts).
+        """
+        if not CALIBRATION_NUDGE_ENABLED:
+            return 0.0
+        wr, _rel, n = self.band_wr(score)
+        if n < BAND_MIN_SAMPLES:
+            return 0.0
+        pred_wp = score_to_win_prob(abs(score))
+        adj = wr - pred_wp
+        return max(-CALIB_BOUND, min(CALIB_BOUND, adj))
 
     def snapshot(self) -> dict[str, Any]:
         """Telemetry snapshot of realized state."""

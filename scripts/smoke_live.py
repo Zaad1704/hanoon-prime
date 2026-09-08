@@ -296,6 +296,30 @@ def phase_verify(bot: IBStreamingBot, before: dict) -> None:
         bool(pipe.get("vitals")),
         f"healthy={pipe.get('healthy')}",
     )
+    # Portfolio risk (rebuild port): live IB feed + giveback decision unit
+    risk = http_get("/risk")
+    check(
+        "portfolio risk /risk live",
+        bool(risk) and risk.get("equity_synced") is True,
+        f"equity=${risk.get('equity', 0):.0f} scalar={risk.get('risk_scalar')}",
+    )
+    from hanoon_prime.monitor.portfolio_risk import PortfolioRiskManager
+
+    pm = PortfolioRiskManager()
+    pm.update_positions(
+        {
+            "AAA": {"value": 1000.0, "pnl": 40.0, "pct": 4.0},
+            "BBB": {"value": 1000.0, "pnl": 15.0, "pct": 1.5},
+            "CCC": {"value": 1000.0, "pnl": -5.0, "pct": -0.5},
+        }
+    )
+    gd = pm.check_portfolio_giveback()
+    check("giveback_unit peak tracked", gd.peak == 50.0, f"peak={gd.peak}")
+    check(
+        "giveback_no_losers",
+        all(t != "CCC" for t in gd.tickers),
+        f"tickers={gd.tickers}",
+    )
     for fname in (
         "juli_horizon_bandit.json",
         "juli_meta_label.json",
