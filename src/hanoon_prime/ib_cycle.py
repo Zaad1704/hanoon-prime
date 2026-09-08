@@ -139,12 +139,19 @@ class BotCycleMixin:
                 log.debug("re-seed %s failed: %s", t, exc)
 
     def _sweep_stale_orders(self) -> None:
-        """Cancel stale JULI entry parents that have been pending too long.
+        """Brain-aware stale-order reconcile (JULI fast path, every cycle).
 
-        Only sweeps DAY-tif entry parents (from place_bracket), NOT GTC
-        protection orders (STP+LMT from _protect.py). Protection orders
-        must survive until the position closes.
+        Never cancels flatten orders (symbols in ``_closing``) or GTC
+        protection (STP+LMT from _protect.py) — those must survive until
+        the position closes. Only DAY entry parents that are stale (>60s)
+        AND whose symbol has no open position are swept individually.
+
+        Rebuild lesson (runner_protocol.md): the old timer swept ANY DAY-tif
+        parent after 60s — including flatten MKT orders for _closing symbols
+        — so it cancelled in-flight closes, stranding positions open while
+        still flagged closing. That freeze is cleared in ``_reconcile_closing``.
         """
+        self._reconcile_closing()
         pending = ("PendingSubmit", "PreSubmitted")
         try:
             trades = list(self.ib.openTrades())
@@ -156,13 +163,115 @@ class BotCycleMixin:
             order = getattr(trade, "order", None)
             if not order or order.parentId:
                 continue
-            # Only sweep DAY-tif entry parents — GTC protection stays
-            if getattr(order, "tif", "") != "DAY":
+            sym = trade.contract.symbol if trade.contract else "?"
+            # Flatten orders (closing) or protection (GTC) — never touch.
+            if sym in self._closing or getattr(order, "tif", "") != "DAY":
                 continue
             if trade.orderStatus.status not in pending:
                 continue
-            sym = trade.contract.symbol if trade.contract else "?"
+            # Only cancel a stale entry parent when no open position needs it.
+            if sym in self.hippocampus._open_positions:
+                continue
             self._sweep_one(order, sym, now)
+
+    def _halim_order_review(self) -> None:
+        """HALIM slow-path order review backstop (throttled)."""
+        now = time.time()
+        last = getattr(self, "_last_halim_review", 0.0)
+        if now - last < 120.0:
+            return
+        self._last_halim_review = now
+        halim = getattr(self.juli.brain, "_consolidation", None)
+        if halim is None:
+            return
+        try:
+            trades = [t for t in self.ib.openTrades() if not t.isDone()]
+        except Exception as exc:
+            log.debug("halim review openTrades failed: %s", exc)
+            return
+        if not trades:
+            return
+        orders = self._open_order_summary(trades)
+        positions = {
+            sym: {"direction": p.direction, "qty": int(abs(p.shares))}
+            for sym, p in self.hippocampus._open_positions.items()
+        }
+        for intent in halim.halim.review_open_orders(orders, positions):
+            if intent.get("action") == "cancel":
+                self._halim_apply_cancel(intent.get("ticker", ""), trades)
+
+    def _open_order_summary(self, trades: list[Any]) -> list[dict[str, Any]]:
+        """Compact summary of active trades for the HALIM order audit."""
+        orders = []
+        for t in trades:
+            o = getattr(t, "order", None)
+            if o is None:
+                continue
+            orders.append(
+                {
+                    "ticker": (t.contract.symbol if t.contract else "?"),
+                    "action": o.action or "?",
+                    "type": o.orderType or "?",
+                    "qty": int(o.totalQuantity or 0),
+                    "status": (t.orderStatus.status if t.orderStatus else "?"),
+                }
+            )
+        return orders
+
+    def _halim_apply_cancel(self, sym: str, trades: list[Any]) -> None:
+        """Re-validate one HALIM cancel intent against JULI's safety rules."""
+        if not sym or sym in self._closing or sym in self.hippocampus._open_positions:
+            return
+        for trade in trades:
+            o = getattr(trade, "order", None)
+            if o is None or o.parentId or not trade.isDone():
+                continue
+            if (trade.contract and trade.contract.symbol) != sym:
+                continue
+            if getattr(o, "tif", "") != "DAY":
+                continue
+            log.info("HALIM CANCEL %s: slow-path review", sym)
+            try:
+                self.ib.cancelOrder(o)
+            except Exception as exc:
+                log.warning("HALIM cancel %s failed: %s", sym, exc)
+            break
+
+    def _reconcile_closing(self) -> None:
+        """Release _closing symbols whose close order died without a fill.
+
+        A symbol lands in ``_closing`` when a flatten/exit order is placed.
+        If IB cancels that order (timer sweep, server reject, disconnect)
+        with filled=0, the position stays OPEN but every path that would
+        act on it (exits, protection, adoption) skips _closing symbols
+        forever. Detect that dead state and release it so the normal
+        exit/protect/adopt loop re-engages next cycle. Never blocks.
+        """
+        if not self._closing:
+            return
+        try:
+            ib_positions = {
+                p.contract.symbol
+                for p in self.ib.positions()
+                if abs(int(p.position)) > 0
+            }
+            active = {
+                t.contract.symbol
+                for t in self.ib.openTrades()
+                if not t.isDone()
+            }
+        except Exception as exc:
+            log.debug("RECONCILE closing scan unavailable: %s", exc)
+            return
+        for sym in list(self._closing):
+            if sym in ib_positions and sym in active:
+                continue  # live close order still in flight
+            self._closing.discard(sym)
+            log.warning(
+                "RECONCILE: released %s from closing (pos open=%s)",
+                sym,
+                sym in ib_positions,
+            )
 
     def _sweep_one(self, order: Any, sym: str, now: float) -> None:
         """Cancel one stale pending parent (tracked ≥ 60s)."""
@@ -231,8 +340,17 @@ class BotCycleMixin:
                 return
             positions = set(self.hippocampus._open_positions.keys())
             market_open = _SLEEP_MGR.get_state().active
+            pos_info = {
+                t: {
+                    "direction": p.direction,
+                    "entry_price": p.entry_price,
+                    "stop_price": p.stop_price,
+                }
+                for t, p in self.hippocampus._open_positions.items()
+            }
+            self._halim_order_review()
             exit_s, decisions = self.juli.tick(
-                positions, self._snapshot, self.streamer, self._closing
+                positions, self._snapshot, self.streamer, self._closing, pos_info
             )
             self._finish_cycle(
                 exit_s, decisions, pnl, CycleMeta(poll, started, market_open)

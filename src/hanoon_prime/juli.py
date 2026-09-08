@@ -1,7 +1,4 @@
-"""hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain.
-
-NeuromorphicBrain is the LOCAL SOURCE OF TRUTH for all decisions.
-"""
+"""hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain."""
 
 from __future__ import annotations
 
@@ -18,9 +15,7 @@ from .juli_feed import JuliFeed, check_tick_latency, compute_alpha_from_snap, en
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
-# Full-parallel-throttle: how many tickers get entry-scored per cycle.
-# Rotating a small window keeps the flow continuous; the main loop never
-# stalls on a fixed batch (no THINK burst, then silence).
+# Rotating EVAL_WINDOW keeps flow continuous (no THINK burst, then silence).
 EVAL_WINDOW: int = 4
 
 
@@ -44,6 +39,7 @@ class JuliBrain:
         get_snapshot: Any,
         streamer: Any,
         closing: set[str] | None = None,
+        pos_info: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """One full brain cycle. Returns (entry_decisions, exit_signals)."""
         self.feed.ensure_refs(streamer)
@@ -51,7 +47,9 @@ class JuliBrain:
         self._maybe_screen(get_snapshot)
         self.feed.fallback_regime()
         self._maybe_allocate(positions)
-        exits = self._evaluate_exits(positions, get_snapshot, closing or set())
+        exits = self._evaluate_exits(
+            positions, get_snapshot, closing or set(), pos_info or {}
+        )
         entries = self._evaluate_entries(positions, get_snapshot)
         return exits, entries
 
@@ -73,8 +71,8 @@ class JuliBrain:
         if not self._candidates:
             return
         snaps = [get_snapshot(c.symbol) for c in self._candidates[:MAX_CANDIDATES]]
-        n = sum(1 for s in snaps if s and s.get("last", 0) > 0)
-        log.info("SCREEN: %d/%d passed", n, len(self._candidates))
+        passed = sum(1 for s in snaps if s and s.get("last", 0) > 0)
+        log.info("SCREEN: %d/%d passed", passed, len(self._candidates))
         self.feed.publish_ref_prices(get_snapshot)
 
     def _maybe_allocate(self, positions: set[str]) -> None:
@@ -87,9 +85,13 @@ class JuliBrain:
         )
 
     def _evaluate_exits(
-        self, positions: set[str], get_snapshot: Any, closing: set[str]
+        self,
+        positions: set[str],
+        get_snapshot: Any,
+        closing: set[str],
+        pos_info: dict[str, dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Evaluate open positions for exit signals."""
+        """Evaluate open positions for exit signals (direction-aware). Registers adopted orphans."""
         exits = []
         for t in positions:
             if t in closing:
@@ -97,7 +99,17 @@ class JuliBrain:
             snap = get_snapshot(t)
             if snap is None or snap.get("last", 0) <= 0:
                 continue
-            sig = self.brain.check_exit(t, snap["last"], direction=1)
+            info = (pos_info or {}).get(t, {})
+            direction = int(info.get("direction", 1)) or 1
+            entry = info.get("entry_price") or snap["last"]
+            if entry > 0 and not self.brain.exits.is_registered(t):
+                self.brain.register_position(t, entry)
+            sig = self.brain.check_exit(
+                t,
+                snap["last"],
+                direction=direction,
+                stop_price=info.get("stop_price") or None,
+            )
             if sig.should_exit:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)
@@ -106,17 +118,10 @@ class JuliBrain:
     def _evaluate_entries(
         self, positions: set[str], get_snapshot: Any
     ) -> list[dict[str, Any]]:
-        """Evaluate a rotating subset of tracked tickers for entry decisions.
-
-        Full parallel throttle: instead of scoring every candidate every
-        cycle (which produced a THINK burst, then silence), rotate through
-        the tracked universe a few at a time so scoring is smooth and the
-        main loop never stalls on a fixed batch.
-        """
+        """Evaluate rotated entry window (full-parallel throttle)."""
         universe = sorted(self.budget.get_all_tracked() | positions)
         if not universe:
             return []
-        # Re-own the rotation cursor (persisted across cycles on self)
         off = getattr(self, "_eval_off", 0) % len(universe)
         window = EVAL_WINDOW
         slice_ = universe[off : off + window]
@@ -129,8 +134,7 @@ class JuliBrain:
             try:
                 dec = self._eval_one(ticker, snap, len(positions))
             except Exception as e:
-                # Counted, never just logged away (FIXES.md Class D):
-                # PipelineMonitor alerts when failures accumulate.
+                # Counted (FIXES.md Class D): PipelineMonitor alerts on accumulation.
                 self.brain.note_eval_failure(ticker, e)
                 log.warning("Entry eval failed for %s: %s", ticker, e)
                 continue
@@ -145,11 +149,10 @@ class JuliBrain:
         score, conf = result.get("score", 0), result.get("confidence", 0.5)
         verdict = result.get("verdict", "")
         log.info(
-            "THINK %s %s score=%.3f regime=%s risk=%s hz=%s/%s",
+            "THINK %s %s score=%.3f risk=%s hz=%s/%s",
             ticker,
             "BUY" if direction > 0 else "SELL",
             score,
-            result.get("regime", "?"),
             result.get("risk", "normal"),
             result.get("horizon", "scalp"),
             result.get("horizon_reason", "classifier"),

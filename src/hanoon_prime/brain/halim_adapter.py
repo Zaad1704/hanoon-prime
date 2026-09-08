@@ -63,6 +63,55 @@ def _normalize_halim_json(text: str) -> dict[str, Any] | None:
         return None
 
 
+def _review_prompt(orders: list[dict[str, Any]], positions: dict[str, Any]) -> str:
+    """Build the order-audit prompt for HALIM."""
+    lines = [
+        f"- {o.get('ticker')} {o.get('action','?')} {o.get('type','?')} "
+        f"qty={o.get('qty',0)} status={o.get('status','?')}"
+        for o in orders
+    ]
+    pos_lines = [
+        f"- {t}: dir={p.get('direction')} qty={p.get('qty')}"
+        for t, p in positions.items()
+    ]
+    return (
+        "You are an order audit. Here are the bot's OPEN orders:\n"
+        + "\n".join(lines)
+        + "\n\nCurrent positions:\n"
+        + ("\n".join(pos_lines) if pos_lines else "- none")
+        + "\n\nCancel only orders that are clearly stale/orphaned (pending, "
+        "no matching position, or duplicated). Return EXACTLY this JSON "
+        "array, nothing else:\n"
+        '[{"ticker": "<SYM>", "action": "cancel|keep", "reason": "<short>"}]'
+    )
+
+
+def _parse_review_intents(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse HALIM's order-review response into per-order intents."""
+    text = result.get("text", "")
+    if not text:
+        log.debug("HALIM order review returned no text (ok=%s)", result.get("ok"))
+        return []
+    parsed = _normalize_halim_json(text)
+    if not isinstance(parsed, list):
+        log.debug("HALIM order review unparsable (ok=%s)", result.get("ok"))
+        return []
+    intents = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        intents.append(
+            {
+                "ticker": str(item.get("ticker", "")).upper(),
+                "action": str(item.get("action", "keep")).lower(),
+                "reason": str(item.get("reason", ""))[:120],
+            }
+        )
+    if intents:
+        log.info("HALIM order review: %d intents", len(intents))
+    return intents
+
+
 class HalimAdapter:
     """Async HALIM API client with caching."""
 
@@ -87,13 +136,19 @@ class HalimAdapter:
     def get_regime(
         self, indicators: dict[str, float], prices: list[float], volume: float = 0.0
     ) -> dict[str, Any]:
-        """Get rich regime classification from HALIM. Returns structured analysis."""
+        """Get rich regime classification from HALIM. Returns structured analysis.
+
+        Tolerant of ``ok:false`` responses: HALIM sets ``ok=false`` with
+        ``reason=json_parse_failed`` when its own parser trips, even when
+        the model echoed a valid JSON block in ``text`` — we parse ``text``
+        directly rather than trusting the server's flag.
+        """
         now = time.time()
         if self._regime_cache and (now - self._regime_ts) < self._regime_ttl:
             return dict(self._regime_cache)
         prompt = self._build_regime_prompt(indicators, prices, volume)
         result = self._query_halim(prompt, purpose="regime", priority="high")
-        if result.get("ok") and result.get("text"):
+        if result.get("text"):
             parsed = self._parse_regime_response(result["text"])
             if parsed:
                 self._regime_cache = parsed
@@ -159,19 +214,40 @@ class HalimAdapter:
     def _start_debate_async(
         self, ticker: str, alpha: dict[str, float], score: float, verdict: str
     ) -> None:
+        """Ask HALIM for a bounded modifier on this ticker (fire-and-forget).
+
+        HALIM exposes ``/v1/complete`` (not ``/debate``) — posting to the
+        dead endpoint made the modifier permanently 0.0. The parsed
+        modifier is cached so the next ``get_modifier`` call returns it.
+        """
+        prompt = (
+            "You are a trading risk advisor. Given a candidate entry:\n"
+            f"ticker={ticker} score={score:.3f} verdict={verdict}\n"
+            f"alpha={json.dumps(alpha)}\n"
+            "Return EXACTLY this JSON, nothing else:\n"
+            '{"modifier": <0.5-1.5>, "reason": "<one short line>"}'
+        )
+        result = self._query_halim(prompt, purpose="debate", priority="low")
+        modifier = self._parse_modifier_response(result)
+        if modifier is not None:
+            self._cache[ticker] = {"modifier": modifier, "ts": time.time()}
+            log.info("HALIM modifier %s <- %.3f", ticker, modifier)
+
+    def _parse_modifier_response(self, result: dict[str, Any]) -> float | None:
+        """Extract the bounded modifier from a /v1/complete response."""
+        text = result.get("text", "")
+        if not text:
+            return None
+        parsed = _normalize_halim_json(text)
+        if parsed is None or not isinstance(parsed, dict):
+            return None
         try:
-            data = json.dumps(
-                {"ticker": ticker, "score": score, "verdict": verdict, "alpha": alpha}
-            ).encode()
-            req = urllib.request.Request(
-                f"{self._base_url}/debate",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception as e:
-            log.debug("HALIM debate failed: %s", e)
+            raw = float(parsed.get("modifier", 0.0))
+        except (TypeError, ValueError):
+            return None
+        if raw <= 0.0:
+            return None
+        return max(0.5, min(1.5, raw))
 
     def _query_halim(
         self, prompt: str, purpose: str = "reasoning", priority: str = "medium"
@@ -198,6 +274,22 @@ class HalimAdapter:
         from .halim_analysis import analyze_trade as _analyze
 
         return _analyze(self._base_url, trade_data)
+
+    def review_open_orders(
+        self, orders: list[dict[str, Any]], positions: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Ask HALIM which open orders should be cancelled (slow-path review).
+
+        JULI's deterministic sweep handles the common cases every cycle;
+        this is the backstop that catches orders JULI's rules missed. Each
+        returned intent is ``{"ticker": ..., "action": "cancel"|"keep",
+        "reason": ...}``. The caller (ib_cycle) re-validates before acting.
+        """
+        if not orders:
+            return []
+        prompt = _review_prompt(orders, positions)
+        result = self._query_halim(prompt, purpose="order_review", priority="low")
+        return _parse_review_intents(result)
 
     def get_improvement_recommendations(self) -> list[dict[str, Any]]:
         """Get HALIM's tactical recommendations for improvement."""

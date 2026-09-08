@@ -391,6 +391,10 @@ class ExitPolicy:
         ):
             d.pop(ticker, None)
 
+    def is_registered(self, ticker: str) -> bool:
+        """Whether a ticker is being exit-monitored."""
+        return ticker in self._entry_ts
+
     def telemetry(self) -> dict[str, float | int]:
         """Learned-exit telemetry (advisor view of the current policy)."""
         return {
