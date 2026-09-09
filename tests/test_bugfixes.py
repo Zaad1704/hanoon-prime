@@ -218,14 +218,14 @@ class TestBug3OffMarketGuard:
         from zoneinfo import ZoneInfo
 
         et = ZoneInfo("America/New_York")
-        # 2026-09-08 is a Monday, 10:00 AM ET — RTH
+        # 2026-09-08 is a Monday, 10:00 AM ET — RTH (unified lowercase id)
         monday_10am = datetime(2026, 9, 8, 10, 0, tzinfo=et)
         with patch("hanoon_prime.monitor.sleep_manager.datetime") as mock_dt:
             mock_dt.now.return_value = monday_10am
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             state = mgr.get_state(ib_connected=True)
         assert state.active is True
-        assert state.session == "RTH"
+        assert state.session == "rth"
 
     def test_ib_cycle_imports_sleep_manager(self):
         """ib_cycle.py must import SleepManager for market hours check."""
