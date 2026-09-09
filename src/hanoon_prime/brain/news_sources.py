@@ -186,10 +186,13 @@ class NewsFeedEngine:
         for t in tickers:
             try:
                 pol, n = ticker_sentiment(t)
-                if n:
-                    snapshot[t] = round(pol, 3)
+                snapshot[t] = round(pol, 3) if n else 0.0
             except Exception:
-                continue
+                snapshot[t] = 0.0
+        # Publish for EVERY tracked ticker (0.0-fill) so the fast path sees
+        # a complete, current snapshot — without this, tickers whose recent
+        # top-5 slate has no headline polarity silently collapse to no
+        # publication at all (news=0.00 on every S2 line in production).
         if snapshot:
             self._state.update(news_sentiment=snapshot)
 

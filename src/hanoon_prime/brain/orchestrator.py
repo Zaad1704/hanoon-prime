@@ -18,7 +18,7 @@ from ..hippocampus import Hippocampus
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from ..types import FillInfo
 from . import horizons
-from .affective import Affective
+from .cognitive.emotion import CONF_BOUND, RISK_CEIL, RISK_FLOOR
 from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
 from .cognitive.nash import NashBrain, NashPrediction
 from .config import (
@@ -31,7 +31,6 @@ from .config import (
 )
 from .consolidation import ConsolidationEngine
 from .cross_asset import CrossAssetEngine
-from .deliberation import Deliberator
 from .dynamics import Dynamics
 from .episodic import EpisodicMemory
 from .exit_checks import ExitSignal
@@ -58,6 +57,7 @@ from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .strategy_genome import StrategyGenome
+from .thinker import TOTAL_MOD_BOUND
 
 log = logging.getLogger(__name__)
 NEURO_BLEND: float = 0.3
@@ -93,8 +93,6 @@ class NeuromorphicBrain:
         weights.update(self.memory.get_weights())
         self.cortex = Cortex(weights=weights)
         self.hippocampus = Hippocampus(cortex=self.cortex, safety_enabled=False)
-        self.affective = Affective()
-        self.deliberator = Deliberator(threshold=self.memory.threshold)
         self.dynamics = Dynamics(base_threshold=self.memory.threshold)
         self.nash = NashBrain()
         self.risk = RiskEngine(realized=self._realized)
@@ -604,7 +602,7 @@ class NeuromorphicBrain:
         bars: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Core fast evaluation — all decisions via neuromorphic brain."""
-        _r, rl, rr, hm, eb, _ = self._get_regime_data()
+        _r, rl, rr, hm, _, _ = self._get_regime_data()
         _r, rl = self._local_regime_fallback(rl)
         canon = self._canonical_regime(rl)
         # Cross-asset lead-lag (SPY/QQQ/IWM/VXX refs via shared state).
@@ -617,6 +615,11 @@ class NeuromorphicBrain:
         horizon = self._classify_horizon(bars)
         horizon, hz_reason = self._bandit.select(canon, horizon)
         self._apply_regime_weights(canon)
+        # Episodic k-NN modifier is queried LIVE against the current alpha
+        # (bounded ±EPISODIC_MOD_BOUND, confidence-gated) and mirrored into
+        # shared state so telemetry shows the applied bias.
+        eb = self.episodic.modifier(alpha)
+        self.state.update(episodic_bias=eb)
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
         ctx["horizon"] = horizon
         ctx["horizon_reason"] = hz_reason
@@ -647,6 +650,10 @@ class NeuromorphicBrain:
             return
         if self._advisor.is_tightening():
             sizing.shares = max(1, int(sizing.shares * GATE_CLOSED_SIZE_SCALAR))
+        # Affective state (fear/greed from live streak) scales size within
+        # [RISK_FLOOR, RISK_CEIL] — a losing streak shrinks, a hot streak
+        # grows. Bounded, advisory (never refuses/forces an entry).
+        sizing.shares = max(1, int(sizing.shares * self._bounded_thinker_risk_scalar()))
         vol_pct = self._vol_pct(bars)
         meta_scale = self._meta.size_scalar(
             ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
@@ -705,6 +712,36 @@ class NeuromorphicBrain:
         self._wkey = key
         self.cortex.set_weights(self._weights_for(regime))
 
+    def _bounded_thinker_modifier(self) -> float:
+        """Slow-path 5-pillar deliberation bias, clamped to TOTAL_MOD_BOUND.
+
+        The Thinker (semantic/episodic/planning/metacognition/nash) runs in
+        the S2 slow path and publishes ``thinker_modifier`` to shared state;
+        this fast-path reader consumes it — bounded so no single pillar
+        dominates the verdict (R1: cortex still emits the verdict).
+        """
+        try:
+            mod = float(self.state.get("thinker_modifier", 0.0) or 0.0)
+        except Exception:
+            return 0.0
+        return max(-TOTAL_MOD_BOUND, min(TOTAL_MOD_BOUND, mod))
+
+    def _bounded_thinker_confidence(self) -> float:
+        """Slow-path affective confidence nudge, clamped to CONF_BOUND."""
+        try:
+            mod = float(self.state.get("thinker_confidence_mod", 0.0) or 0.0)
+        except Exception:
+            return 0.0
+        return max(-CONF_BOUND, min(CONF_BOUND, mod))
+
+    def _bounded_thinker_risk_scalar(self) -> float:
+        """Affective (fear/greed) position-size multiplier from the S2 path."""
+        try:
+            scalar = float(self.state.get("thinker_risk_scalar", 1.0) or 1.0)
+        except Exception:
+            return 1.0
+        return max(RISK_FLOOR, min(RISK_CEIL, scalar))
+
     def _news_bias(self, ticker: str) -> float:
         """Bounded live-news sentiment bias (System 2 evidence, ±0.03).
 
@@ -746,6 +783,8 @@ class NeuromorphicBrain:
         cross: float = 0.0,
     ) -> dict[str, Any]:
         """Compute the blended stabilized score and decision intermediates."""
+        thinker_mod = self._bounded_thinker_modifier()
+        thinker_conf = self._bounded_thinker_confidence()
         base = self.cortex.evaluate(alpha, prior_top=self._realized.dynamic_prior_top())
         nash_pred = self.nash.predict(alpha, base.score, base.direction)
         nash_op = self._compute_nash_mod(nash_pred)
@@ -756,20 +795,23 @@ class NeuromorphicBrain:
         advisor_delta = self._advisor.threshold_delta()
         news_bias = self._news_bias(ticker)
         raw = blended * regime_mul + halim + episodic + nash_op
-        raw += news_bias + cross - advisor_delta
+        raw += news_bias + cross - advisor_delta + thinker_mod
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
+        confidence = max(0.05, min(0.95, base.confidence + thinker_conf))
         return {
             "base": base,
             "nash_pred": nash_pred,
             "nash_op": nash_op,
             "neuro_score": neuro_score,
-            "confidence": base.confidence,
+            "confidence": confidence,
             "raw_score": raw,
             "stabilized": stabilized,
             "final_dir": final_dir,
             "dyn_reason": dyn_reason,
             "nash_win_prob": nash_pred.win_prob,
             "advisor_delta": advisor_delta,
+            "thinker_mod": thinker_mod,
+            "thinker_conf": thinker_conf,
         }
 
     def _calibration_nudge(self, score: float) -> float:

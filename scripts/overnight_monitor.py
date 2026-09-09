@@ -27,6 +27,13 @@ TRADES_FILE = os.path.join(BASE_DIR, "models/buffer/trades.json")
 MEMORY_FILE = os.path.join(BASE_DIR, "models/juli_memory/juli_memory.json")
 HEALTH_URL = "http://127.0.0.1:8080/health"
 TUNNEL_URL = "https://api.hanoonweb.xyz/health"
+TUNNEL_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
 
 
 def load_trades():
@@ -60,7 +67,8 @@ def check_health():
 def check_tunnel():
     """Check named tunnel health."""
     try:
-        with urllib.request.urlopen(TUNNEL_URL, timeout=5) as resp:
+        req = urllib.request.Request(TUNNEL_URL, headers=TUNNEL_HEADERS)
+        with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read())
     except Exception as e:
         return {"error": str(e)}
