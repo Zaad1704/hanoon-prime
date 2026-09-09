@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 import urllib.request
 from typing import Any, Callable, Optional
+
+from ._telegram import _get_chat_id, _get_token
 
 log = logging.getLogger(__name__)
 
@@ -24,24 +25,6 @@ _POLL_INTERVAL: float = 3.0
 _LONG_POLL_TIMEOUT: int = 2
 _CHAT_MAX_PER_MIN: int = 20
 _chat_bucket: dict[str, float] = {"count": 0.0, "window": 0.0}
-
-
-def _get_token() -> Optional[str]:
-    """Read Telegram bot token from env (shared with the notifier)."""
-    for var in ("TRADING_BOT_TELEGRAM_TOKEN", "TELEGRAM_BOT_TOKEN"):
-        val = os.getenv(var)
-        if val:
-            return val
-    return None
-
-
-def _get_chat_id() -> Optional[str]:
-    """Read Telegram chat ID from env (shared with the notifier)."""
-    for var in ("TRADING_BOT_TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID"):
-        val = os.getenv(var)
-        if val:
-            return val
-    return None
 
 
 class TelegramChat:

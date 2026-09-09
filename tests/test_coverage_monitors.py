@@ -513,6 +513,7 @@ class TestTelegram:
         monkeypatch.delenv("TRADING_BOT_TELEGRAM_TOKEN", raising=False)
         monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
         monkeypatch.delenv("TRADING_BOT_TELEGRAM_CHAT_ID", raising=False)
+        monkeypatch.setattr("hanoon_prime._telegram._dot_env_vars", lambda: {})
         assert send("hello") is False
 
     def test_429_cooldown(self, monkeypatch):

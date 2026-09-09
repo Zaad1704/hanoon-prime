@@ -1,9 +1,5 @@
 """hanoon_prime._telegram — Telegram notifications for JULI.
-
-Sends trade entries, exits, safety halts, and errors to Telegram.
-Uses stdlib urllib — no external dependencies.
-Rate-limited (max 10/min), 429-aware, chunked at 4096 chars.
-The read-only chat interface lives in _telegram_chat.py.
+Sends entries, exits, holds, halts, and errors via stdlib urllib.
 """
 
 from __future__ import annotations
@@ -29,22 +25,41 @@ _last_send: float = 0.0
 _cooldown_until: float = 0.0
 
 
+_ENV_FILE = os.path.normpath(os.path.join(__file__, "..", "..", "..", ".env"))
+
+
+def _dot_env_vars() -> dict[str, str]:
+    """Read KEY=VALUE pairs from repo-root .env (launch-path agnostic)."""
+    try:
+        with open(_ENV_FILE, encoding="utf-8") as fh:
+            lines = [ln.strip() for ln in fh if ln.strip()]
+    except OSError as exc:
+        log.debug("No .env fallback: %s", exc)
+        return {}
+    env: dict[str, str] = {}
+    for ln in lines:
+        if "=" in ln and not ln.startswith("#"):
+            key, _, val = ln.partition("=")
+            env[key.strip()] = val.strip()
+    return env
+
+
 def _get_token() -> Optional[str]:
-    """Read Telegram bot token from env."""
+    """Read Telegram bot token from env (.env fallback)."""
     for var in ("TRADING_BOT_TELEGRAM_TOKEN", "TELEGRAM_BOT_TOKEN"):
         val = os.getenv(var)
         if val:
             return val
-    return None
+    return _dot_env_vars().get("TRADING_BOT_TELEGRAM_TOKEN")
 
 
 def _get_chat_id() -> Optional[str]:
-    """Read Telegram chat ID from env."""
+    """Read Telegram chat ID from env (.env fallback)."""
     for var in ("TRADING_BOT_TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID"):
         val = os.getenv(var)
         if val:
             return val
-    return None
+    return _dot_env_vars().get("TRADING_BOT_TELEGRAM_CHAT_ID")
 
 
 def _rate_ok() -> bool:
@@ -176,16 +191,3 @@ def startup(tickers: list[str] | None = None) -> None:
 def shutdown(reason: str = "") -> None:
     """Notify bot shutdown."""
     send(f"🔴 JULI Prime stopped\n{reason}")
-
-
-__all__ = [
-    "send",
-    "trade_opened",
-    "trade_closed",
-    "trade_hold",
-    "postmortem",
-    "safety_halt",
-    "error_notify",
-    "startup",
-    "shutdown",
-]
