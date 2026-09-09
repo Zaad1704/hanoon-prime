@@ -14,7 +14,7 @@ import os
 import threading
 import time
 import urllib.request
-from typing import Optional
+from typing import Any, Optional
 
 from .types import ExitLevels
 
@@ -144,6 +144,22 @@ def safety_halt(reason: str) -> None:
     send(f"🛑 TRADING HALTED\n{reason}")
 
 
+def trade_hold(ticker: str, minutes: float, side: str = "LONG") -> None:
+    """Notify an open position still being held past a milestone."""
+    msg = f"🟡 HOLDING {ticker} | {side} | {minutes:.0f} min"
+    send(msg)
+    log.info(msg)
+
+
+def postmortem(insight: dict[str, Any]) -> None:
+    """Notify HALIM's post-mortem JSON verbatim (flat book)."""
+    if not insight:
+        return
+    msg = json.dumps(insight, indent=2, ensure_ascii=False)
+    send(f"📋 HALIM POST-MORTEM\n{msg}")
+    log.info("POSTMORTEM %s", msg)
+
+
 def error_notify(context: str, detail: str) -> None:
     """Notify an error condition."""
     send(f"❗ ERROR in {context}\n{detail}")
@@ -166,6 +182,8 @@ __all__ = [
     "send",
     "trade_opened",
     "trade_closed",
+    "trade_hold",
+    "postmortem",
     "safety_halt",
     "error_notify",
     "startup",

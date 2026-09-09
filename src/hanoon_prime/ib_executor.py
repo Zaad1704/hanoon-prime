@@ -125,6 +125,7 @@ class IBExecutor:
                 len(self.brain._open_positions),
             )
             return
+        self._notify_open_fills(ib_positions)
         # Fire exit for any tracked position that IB no longer reports.
         # Use _open_positions (not just _brackets) so adopted/orphan
         # positions without OCA protection are still learned from.
@@ -201,12 +202,17 @@ class IBExecutor:
         pnl = get_ib_pnl(self.ib, ticker, pos)
         is_synthetic = ticker in self._synthetic
         self._synthetic.discard(ticker)
+        trade_closed(
+            ticker,
+            "LONG" if pos.direction > 0 else "SHORT",
+            pnl,
+            reason="reconciled" if is_synthetic else "",
+        )
         if is_synthetic:
             log.info("EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
                      ticker, pnl)
         else:
             log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
-            trade_closed(ticker, "LONG" if pos.direction > 0 else "SHORT", pnl)
             self.brain.record_trade(
                 ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
             )
@@ -222,6 +228,22 @@ class IBExecutor:
                 "source": "reconciled_exit" if is_synthetic else "ib_fill",
             }
         )
+
+    def _notify_open_fills(self, ib_positions: dict[str, Any]) -> None:
+        """Fire fill-confirmed entry notifications for pending brackets."""
+        for sym in list(self._pending_parent):
+            pos = ib_positions.get(sym)
+            if pos is None:
+                continue
+            self._pending_parent.discard(sym)
+            stop, target = self._brackets.get(sym, (0.0, 0.0))
+            trade_opened(
+                sym,
+                "BUY" if pos.direction > 0 else "SELL",
+                int(pos.shares),
+                float(pos.entry_price or 0.0),
+                ExitLevels(stop=float(stop or 0.0), target=float(target or 0.0)),
+            )
 
     def monitor_orders(self, ib_positions: dict[str, Any], streamer: Any) -> None:
         """Monitor ALL parent orders — cancel orphans, trail both."""

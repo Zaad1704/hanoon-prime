@@ -59,6 +59,7 @@ class IBStreamingBot(BotCycleMixin):
         self._closing: set[str] = set()
         self._watched: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
+        self._hold_notified: dict[str, float] = {}
         self._last_bars: int = 0
         # Gateway supervision state (rebuild runner_gateway port)
         self._gw_was_connected: bool = True

@@ -438,6 +438,10 @@ class ExitPolicy:
         """Whether a ticker is being exit-monitored."""
         return ticker in self._entry_ts
 
+    def hold_minutes(self, ticker: str) -> float:
+        """Minutes held for a registered position (0.0 if unknown)."""
+        return max(0.0, (time.time() - self._entry_ts.get(ticker, time.time())) / 60.0)
+
     def telemetry(self) -> dict[str, float | int]:
         """Learned-exit telemetry (advisor view of the current policy)."""
         return {

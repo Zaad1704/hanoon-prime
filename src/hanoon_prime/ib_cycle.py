@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._ib_sync import read_portfolio
-from ._telegram import shutdown
+from ._telegram import postmortem, shutdown, trade_hold
 from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
 from .brain.policy.verdict import ENTER, Verdict
@@ -25,6 +25,8 @@ RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
+HOLD_FIRST_MIN: float = 15.0  # first open-position hold notice (minutes)
+HOLD_REPEAT_MIN: float = 60.0  # repeat hold notice every this many minutes
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
@@ -340,6 +342,7 @@ class BotCycleMixin:
                 self._finish_cycle([], [], pnl, CycleMeta(poll, started, False))
                 return
             self._run_brain_cycle(poll, pnl, started)
+            self._notify_holds()
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
 
@@ -668,7 +671,8 @@ class BotCycleMixin:
 
     def _reflect_closed(self) -> None:
         """Route closed trades to neuromorphic brain for learning."""
-        for trade in self.executor.get_newly_closed_trades():
+        trades = self.executor.get_newly_closed_trades()
+        for trade in trades:
             won = trade["pnl"] > 0
             source = trade.get("source", "ib_fill")
             self.juli.brain.on_trade_close(
@@ -683,6 +687,7 @@ class BotCycleMixin:
             )
             self._closing.discard(trade["ticker"])
             self._watched.discard(trade["ticker"])
+            self._hold_notified.pop(trade["ticker"], None)
             self.streamer.unwatch_pnl_single(trade["ticker"])
             log.info(
                 "REFLECT %s %s pnl=%.4f src=%s",
@@ -691,6 +696,33 @@ class BotCycleMixin:
                 trade["pnl"],
                 source,
             )
+        if trades and not self.hippocampus._open_positions:
+            self._send_postmortem()
+
+    def _send_postmortem(self) -> None:
+        """After the book goes flat, forward HALIM's post-mortem verbatim."""
+        try:
+            insight = self.juli.brain.state.get("halim_last_insight") or {}  # array-safe
+            if insight:
+                postmortem(insight)
+        except Exception as exc:
+            log.debug("postmortem notify failed: %s", exc)
+
+    def _notify_holds(self) -> None:
+        """Send hold milestone notifications for open positions."""
+        try:
+            for t in tuple(self.hippocampus._open_positions):
+                pos = self.hippocampus._open_positions[t]
+                mins = self.juli.brain.exits.hold_minutes(t)
+                last = self._hold_notified.get(t, 0.0)
+                if (last <= 0.0 and mins >= HOLD_FIRST_MIN) or (
+                    last > 0.0 and mins - last >= HOLD_REPEAT_MIN
+                ):
+                    self._hold_notified[t] = mins
+                    side = "LONG" if pos.direction > 0 else "SHORT"
+                    trade_hold(t, mins, side)
+        except Exception as exc:
+            log.debug("hold notify failed: %s", exc)
 
     def _heartbeat(self) -> None:
         """Periodic status log."""

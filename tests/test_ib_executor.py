@@ -204,6 +204,75 @@ class TestRecordExit:
 
 
 # ---------------------------------------------------------------------------
+# TestNotifyOpenFills — fill-confirmed entry notifications
+# ---------------------------------------------------------------------------
+
+
+class TestNotifyOpenFills:
+    """_notify_open_fills fires entry notifications only on IB fill confirm."""
+
+    def test_fires_when_position_appears(self):
+        exc = make_executor(tracked={"TSLA"})
+        exc._pending_parent.add("TSLA")
+        exc._brackets["TSLA"] = (95.0, 110.0)
+        pos = make_pos(direction=1, shares=10, entry_price=100.0)
+        with patch("hanoon_prime.ib_executor.trade_opened") as fn:
+            exc._notify_open_fills({"TSLA": pos})
+        fn.assert_called_once()
+        _, side, qty, price, levels = fn.call_args[0]
+        assert side == "BUY"
+        assert qty == 10
+        assert price == 100.0
+        assert levels.stop == 95.0
+        assert levels.target == 110.0
+        assert "TSLA" not in exc._pending_parent
+
+    def test_ignores_still_pending(self):
+        exc = make_executor(tracked={"TSLA"})
+        exc._pending_parent.add("TSLA")
+        exc._notify_open_fills({})
+        assert "TSLA" in exc._pending_parent
+
+
+# ---------------------------------------------------------------------------
+# TestRecordExitNotify — all closes notify, including reconciled
+# ---------------------------------------------------------------------------
+
+
+class TestRecordExitNotify:
+    """_record_exit notifies every close, including synthetic/reconciled."""
+
+    def test_synthetic_close_notifies(self):
+        exc = make_executor(tracked={"TSLA"})
+        exc.brain._open_positions = {
+            "TSLA": make_pos(direction=1, shares=10, entry_price=100.0)
+        }
+        exc._synthetic.add("TSLA")
+        exc.ib.trades.return_value = []
+        streamer = MagicMock()
+        streamer.get_last_price.return_value = 110.0
+        with patch("hanoon_prime.ib_executor.trade_closed") as fn:
+            exc._record_exit("TSLA", streamer)
+        fn.assert_called_once()
+        assert fn.call_args.kwargs["reason"] == "reconciled"
+        exc.brain.record_trade.assert_not_called()
+
+    def test_real_close_notifies_plain(self):
+        exc = make_executor(tracked={"TSLA"})
+        exc.brain._open_positions = {
+            "TSLA": make_pos(direction=1, shares=10, entry_price=100.0)
+        }
+        exc.ib.trades.return_value = []
+        streamer = MagicMock()
+        streamer.get_last_price.return_value = 110.0
+        with patch("hanoon_prime.ib_executor.trade_closed") as fn:
+            exc._record_exit("TSLA", streamer)
+        fn.assert_called_once()
+        assert fn.call_args.kwargs.get("reason", "") == ""
+        exc.brain.record_trade.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # TestCancelAll
 # ---------------------------------------------------------------------------
 
