@@ -475,6 +475,8 @@ class BotCycleMixin:
             account_feed=feed,
             consecutive_losses=getattr(self.hippocampus, "_consecutive_losses", 0),
         )
+        # Mirror IB account context to the executor for close notifications.
+        self.executor._account_feed = {"equity": feed.get("equity"), "daily_pnl": daily}
 
     def _execute_verdict(self, verdict: Verdict) -> None:
         """Execute one ENTER verdict (live bid/ask, sizing, open skip)."""

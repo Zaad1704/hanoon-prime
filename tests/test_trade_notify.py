@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from hanoon_prime._telegram import postmortem, trade_closed
 from hanoon_prime.ib_cycle import HOLD_FIRST_MIN, HOLD_REPEAT_MIN, BotCycleMixin
 
 
@@ -128,3 +129,46 @@ class TestReflectClosedPostmortem:
         with patch("hanoon_prime.ib_cycle.postmortem") as fn:
             bot._reflect_closed()
         fn.assert_not_called()
+
+
+class TestHalimSeparateChat:
+    """HALIM post-mortems route to their own chat when configured."""
+
+    def test_postmortem_routes_to_halim_chat(self, monkeypatch):
+        monkeypatch.setenv("HALIM_TELEGRAM_CHAT_ID", "-100123456789")
+        with patch("hanoon_prime._telegram.send") as fn:
+            postmortem({"insight": "done"})
+        fn.assert_called_once()
+        args, kwargs = fn.call_args
+        assert kwargs["chat_id"] == "-100123456789"
+        assert "HALIM POST-MORTEM" in args[0]
+
+    def test_postmortem_falls_back_to_main_chat(self, monkeypatch):
+        from hanoon_prime._telegram import _get_chat_id
+
+        monkeypatch.delenv("HALIM_TELEGRAM_CHAT_ID", raising=False)
+        with patch("hanoon_prime._telegram.send") as fn:
+            postmortem({"insight": "done"})
+        args, kwargs = fn.call_args
+        assert kwargs["chat_id"] == _get_chat_id()  # main chat fallback
+
+
+class TestTradeClosedDetails:
+    """trade_closed keeps the IB P&L line and appends extra context."""
+
+    def test_trade_closed_appends_extra(self):
+        with patch("hanoon_prime._telegram.send") as fn:
+            trade_closed(
+                "TSLA",
+                "LONG",
+                0.1061,
+                reason="target",
+                extra="Account $242,783 | IB day -554.00\nJULI WR 66.5% (n=200)",
+            )
+        body = fn.call_args[0][0]
+        assert "✅ WIN TSLA" in body
+        assert "P&L: $+0.1061" in body
+        assert "Reason: target" in body
+        assert "Account $242,783" in body
+        assert "IB day -554.00" in body
+        assert "JULI WR 66.5% (n=200)" in body

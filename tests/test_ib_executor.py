@@ -504,3 +504,69 @@ class TestPlaceOca:
         assert len(placed) == 2
         for order in placed:
             assert order.outsideRth is True
+
+
+# ---------------------------------------------------------------------------
+# Short policy: SELL-open hard-block + IB account context on close notify
+# ---------------------------------------------------------------------------
+
+
+class TestShortPolicy:
+    """direction_mode=long_only must block SELL opens at the executor level."""
+
+    def test_sell_thought_blocked_when_long_only(self):
+        from types import SimpleNamespace
+
+        from hanoon_prime.brain.policy.trading_policy import TRADING_CONFIG
+
+        mode = TRADING_CONFIG.direction_mode
+        try:
+            TRADING_CONFIG.direction_mode = "long_only"
+            exc = make_executor()
+            streamer = MagicMock()
+            streamer.buffer_atr.return_value = 2.0
+            streamer.contracts = {"TSLA": MagicMock()}
+            exc.brain.size_position.return_value = 10
+            thought = SimpleNamespace(direction=-1, score=0.5, confidence=0.5)
+            exc.place_bracket("TSLA", thought, 150.0, streamer)
+            exc.ib.bracketOrder.assert_not_called()
+            exc.ib.placeOrder.assert_not_called()
+        finally:
+            TRADING_CONFIG.direction_mode = mode
+
+    def test_sell_thought_allowed_when_both(self):
+        from types import SimpleNamespace
+
+        from hanoon_prime.brain.policy.trading_policy import TRADING_CONFIG
+
+        mode = TRADING_CONFIG.direction_mode
+        try:
+            TRADING_CONFIG.direction_mode = "both"
+            exc = make_executor()
+            streamer = MagicMock()
+            streamer.buffer_atr.return_value = 2.0
+            streamer.contracts = {"TSLA": MagicMock()}
+            exc.brain.size_position.return_value = 10
+            exc.ib.bracketOrder.return_value = [MagicMock(), MagicMock(), MagicMock()]
+            thought = SimpleNamespace(direction=-1, score=0.5, confidence=0.5)
+            exc.place_bracket("TSLA", thought, 150.0, streamer)
+            exc.ib.bracketOrder.assert_called_once()
+        finally:
+            TRADING_CONFIG.direction_mode = mode
+
+
+class TestCloseSummary:
+    """_close_summary renders IB account + realized win rate context."""
+
+    def test_close_summary_includes_ib_context(self):
+        exc = make_executor()
+        exc._account_feed = {"equity": 242783.0, "daily_pnl": -554.0}
+        exc._winrate_provider = lambda: (0.665, 200)
+        summary = exc._close_summary(make_pos(), 0.1061)
+        assert "Account $242,783" in summary
+        assert "IB day -554.00" in summary
+        assert "JULI WR 66.5% (n=200)" in summary
+
+    def test_close_summary_empty_without_context(self):
+        exc = make_executor()
+        assert exc._close_summary(make_pos(), 0.1061) == ""

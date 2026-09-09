@@ -99,9 +99,9 @@ def _send_chunk(token: str, chat_id: str, chunk: str) -> bool:
         return False
 
 
-def send(message: str) -> bool:
+def send(message: str, chat_id: str | None = None) -> bool:
     """Send a message via Telegram. Returns True on success."""
-    token, chat_id = _get_token(), _get_chat_id()
+    token, chat_id = _get_token(), chat_id or _get_chat_id()
     if not token or not chat_id:
         log.debug("Telegram not configured")
         return False
@@ -143,13 +143,16 @@ def trade_closed(
     side: str,
     pnl: float,
     reason: str = "",
+    extra: str = "",
 ) -> None:
-    """Notify trade exit with P&L."""
+    """Notify trade exit with IB P&L + context."""
     result = "WIN" if pnl > 0.01 else ("LOSS" if pnl < -0.01 else "BREAKEVEN")
     emoji = "✅" if result == "WIN" else ("🔴" if result == "LOSS" else "➖")
     msg = f"👑 JULI {emoji} {result} {ticker}\n{side} | P&L: ${pnl:+.4f}"
     if reason:
         msg += f"\nReason: {reason}"
+    if extra:
+        msg += f"\n{extra}"
     send(msg)
     log.info(msg)
 
@@ -167,11 +170,14 @@ def trade_hold(ticker: str, minutes: float, side: str = "LONG") -> None:
 
 
 def postmortem(insight: dict[str, Any]) -> None:
-    """Notify HALIM's post-mortem JSON verbatim (flat book)."""
+    """Notify HALIM's post-mortem JSON to its own chat (main fallback)."""
     if not insight:
         return
     msg = json.dumps(insight, indent=2, ensure_ascii=False)
-    send(f"📋 HALIM POST-MORTEM\n{msg}")
+    chat_id = os.getenv("HALIM_TELEGRAM_CHAT_ID") or _dot_env_vars().get(
+        "HALIM_TELEGRAM_CHAT_ID"
+    )
+    send(f"📋 HALIM POST-MORTEM\n{msg}", chat_id=chat_id or _get_chat_id())
     log.info("POSTMORTEM %s", msg)
 
 

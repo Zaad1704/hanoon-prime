@@ -12,6 +12,7 @@ from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positi
 from ._protect import protect_position
 from ._telegram import trade_closed, trade_opened
 from .brain.horizons import HORIZONS
+from .brain.policy.trading_policy import TRADING_CONFIG
 from .brain.risk import SizingResult
 from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
@@ -47,6 +48,9 @@ class IBExecutor:
         self._closed_trades: list[dict[str, Any]] = []
         self.last_thoughts: dict[str, Any] = {}
         self.on_fill_confirmed: Callable[[str, float], None] | None = None
+        # IB account context mirrored from ib_cycle each cycle (IB source).
+        self._account_feed: dict[str, Any] = {}
+        self._winrate_provider: Callable[[], tuple[float, int]] | None = None
 
     def place_bracket(
         self,
@@ -81,6 +85,9 @@ class IBExecutor:
         if shares <= 0:
             return
         action = "BUY" if d > 0 else "SELL"
+        if action == "SELL" and not TRADING_CONFIG.is_direction_allowed(action):
+            log.info("SHORT order blocked (long_only policy)")
+            return
         contract = streamer.contracts[ticker]
         self._horizons[ticker] = horizon
         for order in self.ib.bracketOrder(
@@ -208,6 +215,7 @@ class IBExecutor:
             "LONG" if pos.direction > 0 else "SHORT",
             pnl,
             reason="reconciled" if is_synthetic else "",
+            extra=self._close_summary(pos, pnl),
         )
         if is_synthetic:
             log.info("EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
@@ -229,6 +237,22 @@ class IBExecutor:
                 "source": "reconciled_exit" if is_synthetic else "ib_fill",
             }
         )
+
+    def _close_summary(self, pos: Any, pnl: float) -> str:
+        """Enrich close notifications with IB account + realized context."""
+        feed = self._account_feed or {}
+        daily = feed.get("daily_pnl")
+        parts = []
+        if feed.get("equity") is not None:
+            parts.append(f"Account ${feed['equity']:,.0f} | IB day {daily:+.2f}")
+        if self._winrate_provider is not None:
+            try:
+                rate, n = self._winrate_provider()
+                if n:
+                    parts.append(f"JULI WR {rate * 100:.1f}% (n={n})")
+            except Exception as exc:
+                log.debug("winrate unavailable: %s", exc)
+        return "\n".join(parts)
 
     def _confirm_fill_hook(self, sym: str, entry_price: float) -> None:
         """Call the cycle's fill-confirmed accounting (if wired)."""

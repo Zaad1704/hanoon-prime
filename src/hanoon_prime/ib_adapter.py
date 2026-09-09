@@ -52,6 +52,8 @@ class IBStreamingBot(BotCycleMixin):
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
         self.executor.on_fill_confirmed = self._confirm_fill
+        # Realized win rate (IB-confirmed fills) for close notifications.
+        self.executor._winrate_provider = self.juli.brain._realized.recent_win_rate
         # Telegram chat (read-only queries answered from brain state)
         self._chat = TelegramChat(state_provider=self._chat_state)
         # Continuous pipeline health daemon (alerts + heal flags)
