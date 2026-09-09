@@ -376,7 +376,8 @@ class BotCycleMixin:
                 self._exit_reasons[t] = es.get("type", "brain_exit")
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
         if pnl is not None:
-            self.hippocampus._daily_pnl = float(pnl.dailyPnL)
+            daily = float(pnl.dailyPnL)
+            self.hippocampus._daily_pnl = daily if math.isfinite(daily) else 0.0
         self._publish_account_feed(pnl)
         market_open = bool(meta and meta.market_open)
         for v in verdicts:
@@ -395,6 +396,8 @@ class BotCycleMixin:
     def _publish_account_feed(self, pnl: Any) -> None:
         """Forward IB account facts to the slow cortex on BrainState."""
         daily = float(pnl.dailyPnL) if pnl is not None else 0.0
+        if not math.isfinite(daily):
+            daily = 0.0  # IB PnL stream starts as nan before the first update
         feed: dict[str, Any] = {"daily_pnl": daily, "ts": time.monotonic()}
         if time.monotonic() - getattr(self, "_last_policy_sync", 0.0) >= RISK_SYNC_SECS:
             self._last_policy_sync = time.monotonic()
