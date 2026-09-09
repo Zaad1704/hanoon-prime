@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 import urllib.request
@@ -34,6 +35,17 @@ from hanoon_prime.telemetry import TelemetryAPI  # noqa: E402
 RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 LOG = logging.getLogger("smoke")
 CHECKS: list[tuple[str, bool, str]] = []
+
+# Hermetic runtime: smoke trades must NEVER touch the production stores.
+# All three persistences redirect into a disposable .smoke_runtime dir.
+_HERM = RUNTIME / ".smoke_runtime"
+_HERM.mkdir(exist_ok=True)
+for _var, _name in (
+    ("HANOO_MEMORY_FILE", "juli_state.json"),
+    ("HANOO_REALIZED_FILE", "juli_realized.json"),
+    ("HANOO_REGIME_FILE", "regime_weights.json"),
+):
+    os.environ.setdefault(_var, str(_HERM / _name))
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:

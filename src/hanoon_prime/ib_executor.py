@@ -215,7 +215,7 @@ class IBExecutor:
             "LONG" if pos.direction > 0 else "SHORT",
             pnl,
             reason="reconciled" if is_synthetic else "",
-            extra=self._close_summary(pos, pnl),
+            extra=self._close_summary(),
         )
         if is_synthetic:
             log.info("EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
@@ -238,7 +238,7 @@ class IBExecutor:
             }
         )
 
-    def _close_summary(self, pos: Any, pnl: float) -> str:
+    def _close_summary(self) -> str:
         """Enrich close notifications with IB account + realized context."""
         feed = self._account_feed or {}
         daily = feed.get("daily_pnl")

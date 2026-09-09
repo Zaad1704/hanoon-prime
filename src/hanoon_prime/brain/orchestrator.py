@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 from ..cortex import Cortex
+from ..edge import score_to_win_prob
 from ..hippocampus import Hippocampus
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from ..types import FillInfo
@@ -91,7 +92,11 @@ class NeuromorphicBrain:
         # overlaid on the structural defaults (the memory may hold a subset).
         weights = dict(DEFAULT_WEIGHTS)
         weights.update(self.memory.get_weights())
-        self.cortex = Cortex(weights=weights)
+        # Unified threshold: cortex admission and dynamics sizing share ONE
+        # adaptive number (memory threshold). _update_admission_threshold()
+        # pushes the dynamics value into the cortex each cycle, so the
+        # prediction-error calibration loop actually moves who enters.
+        self.cortex = Cortex(weights=weights, threshold=self.memory.threshold)
         self.hippocampus = Hippocampus(cortex=self.cortex, safety_enabled=False)
         self.dynamics = Dynamics(base_threshold=self.memory.threshold)
         self.nash = NashBrain()
@@ -421,7 +426,7 @@ class NeuromorphicBrain:
 
     def _size_entry(
         self,
-        ticker: str,
+        _ticker: str,
         snap: dict[str, Any],
         bars: dict[str, Any],
         thought: SimpleNamespace,
@@ -785,13 +790,13 @@ class NeuromorphicBrain:
         """Compute the blended stabilized score and decision intermediates."""
         thinker_mod = self._bounded_thinker_modifier()
         thinker_conf = self._bounded_thinker_confidence()
+        self.cortex._threshold = self.dynamics.threshold
         base = self.cortex.evaluate(alpha, prior_top=self._realized.dynamic_prior_top())
         nash_pred = self.nash.predict(alpha, base.score, base.direction)
         nash_op = self._compute_nash_mod(nash_pred)
         neuro_score = self._compute_neuro_score(alpha, ticker)
         cal_adj = self._calibration_nudge(base.score)
         blended = (1 - NEURO_BLEND) * (base.score + cal_adj) + NEURO_BLEND * neuro_score
-        # Gate advisor: learned, bounded threshold delta from realized WR.
         advisor_delta = self._advisor.threshold_delta()
         news_bias = self._news_bias(ticker)
         raw = blended * regime_mul + halim + episodic + nash_op
@@ -995,6 +1000,7 @@ class NeuromorphicBrain:
         """
         conf = self._last_conf.get(ticker, 0.5)
         score = self._last_score.get(ticker, 0.0)
+        # predicted_score is score_to_win_prob (win-prob), not sizing confidence (was: conf).
         self._reflector.on_trade_close(
             TradeClose(
                 ticker=ticker,
@@ -1002,7 +1008,7 @@ class NeuromorphicBrain:
                 pnl_pct=pnl_pct,
                 direction=direction,
                 alpha=self._last_alpha.get(ticker, {}),
-                predicted_score=conf,
+                predicted_score=score_to_win_prob(score),
                 regime=regime,
             )
         )

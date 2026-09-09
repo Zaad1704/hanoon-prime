@@ -48,9 +48,9 @@ def test_immune_literals_locked():
 
     assert (PRIOR_BOTTOM, PRIOR_TOP, PRIOR_TOP_MAX) == (0.25, 0.60, 0.65)
     assert SCORE_INVERT is False
-    assert MAX_POSITION_NOTIONAL == 25_000.0
-    assert MAX_LOSS_PER_TRADE == 250.0
-    assert MAX_CONCURRENT_POSITIONS == 30
+    assert MAX_POSITION_NOTIONAL == 5_000.0  # CONTRACT.md line 194
+    assert MAX_LOSS_PER_TRADE == 50.0  # CONTRACT.md line 195
+    assert MAX_CONCURRENT_POSITIONS == 3  # CONTRACT.md line 196
     assert DAILY_LOSS_LIMIT == 200.0
     assert CONSECUTIVE_LOSSES_PAUSE == 3
     assert KELLY_FRACTION == 0.25

@@ -181,3 +181,20 @@ def compute_osc_signals(
         "hurst_exponent": compute_hurst_exponent(close),
         "kelly_fraction": compute_kelly_fraction(close),
     }
+
+
+def compute_microstructure(close: Any, high: Any, low: Any) -> float:
+    """Mean bar range vs price level (book-noise proxy)."""
+    return float(np.mean(np.abs(high - low)) / (float(np.mean(close)) + 1e-12))
+
+
+def compute_fib_proximity(close: Any, high: Any, low: Any) -> float:
+    """0-1 nearness of last close to the 38.2% retracement (0.5 if thin)."""
+    if len(close) < 3:
+        return 0.5
+    hi, lo = float(np.max(high[-20:])), float(np.min(low[-20:]))
+    rng = hi - lo
+    if rng <= 1e-12:
+        return 0.5
+    prox = abs(float(close[-1]) - (hi - 0.382 * rng)) / rng
+    return float(np.clip(1.0 - prox * 4.0, 0.0, 1.0))

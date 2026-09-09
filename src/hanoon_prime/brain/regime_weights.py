@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,11 @@ class RegimeWeights:
     """Per-regime weight vectors with thin-data fallback to defaults."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or REGIME_FILE
+        # HANOO_REGIME_FILE keeps smoke runs out of the production vectors.
+        if path is None:
+            env_file = os.environ.get("HANOO_REGIME_FILE", "").strip()
+            path = Path(env_file) if env_file else REGIME_FILE
+        self._path = path
         self._lock = threading.RLock()
         self._vectors: dict[str, dict[str, float]] = {}
         self._counts: dict[str, int] = {}
@@ -62,9 +67,6 @@ class RegimeWeights:
                 vec[key] = max(self._wmin, min(self._wmax, vec[key] + delta))
             for key in vec:
                 vec[key] *= self._decay
-            total = sum(abs(v) for v in vec.values())
-            if total > 0:
-                vec = {k: v / total for k, v in vec.items()}
             self._vectors[regime] = vec
             self._counts[regime] = self._counts.get(regime, 0) + 1
             self._save()

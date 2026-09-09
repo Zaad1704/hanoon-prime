@@ -1,13 +1,26 @@
-"""hanoon_prime.telemetry — HTTP API for Juli webapp."""
+"""hanoon_prime.telemetry — real-time HTTP + SSE API for Juli webapp.
+
+Transport model (v2):
+  * An always-on refresher thread rebuilds a full telemetry snapshot every
+    SNAPSHOT_INTERVAL seconds — 24/7, whether or not any browser is watching.
+  * ``GET /snapshot`` returns that cached snapshot instantly (one round-trip
+    instead of the old 11 separate polls).
+  * ``GET /stream`` is a Server-Sent Events endpoint: every new snapshot is
+    pushed to all connected browsers within SNAPSHOT_INTERVAL. True real-time,
+    works through Cloudflare tunnels with no extra configuration.
+  * All legacy per-topic routes are kept and served from the cache when fresh
+    (zero cost) or rebuilt directly when the refresher thread is down.
+"""
 
 from __future__ import annotations
 
 import json
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import TRADING_CONFIG
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
@@ -17,6 +30,10 @@ log = __import__("logging").getLogger(__name__)
 
 # Shared flag: main cycle checks this and flattens when non-empty
 _FLATTEN_REQUESTED: list[int] = []  # [position_count] when pending
+
+# Snapshot cadence. 1s = real-time feel without hammering IB; the refresher
+# thread runs at this rate forever, independent of any browser.
+SNAPSHOT_INTERVAL = 1.0
 
 ROUTES_GET = {
     "/health": "_health",
@@ -35,40 +52,144 @@ ROUTES_GET = {
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
+# Route → handler method for POST mutations (also flipped via /config UI).
+POST_HANDLERS = {
+    "/safety-net": "_handle_safety_net",
+    "/config": "_handle_config",
+    "/flatten": "_handle_flatten",
+}
+
+# Route → key inside the snapshot payload
+_ROUTE_KEY = {
+    "/health": "health",
+    "/journal": "journal",
+    "/positions": "positions",
+    "/safety-net": "safety_net",
+    "/brain": "brain",
+    "/trades": "trades",
+    "/system2": "system2",
+    "/pipeline": "pipeline",
+    "/risk": "risk",
+    "/config": "config",
+    "/halim": "halim",
+    "/verdicts": "verdicts",
+    "/session": "session",
+}
+
+_MISSING = object()
+
 
 class _H(BaseHTTPRequestHandler):
     bot: Any = None
     journal_path: Path | None = None
+    # Shared cache owned by TelemetryAPI; set before the server starts.
+    cache: dict[str, Any] = {}
+    cache_lock: threading.Lock | None = None
+    builder: Callable[[], dict[str, Any]] | None = None
+    sse_registry: "SseRegistry | None" = None
+    # Called after a successful POST so the cache reflects the mutation
+    # immediately (no 1s staleness on user-initiated changes).
+    on_mutation: Callable[[], None] | None = None
+
+    protocol_version = "HTTP/1.1"  # keep-alive; required for smooth SSE
 
     def log_message(self, *_a: Any) -> None:
         """Suppress default stderr logging."""
 
+    # ── Routing ─────────────────────────────────────────────────────────
+
     def do_GET(self) -> None:
-        """Route GET requests."""
-        name = ROUTES_GET.get(self.path)
-        if name is None:
-            self._r(404, {"error": "not found", "path": self.path})
-        else:
-            self._r(200, getattr(self, name)())
+        """Serve telemetry routes from the cached snapshot."""
+        path = self.path.split("?", 1)[0]
+        if path == "/snapshot":
+            self._r(200, self._current_snapshot())
+            return
+        if path == "/stream":
+            self._handle_stream()
+            return
+        if path not in ROUTES_GET:
+            self._r(404, {"error": "not found", "path": path})
+            return
+        snap = self._current_snapshot()
+        payload = snap.get(_ROUTE_KEY[path], _MISSING)
+        if payload is _MISSING:
+            payload = getattr(self, ROUTES_GET[path])()
+        self._r(200, payload)
 
     def do_OPTIONS(self) -> None:
         """Handle CORS preflight."""
-        self.send_response(200)
+        self.send_response(HTTPStatus.OK)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_POST(self) -> None:
-        """Handle POST requests."""
-        if self.path == "/safety-net":
-            self._handle_safety_net()
-        elif self.path == "/config":
-            self._handle_config()
-        elif self.path == "/flatten":
-            self._handle_flatten()
-        else:
+        """Handle POST requests, then refresh the snapshot cache at once."""
+        handler = POST_HANDLERS.get(self.path)
+        if handler is None:
             self._r(404, {"error": "not found", "path": self.path})
+            return
+        getattr(self, handler)()
+        self._refresh_after_mutation()
+
+    def _refresh_after_mutation(self) -> None:
+        """Rebuild and broadcast the snapshot after a successful mutation."""
+        if self.on_mutation is None:
+            return
+        try:
+            self.on_mutation()
+        except Exception as exc:
+            log.debug("post-mutation refresh failed: %s", exc)
+
+    # ── Snapshot / stream plumbing ──────────────────────────────────────
+
+    def _current_snapshot(self) -> dict[str, Any]:
+        try:
+            with self.cache_lock or threading.Lock():
+                return self.cache.get("data") or {}
+        except Exception:
+            return {}
+
+    def _handle_stream(self) -> None:
+        """Server-Sent Events: push a fresh snapshot every interval."""
+        reg = self.sse_registry
+        if reg is None:
+            self._r(503, {"error": "stream unavailable"})
+            return
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            # Immediate first frame so the UI goes live instantly.
+            first = self._current_snapshot()
+            if first:
+                self.wfile.write(
+                    f"event: snapshot\ndata: {json.dumps(first, default=str)}\n\n".encode()
+                )
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        reg.add(self)
+        try:
+            while True:
+                # Sleep in short slices so shutdown() is honoured quickly.
+                if getattr(self.server, "_shutdown_request", False):
+                    break
+                time.sleep(0.2)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            log.debug("sse client disconnected")
+        finally:
+            reg.discard(self)
+            try:
+                self.wfile.close()
+            except Exception as exc:
+                log.debug("sse client wfile close: %s", exc)
+
+    # ── POST handlers (unchanged behaviour) ─────────────────────────────
 
     def _handle_safety_net(self) -> None:
         """Toggle safety net on/off, or resume from a halt (brain commands)."""
@@ -176,6 +297,8 @@ class _H(BaseHTTPRequestHandler):
     def _ib_positions(self) -> list[Any]:
         ib = self._ib()
         return list(ib.positions()) if ib else []
+
+    # ── Payload builders (unchanged, now called by the refresher thread) ─
 
     def _health(self) -> dict[str, Any]:
         bot, ib = self.bot, self._ib()
@@ -401,29 +524,170 @@ class _H(BaseHTTPRequestHandler):
         return {"entries": Journal(self.journal_path).tail(20)[::-1]}
 
 
+class SseRegistry:
+    """Tracks connected SSE clients and pushes new snapshots to them."""
+
+    def __init__(self) -> None:
+        self._clients: list[_H] = []
+        self._lock = threading.Lock()
+
+    def add(self, client: _H) -> None:
+        """Register a connected SSE client."""
+        with self._lock:
+            self._clients.append(client)
+
+    def discard(self, client: _H) -> None:
+        """Remove a client that disconnected or crashed."""
+        with self._lock:
+            try:
+                self._clients.remove(client)
+            except ValueError as exc:
+                log.debug("sse discard missing client: %s", exc)
+
+    def broadcast(self, snapshot: dict[str, Any]) -> int:
+        """Push a snapshot to every connected client. Returns delivered count."""
+        if not self._clients:
+            return 0
+        frame = f"event: snapshot\ndata: {json.dumps(snapshot, default=str)}\n\n".encode()
+        dead: list[_H] = []
+        with self._lock:
+            clients = list(self._clients)
+        for c in clients:
+            try:
+                c.wfile.write(frame)
+                c.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                dead.append(c)
+        for c in dead:
+            self.discard(c)
+        return len(clients) - len(dead)
+
+    @property
+    def count(self) -> int:
+        """Number of currently connected SSE clients."""
+        with self._lock:
+            return len(self._clients)
+
+
+def build_snapshot(handler: _H) -> dict[str, Any]:
+    """Aggregate every telemetry topic into one payload."""
+    return {
+        "health": handler._health(),
+        "positions": handler._positions(),
+        "safety_net": handler._safety_net_status(),
+        "brain": handler._brain_state(),
+        "system2": handler._system2_state(),
+        "pipeline": handler._pipeline_state(),
+        "risk": handler._risk_state(),
+        "config": handler._config(),
+        "halim": handler._halim_state(),
+        "verdicts": handler._verdicts(),
+        "trades": handler._recent_trades(),
+        "journal": handler._journal(),
+        "session": handler._session(),
+        "meta": {
+            "built_ts": time.time(),
+            "interval": SNAPSHOT_INTERVAL,
+        },
+    }
+
+
 class TelemetryAPI:
-    """Background HTTP server for Juli webapp."""
+    """Background HTTP + SSE server for Juli webapp.
+
+    A refresher thread rebuilds the full snapshot every SNAPSHOT_INTERVAL
+    seconds, forever — connected browsers or not. SSE clients get each new
+    snapshot pushed instantly; GET /snapshot returns the cached copy; legacy
+    per-topic routes are served from the cache.
+    """
 
     def __init__(self, bot: Any, journal_path: Path) -> None:
         self._bot, self._jp = bot, journal_path
-        self._server: HTTPServer | None = None
+        self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._refresh_thread: threading.Thread | None = None
+        self._cache: dict[str, Any] = {"data": {}, "ts": 0.0}
+        self._cache_lock = threading.Lock()
+        self._registry = SseRegistry()
+        self._stop = threading.Event()
+        # Legacy contract: binding at init lets bare HTTPServer(_H)
+        # fixtures (and any external harness) work without start().
         _H.bot = bot
         _H.journal_path = journal_path
 
-    def start(self) -> None:
-        """Start the HTTP server in a background thread."""
-        self._server = HTTPServer(("127.0.0.1", TELEMETRY_PORT), _H)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+    # ── wiring ──────────────────────────────────────────────────────────
+
+    def _make_handler(self) -> type[_H]:
+        # Bind instance state onto the class once (handler classes are
+        # instantiated per-request by http.server).
+        _H.cache = self._cache
+        _H.cache_lock = self._cache_lock
+        _H.sse_registry = self._registry
+        _H.on_mutation = self._build_and_cache
+        return _H
+
+    def _build_and_cache(self) -> None:
+        h = _H.__new__(_H)
+        h.bot = self._bot
+        h.journal_path = self._jp
+        try:
+            snap = build_snapshot(h)
+        except Exception as exc:  # never let the refresher die
+            log.warning("snapshot build failed: %s", exc)
+            return
+        with self._cache_lock:
+            self._cache["data"] = snap
+            self._cache["ts"] = time.time()
+        self._registry.broadcast(snap)
+
+    def _refresh_loop(self) -> None:
+        log.info("Telemetry snapshot refresher started (%.1fs cadence)", SNAPSHOT_INTERVAL)
+        while not self._stop.is_set():
+            t0 = time.time()
+            self._build_and_cache()
+            # Sleep the remainder of the interval in small slices.
+            elapsed = time.time() - t0
+            remaining = max(0.05, SNAPSHOT_INTERVAL - elapsed)
+            if self._stop.wait(remaining):
+                break
+
+    # ── lifecycle ───────────────────────────────────────────────────────
+
+    def start(self, port: int | None = None) -> None:
+        """Start HTTP server + snapshot refresher in background threads.
+
+        ``port`` overrides TELEMETRY_PORT (used by tests with port=0 for an
+        ephemeral bind); production callers keep the default.
+        """
+        handler = self._make_handler()
+        bind_port = TELEMETRY_PORT if port is None else port
+        self._server = ThreadingHTTPServer(("127.0.0.1", bind_port), handler)
+        self._server.daemon_threads = True
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, daemon=True, name="telemetry-http"
+        )
         self._thread.start()
-        log.info("TelemetryAPI live on http://127.0.0.1:%s", TELEMETRY_PORT)
+        self._refresh_thread = threading.Thread(
+            target=self._refresh_loop, daemon=True, name="telemetry-refresher"
+        )
+        self._refresh_thread.start()
+        log.info(
+            "TelemetryAPI live on http://127.0.0.1:%s (SSE /stream, /snapshot)",
+            TELEMETRY_PORT,
+        )
 
     def stop(self) -> None:
-        """Shut down the HTTP server."""
+        """Shut down HTTP server + refresher."""
+        self._stop.set()
         if self._server:
             self._server.shutdown()
             self._server.server_close()
-            log.info("TelemetryAPI stopped")
+        log.info("TelemetryAPI stopped")
+
+    @property
+    def stream_clients(self) -> int:
+        """Number of currently connected SSE stream clients."""
+        return self._registry.count
 
 
-__all__ = ["TelemetryAPI"]
+__all__ = ["TelemetryAPI", "SNAPSHOT_INTERVAL"]

@@ -180,12 +180,12 @@ class RiskEngine:
         # Entry quality modifiers (advisory score penalties)
         direction = 1 if score > 0 else -1
         quality_penalty = self._compute_entry_quality_penalty(
-            alpha=alpha,
-            direction=direction,
-            high=high,
-            low=low,
-            vwap_dev=alpha.get("vwap_deviation", 0.0) if alpha else 0.0,
-            momentum=alpha.get("momentum", 0.0) if alpha else 0.0,
+            alpha,
+            direction,
+            high,
+            low,
+            alpha.get("vwap_deviation", 0.0) if alpha else 0.0,
+            alpha.get("momentum", 0.0) if alpha else 0.0,
         )
         adjusted_score = score - quality_penalty
         # Recompute EV with adjusted score (advisory adjustment)
@@ -251,7 +251,7 @@ class RiskEngine:
 
     def _compute_entry_quality_penalty(
         self,
-        alpha: dict[str, float] | None,
+        _alpha: dict[str, float] | None,
         direction: int,
         high: list[float] | None,
         low: list[float] | None,

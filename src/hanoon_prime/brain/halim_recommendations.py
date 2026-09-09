@@ -16,12 +16,21 @@ from __future__ import annotations
 import logging
 import time
 import urllib.request
-from typing import Any
+from typing import Any, TypedDict
 
 log = logging.getLogger(__name__)
 
+
+class _ActionSpec(TypedDict, total=True):
+    """Type for HALIM recommendation action specifications."""
+
+    min: float
+    max: float
+    target: str
+
+
 # Valid actions and their parameter bounds
-_ACTIONS = {
+_ACTIONS: dict[str, _ActionSpec] = {
     "adjust_threshold": {"min": 0.40, "max": 0.80, "target": "threshold"},
     "adjust_weight": {"min": -2.0, "max": 2.0, "target": "weights"},
     "adjust_risk_scalar": {"min": 0.1, "max": 2.0, "target": "risk_scalar"},

@@ -133,14 +133,14 @@ class _ProbeMemory:
         self._band_wr_val: float | None = None
         self._band_total_val: int = 0
 
-    def band_wr(self, score: float) -> tuple[float, float, int]:
+    def band_wr(self, _score: float) -> tuple[float, float, int]:
         """Empty band data for thin-data test (no band pull)."""
         if self._band_wr_val is not None:
             rel = min(1.0, self._band_total_val / 100.0)
             return self._band_wr_val, rel, self._band_total_val
         return 0.5, 0.0, 0  # Neutral, no reliability
 
-    def conf_band_wr(self, conf: float) -> tuple[float, float, int]:
+    def conf_band_wr(self, _conf: float) -> tuple[float, float, int]:
         """Confidence band with thin-data threshold.
 
         If samples < CONF_MIN_SAMPLES, return (0.5, 0.0, 0) to fall back
@@ -151,7 +151,7 @@ class _ProbeMemory:
         rel = min(1.0, self._conf_total / (self._conf_total + 100))
         return self._conf_wr, rel, self._conf_total
 
-    def is_gate_closed(self, score: float) -> bool:
+    def is_gate_closed(self, _score: float) -> bool:
         """No gate close for probe memory (thin data mode)."""
         return False
 

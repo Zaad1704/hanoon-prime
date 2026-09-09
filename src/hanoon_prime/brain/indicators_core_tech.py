@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from .indicators_core import _cl
+from .indicators_core import _cl, compute_fib_proximity, compute_microstructure
 
 
 def compute_ad_signal(close: Any, high: Any, low: Any, volume: Any) -> float:
@@ -178,6 +178,7 @@ def compute_flow_signals(
     close: Any, high: Any, low: Any, volume: Any
 ) -> dict[str, float]:
     """Flow/structure indicators into named dict."""
+    c, h, l = (np.asarray(x, dtype=float) for x in (close, high, low))
     return {
         "ad_signal": compute_ad_signal(close, high, low, volume),
         "obv_divergence": compute_obv_divergence(close, volume),
@@ -191,6 +192,6 @@ def compute_flow_signals(
         "institutional_wave": compute_institutional_wave(close, high, low, volume),
         "keltner_position": compute_keltner_position(close, high, low),
         "vw_macd_hist": compute_vw_macd_hist(close, volume),
-        "microstructure": 0.5,
-        "fib_proximity": 0.5,
+        "microstructure": compute_microstructure(c, h, l),
+        "fib_proximity": compute_fib_proximity(c, h, l),
     }

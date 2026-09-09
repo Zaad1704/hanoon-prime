@@ -1,8 +1,9 @@
 """brain.weight_enforcer — Weight integrity enforcer.
 
 Prevents weight drift and repairs corruption. Three defense layers:
-1. ADAPT GUARD: after every N adapt calls, normalize weights to sum=1.0
-2. PER-ADAPT CAP: no single weight may exceed MAX_WEIGHT
+1. ADAPT GUARD: after every N adapt calls, normalize the weight budget
+   (|sum| = 1.0) without destroying signs
+2. PER-ADAPT CAP: no single weight may leave [-MAX_WEIGHT, +MAX_WEIGHT]
 3. STARTUP REPAIR: on _load, detect and fix corrupted weights
 
 Source: rebuild's weight_enforcer.py (lines 1-193).
@@ -21,7 +22,7 @@ MAX_WEIGHT: float = 0.20
 MIN_WEIGHT_SUM: float = 0.80
 MAX_WEIGHT_SUM: float = 1.50
 NORMALIZE_EVERY_N: int = 25
-WEIGHT_FLOOR: float = 0.01
+WEIGHT_FLOOR: float = -0.20  # symmetric lower bound — negative weights allowed
 
 
 class WeightEnforcer:
@@ -34,38 +35,44 @@ class WeightEnforcer:
     def on_adapt(self, weights: dict[str, float], indicator: str) -> None:
         """Called after every adapt. Enforces caps + periodic normalization."""
         self._adapt_count += 1
-        current = weights.get(indicator, 0.01)
+        current = weights.get(indicator, 0.0)
         if current > MAX_WEIGHT:
             weights[indicator] = MAX_WEIGHT
             log.debug("Capped %s from %.4f → %.4f", indicator, current, MAX_WEIGHT)
+        elif current < WEIGHT_FLOOR:
+            weights[indicator] = WEIGHT_FLOOR
+            log.debug("Floored %s from %.4f → %.4f", indicator, current, WEIGHT_FLOOR)
         if self._adapt_count % NORMALIZE_EVERY_N == 0:
             self._normalize(weights)
 
     def _normalize(self, weights: dict[str, float]) -> None:
-        """Proportionally normalize weights to sum to 1.0."""
+        """Renormalize so the absolute weight budget sums to 1.0.
+
+        Signs are preserved (negative weights stay negative); bounds are
+        re-clamped to [WEIGHT_FLOOR, MAX_WEIGHT] afterward.
+        """
         if not weights:
             return
-        total = sum(weights.values())
-        if total <= 0:
-            log.warning("All weights zero — resetting to defaults")
-            weights.update(DEFAULT_WEIGHTS)
-            return
-        if 0.90 <= total <= 1.10:
+        total_abs = sum(abs(v) for v in weights.values())
+        if total_abs <= 0:
+            return  # all clamped to zero — never reset learned polarity
+        if 0.90 <= total_abs <= 1.10:
             return  # within 10% of target
-        scale = 1.0 / total
+        scale = 1.0 / total_abs
         for k in weights:
             weights[k] *= scale
         for k in weights:
-            if weights[k] < WEIGHT_FLOOR:
-                weights[k] = WEIGHT_FLOOR
-        log.debug("Normalized weights (sum %.4f → %.4f)", total, sum(weights.values()))
+            weights[k] = min(MAX_WEIGHT, max(WEIGHT_FLOOR, weights[k]))
+        log.debug(
+            "Normalized weights (|sum| %.4f → %.4f)", total_abs, sum(weights.values())
+        )
 
     def repair_on_load(self, weights: dict[str, float]) -> bool:
         """Repair weights on memory load. Returns True if repair was needed."""
         if not weights:
             return False
         repaired = self._repair_bounds_and_membership(weights)
-        total = sum(weights.values())
+        total = sum(abs(v) for v in weights.values())
         if total < 0.90 or total > 1.10:
             self._normalize(weights)
             repaired = True
@@ -97,7 +104,7 @@ class WeightEnforcer:
         """Check weight integrity without modifying. Returns diagnostic."""
         if not weights:
             return {"ok": True, "reason": "empty"}
-        total = sum(weights.values())
+        total = sum(abs(v) for v in weights.values())
         max_w = max(weights.values())
         min_w = min(weights.values())
         issues = []

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from collections import defaultdict, deque
 from pathlib import Path
@@ -57,7 +58,8 @@ class RealizedStats:
         if filepath is not None:
             self._path = Path(filepath)
         elif persist:
-            self._path = JULI_REALIZED_FILE
+            env_file = os.environ.get("HANOO_REALIZED_FILE", "").strip()
+            self._path = Path(env_file) if env_file else JULI_REALIZED_FILE
         else:
             self._path = None
         self._lock = threading.RLock()

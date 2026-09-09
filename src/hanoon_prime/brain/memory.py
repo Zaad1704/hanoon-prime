@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -40,7 +41,12 @@ class JuliMemory:
     """Persistent learning state for Juli's brain."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or JULI_STATE_FILE
+        # HANOO_MEMORY_FILE lets smoke/test harnesses run fully hermetic
+        # instead of writing SMOKE episodes into the production store.
+        if path is None:
+            env_file = os.environ.get("HANOO_MEMORY_FILE", "").strip()
+            path = Path(env_file) if env_file else JULI_STATE_FILE
+        self._path = path
         self._lock = threading.RLock()
         self._weights: dict[str, float] = dict(DEFAULT_WEIGHTS)
         self._episodes: list[dict[str, Any]] = []

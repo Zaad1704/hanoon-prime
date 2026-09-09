@@ -58,7 +58,7 @@ def compute_setup_degradation(
 
 
 def compute_momentum_fading(
-    momentum: float = 0.0,
+    _momentum: float = 0.0,
     momentum_accel: float = 0.0,
     pnl_pct: float = 0.0,
 ) -> float:
@@ -308,7 +308,7 @@ class ExitPolicy:
         pillars = [
             compute_setup_degradation(self._entry_alpha.get(ticker)),
             compute_momentum_fading(
-                momentum=momentum, momentum_accel=momentum, pnl_pct=pnl_pct
+                momentum, momentum_accel=momentum, pnl_pct=pnl_pct
             ),
             compute_flow_reversal(direction, institutional_flow=0.0),
             compute_giveback_risk(health, pnl_pct),
@@ -381,9 +381,9 @@ class ExitPolicy:
 
     def _check_pillars(
         self,
-        ticker: str,
-        current_price: float,
-        direction: int,
+        _ticker: str,
+        _current_price: float,
+        _direction: int,
         pillars: dict[str, float],
         exit_threshold: float = 0.6,
     ) -> ExitSignal:
@@ -394,6 +394,7 @@ class ExitPolicy:
             current_price: current market price
             direction: 1 for long, -1 for short
             pillars: dict of pillar_name -> score (0.0-1.0)
+            exit_threshold: score at or above which we exit (default 0.6)
             exit_threshold: combined score threshold for exit (default 0.6)
 
         Returns:

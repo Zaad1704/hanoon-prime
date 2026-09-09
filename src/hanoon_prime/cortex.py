@@ -174,11 +174,10 @@ class Cortex:
         """Map |tanh score| ∈ [0, 1] → confidence ∈ [0.5, 0.95]."""
         return float(max(CONFIDENCE_FLOOR, min(0.95, 0.5 + abs_score * 0.45)))
 
-    @staticmethod
-    def _hold_reason(score: float) -> str:
-        if abs(score) < ENTRY_THRESHOLD:
-            return f"|{score:.3f}| < {ENTRY_THRESHOLD}"
-        if not SHORT_ALLOWED and score <= -ENTRY_THRESHOLD:
+    def _hold_reason(self, score: float) -> str:
+        if abs(score) < self._threshold:
+            return f"|{score:.3f}| < {self._threshold:.3f}"
+        if not SHORT_ALLOWED and score <= -self._threshold:
             return "SHORT disabled"
         return f"score {score:.3f} below threshold"
 

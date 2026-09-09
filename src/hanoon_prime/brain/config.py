@@ -24,7 +24,7 @@ JULI_STATE_FILE = STATE_DIR / "juli_state.json"
 # ── Signal thresholds ────────────────────────────────────────────────
 SIGNAL_THRESHOLD: float = 0.58
 CONFIDENCE_FLOOR: float = 0.50
-THRESHOLD_MIN: float = 0.10
+THRESHOLD_MIN: float = 0.45  # absolute floor for the adaptive admission gate
 THRESHOLD_MAX: float = 0.70
 
 # ── Modifier bounds (no single module dominates) ─────────────────────

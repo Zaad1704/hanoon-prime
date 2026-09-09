@@ -114,6 +114,7 @@ ignore = ["E501", "E701"]
 "src/hanoon_prime/brain/adaptive_learning.py" = ["PLR0913", "ARG001"]
 "src/hanoon_prime/brain/adaptive_thresholds.py" = ["PLR0913"]
 "src/hanoon_prime/ib_executor.py" = ["PLR0913"]
+"src/hanoon_prime/juli.py" = ["PLR0913"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

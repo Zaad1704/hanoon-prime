@@ -89,7 +89,4 @@ class Reflector:
             weights[key] = max(WEIGHT_MIN, min(WEIGHT_MAX, weights[key] + delta))
         for key in weights:
             weights[key] *= WEIGHT_DECAY
-        total = sum(abs(v) for v in weights.values())
-        if total > 0:
-            weights = {k: v / total for k, v in weights.items()}
         self._memory.set_weights(weights)

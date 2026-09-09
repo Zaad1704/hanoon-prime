@@ -473,9 +473,12 @@ class BotCycleMixin:
             # the slow-cortex pulse always sees it between 30s refresh ticks.
             feed["equity"] = carried
             feed["equity_synced"] = getattr(self, "_account_equity_synced", True)
+        positions = feed.get("positions")
+        feed["positions_open"] = len(positions) if positions else 0
         self.juli._state.update(
             account_feed=feed,
             consecutive_losses=getattr(self.hippocampus, "_consecutive_losses", 0),
+            positions_open=feed["positions_open"],
         )
         # Mirror IB account context to the executor for close notifications.
         self.executor._account_feed = {"equity": feed.get("equity"), "daily_pnl": daily}

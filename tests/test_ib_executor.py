@@ -562,11 +562,11 @@ class TestCloseSummary:
         exc = make_executor()
         exc._account_feed = {"equity": 242783.0, "daily_pnl": -554.0}
         exc._winrate_provider = lambda: (0.665, 200)
-        summary = exc._close_summary(make_pos(), 0.1061)
+        summary = exc._close_summary()
         assert "Account $242,783" in summary
         assert "IB day -554.00" in summary
         assert "JULI WR 66.5% (n=200)" in summary
 
     def test_close_summary_empty_without_context(self):
         exc = make_executor()
-        assert exc._close_summary(make_pos(), 0.1061) == ""
+        assert exc._close_summary() == ""

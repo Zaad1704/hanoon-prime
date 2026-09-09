@@ -48,7 +48,7 @@ class TradingConfig:
         return True
 
     def is_penny_bar_cleared(
-        self, ticker: str, price: float, score: float
+        self, _ticker: str, price: float, score: float
     ) -> tuple[bool, str]:
         """Raise-the-bar for sub-dollar tickers: (False, reason) unless the
         brain is EXTREMELY sure of a micro-cap scalp (a higher bar the score

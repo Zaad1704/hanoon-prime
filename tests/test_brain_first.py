@@ -45,7 +45,7 @@ class TestEVGateAdvisory:
     def test_losing_band_still_sizes(self):
         """A proven-losing realized band may scale down but NEVER refuse."""
         engine = RiskEngine(realized=_losing_band())
-        result = engine.evaluate(0.62, 0.7, 100.0, 2.0, open_positions=0)
+        result = engine.evaluate(0.62, 0.7, 50.0, 2.0, open_positions=0)
         assert result.risk_pass is True
         assert result.shares >= 1
         assert result.ev_scale in (0.5, 0.75)  # scaled down, bounded

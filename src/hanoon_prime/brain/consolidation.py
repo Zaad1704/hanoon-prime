@@ -102,9 +102,12 @@ class ConsolidationEngine:
         self.safety.begin_call()
         self.safety.on_daily_pnl(float(feed.get("daily_pnl", 0.0)))
         self.safety.on_consecutive_losses(int(self.state.get("consecutive_losses", 0)))
-        self.safety.on_position_count(
-            len(self.state.get("positions_open") or {})  # array-safe: dict-typed
-        )
+        raw_positions = self.state.get("positions_open") or 0
+        if isinstance(raw_positions, int):
+            pos_count = raw_positions  # int-typed positions_open
+        else:
+            pos_count = int(len(raw_positions or {}))  # legacy dict-typed
+        self.safety.on_position_count(pos_count)
         risk = self._portfolio_policy_state(feed)
         self._publish_giveback_exits()
         self.state.update(policy_state=risk)
