@@ -17,7 +17,8 @@ from ._ib_sync import read_portfolio
 from ._telegram import shutdown
 from .brain.horizons import holds_through_close
 from .brain.policy.verdict import ENTER, Verdict
-from .monitor.sleep_manager import SleepManager
+from .config import TRADING_CONFIG
+from .monitor.sleep_manager import SleepManager, SleepState
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
@@ -313,6 +314,13 @@ class BotCycleMixin:
         """One main loop iteration."""
         started = time.monotonic()
         try:
+            state = _SLEEP_MGR.effective_state(TRADING_CONFIG)
+            if not state.active:
+                self._sleep_tick(state, poll)
+                return
+            if getattr(self, "_sleeping", False):
+                self._sleeping = False
+                log.info("SESSION WAKE: %s active", state.session)
             self._supervise_gateway()
             self.executor.sync_from_ib(self.streamer, closing=self._closing)
             self._sweep_stale_orders()
@@ -328,10 +336,40 @@ class BotCycleMixin:
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
 
+    def _sleep_tick(self, state: SleepState, poll: float) -> None:
+        """Keepalive for a deactivated session: no brain, no orders, no HALIM.
+
+        Gateway supervision and on-demand flatten stay live so risk
+        controls still work while the system is fully asleep.
+        """
+        if not getattr(self, "_sleeping", False):
+            self._sleeping = True
+            log.info("SESSION SLEEP: %s inactive — whole system idle", state.session)
+        try:
+            if self._check_manual_flatten() or self._check_eod_flatten():
+                self._finish_cycle(
+                    [],
+                    [],
+                    None,
+                    CycleMeta(poll, time.monotonic(), False),
+                    session=state.session,
+                )
+                self._sleeping = True
+                return
+        except Exception as exc:
+            log.error("Sleep flatten failed: %s", exc)
+        try:
+            self._supervise_gateway()
+        except Exception as exc:
+            log.debug("Gateway supervise during sleep: %s", exc)
+        self._heartbeat()
+        self.monitor.record_cycle(False, session=state.session)
+        time.sleep(max(CYCLE_FLOOR, poll))
+
     def _run_brain_cycle(self, poll: float, pnl: Any, started: float) -> None:
         """Score the whole universe and finish the cycle (single funnel)."""
         positions = set(self.hippocampus._open_positions.keys())
-        mkt_state = _SLEEP_MGR.get_state()
+        mkt_state = _SLEEP_MGR.effective_state(TRADING_CONFIG)
         pos_info = {
             t: {
                 "direction": p.direction,
@@ -351,7 +389,11 @@ class BotCycleMixin:
             session=mkt_state.session,
         )
         self._finish_cycle(
-            exit_s, verdicts, pnl, CycleMeta(poll, started, mkt_state.active)
+            exit_s,
+            verdicts,
+            pnl,
+            CycleMeta(poll, started, mkt_state.active),
+            session=mkt_state.session,
         )
 
     def _finish_cycle(
@@ -360,6 +402,7 @@ class BotCycleMixin:
         verdicts: list[Verdict],
         pnl: Any,
         meta: CycleMeta,
+        session: str = "rth",
     ) -> None:
         """Execute exits, journal/execute verdicts, reflect, wait."""
         self._last_bars = sum(
@@ -385,7 +428,7 @@ class BotCycleMixin:
             if market_open and v.action == ENTER:
                 self._execute_verdict(v)
         self._reflect_closed()
-        self.monitor.record_cycle(market_open)
+        self.monitor.record_cycle(market_open, session=session)
         elapsed = time.monotonic() - meta.started
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)

@@ -56,6 +56,19 @@ def test_record_cycle_publishes_vitals(tmp_path):
     assert v["decision_count"] == 0
 
 
+def test_record_cycle_carries_session(tmp_path):
+    """Vitals reflect the active session and its gate state."""
+    bot = make_bot(tmp_path)
+    mon = PipelineMonitor(bot, bot.journal)
+    mon.record_cycle(market_open=True, session="pre_market")
+    v = mon.snapshot()["vitals"]
+    assert v["session"] == "pre_market"
+    assert v["session_active"] is True
+    mon.record_cycle(market_open=False, session="overnight")
+    v = mon.snapshot()["vitals"]
+    assert v["session_active"] is False
+
+
 def test_ib_disconnect_incident_and_recovery(tmp_path):
     """A disconnect journals an incident; recovery clears it."""
     bot = make_bot(tmp_path)

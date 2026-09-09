@@ -46,7 +46,7 @@ class PipelineMonitor:
         self._last_bar_growth: float = time.time()
 
     # ── cycle-thread side ────────────────────────────────────────────
-    def record_cycle(self, market_open: bool) -> None:
+    def record_cycle(self, market_open: bool, session: str = "rth") -> None:
         """Publish vitals from the cycle thread (cheap, lock-light)."""
         streamer = self._bot.streamer
         sizes = {
@@ -66,6 +66,8 @@ class PipelineMonitor:
             self._vitals = {
                 "ts": time.time(),
                 "market_open": market_open,
+                "session": session,
+                "session_active": market_open,
                 "ib_connected": connected,
                 "bar_sizes": sizes,
                 "decision_count": decisions,
