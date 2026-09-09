@@ -93,24 +93,48 @@ disable, `halted` stayed `false`, final state `enabled=false`.
 ### Gate 0 — Hygiene (done, §2)
 - [x] All §2 baseline items green on the exact commit you'll run.
 
-### Gate 1 — Automated runtime ledger (HALIM-verified)
+### Gate 1 — Automated runtime ledger (HALIM-verified guardian + bug catcher)
 
-An enforceable, always-on monitor keeps Gate 1 honest. It runs via launchd
-(`scripts/com.hanoon.production-monitor.plist`, load + RunAtLoad + KeepAlive)
-and executes `scripts/production_monitor.py --daemon` — checks at `:00`/`:30`
-local plus a 23:50 day-finalize. Install once (already done on this machine):
+An enforceable, always-on monitor keeps Gate 1 honest **and** catches bugs. It
+runs as part of the stack lifecycle — **`scripts/start.command`** brings up
+HALIM serve → trading bot → guardian monitor; **`scripts/stop.command`** tears
+them down in reverse (monitor → bot → HALIM). The monitor only ever runs while
+the bot is up; when the bot is unreachable it idles and, after ~4h of
+sustained downtime, exits on its own. No launchd involved (launchd is
+TCC-blocked on `~/Downloads`).
 
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hanoon.production-monitor.plist
+    # lifecycle (double-clickable from Finder, or from a terminal):
+    scripts/start.command
+    scripts/stop.command
+
+The monitor executes `scripts/production_monitor.py --daemon` — checks at
+`:00`/`:30` local plus a 23:50 day-finalize. Daemons are pidfile-tracked in
+`runtime/pids/` (`hanoon_prime.pid`, `production_monitor.pid`).
 
 **Hierarchy of truth (read-only, never trades):**
-1. **Deterministic metrics** are computed first and CANNOT be overridden by an
-   LLM: telemetry `/health` must be `ok`+`connected`; zero `NETTING GUARD`
-   triggers since last restart; zero `Traceback` lines; daily P&L must never
-   break `-1.0%` of equity; learning state must stay hermetically test-free.
-2. **HALIM** independently re-derives a verdict from the SAME real runtime
-   data (shipped in the prompt) and attaches risk-annotated issues.
-3. A gate passes only when BOTH agree; any deterministic rule violation is an
-   immediate FAIL (exit 2) regardless of HALIM.
+1. **Deterministic role → `PASS`/`FAIL` (Cannot be overridden by an LLM):**
+   telemetry `/health` must be `ok`+`connected`; `/snapshot` must be non-empty
+   (telemetry-stall catch); a fresh `ib_cycle CYCLE` line within 5 min
+   (pipeline-stall catch); zero `NETTING GUARD` triggers since last restart;
+   zero `Traceback` lines; daily P&L must never break `-1.0%` of equity;
+   learning state must stay hermetically test-free. Any violation FAILs (exit 2)
+   and resets the clean-day streak.
+2. **Deterministic role → bug catcher (`anomalies`, streak-neutral):**
+   decision path sanity — weighted carriers within `[-2,2]` and non-sparse;
+   brain-state fields typed & bounded (`threshold`∈[0.45,0.70],
+   `pred_error`∈[0,1], `risk_ceiling`>0); last journal verdicts have finite
+   scores and valid actions; non-noise `ERROR` lines since restart →
+   flagged problems; `pipeline_incident` rows; `SAFETY HALT` /
+   `LEARN BLOCKED` markers. These do NOT reset the streak but DO escalate.
+3. **HALIM** independently re-derives a verdict from the SAME real runtime
+   data and, when anomalies exist, emits a **`bug_report`** (summary, root-cause
+   hypothesis, severity, one-line suggested fix). A gate passes only when both
+   agree; an anomaly whose report is silent is still escalated on the
+   deterministic findings.
+4. **User notification (bug-catcher output):** each anomaly is sent to the
+   Telegram chat via the bot's own `_telegram.send()` (token/chat from
+   `.env`) — deduped to one message per rule per calendar day. If Telegram is
+   not configured it is recorded in the ledger instead, never crashed on.
 
 **State & reads:**
 - Ledger (daemon-owned, gitignored): `scripts/production_state.json`
@@ -118,7 +142,7 @@ local plus a 23:50 day-finalize. Install once (already done on this machine):
 - Metrics only: `scripts/production_monitor.py --json`
 - Manual check: `.venv/bin/python scripts/production_monitor.py`
 - Log: `logs/production_monitor.log`
-- Exit codes: 0 PASS · 2 deterministic FAIL · 3 HALIM degraded (metrics only)
+- Exit codes: 0 PASS · 2 deterministic FAIL · 3 HALIM degraded · 4 anomalies reported
 
 **Current state (as of doc update):** `gate_status=pending`, streak `0/10`,
 closes `0/200` — today is FAILing the drawdown rule (paper `-1.09%`), so it

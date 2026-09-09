@@ -1,32 +1,41 @@
-"""scripts/production_monitor.py — HALIM-backed, evidence-based runtime checklist.
+"""scripts/production_monitor.py — full-pipeline guardian + bug catcher.
 
-Runs against the LIVE paper bot and computes a production-readiness verdict per
-gate. Deterministic metrics are collected first (they cannot be shaped by an
-LLM); HALIM independently re-derives a verdict from the same real runtime data.
-A gate only goes PASS when BOTH agree.
+Runs against the LIVE bot and produces a production-readiness verdict for the
+Gate-1 soak, PLUS a bug-catching pass that diagnoses and notifies on any
+anomaly. Two roles, one process:
 
-Hard rules (deterministic, LLM cannot override) — matching PRODUCTION_READINESS
-Gate 1:
-  - telemetry must answer /health as ok+connected (no stall)
+ROLE 1 — VERIFY (deterministic, HALIM cannot override):
+  - telemetry /health must be ok+connected and /snapshot non-empty
+  - pipeline must be alive: a fresh CYCLE line within 5 min
   - zero NETTING GUARD triggers since the last bot restart
   - zero Traceback lines since the last bot restart
-  - daily P&L must never be below -1.0% of equity
-  - learning state must stay hermetic (no T/TEST/SMOKE episodes)
+  - daily P&L must never break -1.0% of equity
+  - learning state must stay hermetically test-free
+  Any violation is a FAIL (exit 2) and resets the clean-day streak.
 
-Progress metrics (informational, staged):
-  - real closes (juli_realized) target 200
-  - clean-day streak (calendar-day based) target 10 days
+ROLE 2 — CATCH BUGS (anomalies; do NOT reset the streak):
+  - decision-path sanity: finite scores in the last N journal verdicts,
+    valid verdict actions, weighted carriers sane, brain-state fields typed
+    and bounded
+  - operational noise funnel: ERROR lines and pipeline_incidents since start,
+    minus a known-bug allowlist
+  - halt/block markers (SAFETY HALT, LEARN BLOCKED)
+  Anomalies go to HALIM, which emits a bug report (root-cause hypothesis,
+  severity, suggested fix); the user is notified once per signature per day
+  via Telegram (reusing hanoon_prime._telegram). If Telegram is not
+  configured, findings are recorded in the ledger instead.
 
-The script is read-only against the bot: it never writes mutation endpoints and
-never trades. It keeps its own ledger at scripts/production_state.json.
+LIFECYCLE: run by scripts/start.command alongside the bot; stop.command tears
+it down. When the bot is unreachable the daemon idles (no FAIL flood, no
+notify) and exits gracefully after ~4h of sustained downtime.
 
 Usage:
-    python3 scripts/production_monitor.py            # collect + HALIM verdict + update ledger
-    python3 scripts/production_monitor.py --json     # metrics only (no HALIM call)
-    python3 scripts/production_monitor.py --status   # read ledger, no new checks
+    python3 scripts/production_monitor.py            # single verify+bug-catch pass
+    python3 scripts/production_monitor.py --json     # metrics only
+    python3 scripts/production_monitor.py --status   # read ledger
+    python3 scripts/production_monitor.py --daemon   # loop; used by start.command
 
-Exit codes: 0 = PASS, 2 = deterministic FAIL, 3 = HALIM degraded (metrics only),
-4 = progress-only HOLD (no rules violated; streak held).
+Exit codes: 0 PASS · 2 deterministic FAIL · 3 HALIM degraded · 4 anomalies found.
 """
 
 from __future__ import annotations
@@ -36,15 +45,21 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(BASE_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)  # allow reuse of hanoon_prime._telegram
+
 LOG_PATH = os.path.join(BASE_DIR, "logs", "hanoon_prime.log")
 STATE_PATH = os.path.join(BASE_DIR, "runtime", "state.json")
 REALIZED_PATH = os.path.join(BASE_DIR, "runtime", "juli_realized.json")
 JULI_STATE_PATH = os.path.join(BASE_DIR, "runtime", "juli_state.json")
+JOURNAL_PATH = os.path.join(BASE_DIR, "runtime", "journal_live.jsonl")
 TELEMETRY_URL = "http://127.0.0.1:8080"
 HALIM_URL = os.environ.get("HALIM_URL", "http://127.0.0.1:8765")
 STATE_FILE = os.path.join(BASE_DIR, "scripts", "production_state.json")
@@ -52,15 +67,33 @@ STATE_FILE = os.path.join(BASE_DIR, "scripts", "production_state.json")
 START_MARKER = re.compile(r"ib_adapter\s+Starting \(seed=")
 GUARD_MARKER = re.compile(r"NETTING GUARD")
 TRACE_MARKER = re.compile(r"Traceback \(most recent call last\)")
+CYCLE_MARKER = re.compile(r"ib_cycle\s+CYCLE ")
+SUB_MARKER = re.compile(r"ib_streamer\s+Subscribed to (\S+)")
+ERROR_MARKER = re.compile(r"\bERROR\b")
+SAFETY_HALT_MARKER = re.compile(r"SAFETY HALT")
+LEARN_BLOCKED_MARKER = re.compile(r"LEARN BLOCKED")
 
-DRAWDOWN_LIMIT = 0.01  # 1.0% of equity as floor for a clean day
+POLLUTED = {"T", "TEST"}
+VALID_ACTIONS = {"BUY", "SELL", "HOLD", "VETOED", "PASS", "OPEN", "CLOSE"}
+NOISE_ERROR = re.compile(
+    r"cancelMktData|latency spike|Max retries exceeded|ib_insync|"
+    r"TWS error 1101|EClient error|Connection reset|BadMessage"
+)
+DRAWDOWN_LIMIT = 0.01
 CLOSES_TARGET = 200
 DAYS_TARGET = 10
-POLLUTED = {"T", "TEST"}
+CYCLE_STALE_SEC = 300  # a live cycle every ~3s; 5 min silence = pipeline stall
+VERDICT_SAMPLE = 60
+BOT_DOWN_EXIT_CYCLES = 8  # ~4h of sustained downtime → self-exit
 
 
-def _utcnow() -> float:
-    return datetime.now(timezone.utc).timestamp()
+def _logfile() -> str:
+    return os.path.join(BASE_DIR, "logs", "production_monitor.log")
+
+
+def _note(msg: str) -> None:
+    with open(_logfile(), "a") as fh:
+        fh.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
 
 
 def _read(path: str) -> dict[str, Any]:
@@ -76,81 +109,335 @@ def _write(path: str, data: dict[str, Any]) -> None:
         json.dump(data, fh, indent=2, sort_keys=True)
 
 
-def _rfc(ts: Optional[float]) -> Optional[str]:
-    return (
-        datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
-        if ts
-        else None
-    )
-
-
-def _log_count_since(marker: re.Pattern[str], start_ts: float) -> int:
-    """Count marker lines with wall-clock timestamp >= start_ts."""
-    n = 0
+def _ts_of(line: str) -> Optional[float]:
+    m = re.match(r"(\d\d):(\d\d):(\d\d)\.\d+", line)
+    if not m:
+        return None
+    # Log stamps are LOCAL wall-clock (hh:mm:ss, no date). Build an absolute
+    # timestamp from the local 'now' with the log's time substituted — the
+    # naive-local timestamp() matches the same clock the bot logs from.
+    now = datetime.now()
     try:
-        with open(LOG_PATH, encoding="utf-8", errors="ignore") as fh:
-            for line in fh:
-                m = re.match(r"(\d\d):(\d\d):(\d\d)\.(\d+)", line)
-                if not m:
-                    continue
-                hh, mm, ss = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                now = datetime.now(timezone.utc)
-                ts = now.replace(hour=hh, minute=mm, second=ss).timestamp()
-                if ts < start_ts:
-                    continue
-                if marker.search(line):
-                    n += 1
-    except OSError:
-        return -1
-    return n
+        return now.replace(
+            hour=int(m.group(1)), minute=int(m.group(2)), second=int(m.group(3))
+        ).timestamp()
+    except ValueError:
+        return None
 
 
-def _bot_start_ts() -> float:
-    """Wall-clock timestamp of the most recent 'ib_adapter Starting' line."""
-    ts = 0.0
+def _bot_start_lines() -> list[str]:
+    """Every log line after the LAST 'ib_adapter Starting' marker.
+
+    The log stamps HH:MM:SS only (no date), so per-line timestamp math cannot
+    tell this session from yesterday's. Session bounding by marker position is
+    timezone/day-proof: everything before the last start marker is ignored.
+    """
+    session: list[str] = []
     try:
         with open(LOG_PATH, encoding="utf-8", errors="ignore") as fh:
             for line in fh:
                 if START_MARKER.search(line):
-                    m = re.match(r"(\d\d):(\d\d):(\d\d)\.(\d+)", line)
-                    if m:
-                        hh, mm, ss = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                        now = datetime.now(timezone.utc)
-                        ts = now.replace(hour=hh, minute=mm, second=ss).timestamp()
+                    session = []
+                else:
+                    session.append(line)
     except OSError:
-        pass
-    return ts
+        return []
+    return session
 
 
-def collect() -> dict[str, Any]:
-    now = _utcnow()
-    start_ts = _bot_start_ts()
-    state = _read(STATE_PATH)
-    brain = state.get("brain_state", {}) if isinstance(state, dict) else {}
-    feed = brain.get("account_feed", {}) if isinstance(brain, dict) else {}
+def _count_in(lines: list[str], marker: re.Pattern[str]) -> int:
+    return sum(1 for line in lines if marker.search(line))
 
-    safety_policy = brain.get("policy_state", {}) if isinstance(brain, dict) else {}
-    safety = {
-        "enabled": bool(safety_policy.get("enabled", False)),
-        "halted": bool(safety_policy.get("halted", False)),
-        "authorized": bool(safety_policy.get("authorized", True)),
+
+def _last_cycle_age() -> Optional[float]:
+    """Age in seconds of the most recent CYCLE log line (None if absent)."""
+    latest = None
+    try:
+        with open(LOG_PATH, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if CYCLE_MARKER.search(line):
+                    t = _ts_of(line)
+                    if t is not None:
+                        latest = t
+    except OSError:
+        return None
+    return (time.time() - latest) if latest is not None else None
+
+
+def _tail(path: str, nbytes: int = 131072) -> str:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - nbytes))
+            return fh.read().decode(errors="ignore")
+    except OSError:
+        return ""
+
+
+def _journal_sample() -> dict[str, Any]:
+    """Tail the most recent journal window: verdict validity + incidents."""
+    tail = _tail(JOURNAL_PATH)
+    rows, incidents = [], 0
+    for line in tail.splitlines():
+        if '"event": "pipeline_incident"' in line:
+            incidents += 1
+            continue
+        if '"event": "verdict"' not in line:
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        rows.append(r)
+    sample = rows[-VERDICT_SAMPLE:]
+    bad_action, nan_score = 0, 0
+    for r in sample:
+        if str(r.get("action", "")).upper() not in VALID_ACTIONS:
+            bad_action += 1
+        sc = r.get("score")
+        if sc is None or not isinstance(sc, (int, float)) or sc != sc:  # NaN check
+            nan_score += 1
+    return {
+        "sample": len(sample),
+        "invalid_actions": bad_action,
+        "nan_scores": nan_score,
+        "incidents": incidents,
+        "last_action": str(sample[-1].get("action", "")) if sample else "",
+        "last_ticker": str(sample[-1].get("ticker", "")) if sample else "",
+        "last_stage": str(sample[-1].get("stage", "")) if sample else "",
     }
 
-    realized = _read(REALIZED_PATH)
-    juli = _read(JULI_STATE_PATH)
-    polluted_episodes = 0
-    for ep in juli.get("episodes", []) or []:
-        if isinstance(ep, dict) and ep.get("ticker") in POLLUTED:
-            polluted_episodes += 1
 
+def _log_errors_in(lines: list[str]) -> dict[str, Any]:
+    """ERROR lines in the current session minus the known-safe allowlist."""
+    total, flagged, samples = 0, 0, []
+    for line in lines:
+        if ERROR_MARKER.search(line):
+            total += 1
+            if NOISE_ERROR.search(line):
+                continue
+            flagged += 1
+            if len(samples) < 8:
+                samples.append(line.strip()[:200])
+    return {"errors_total": total, "problems": flagged, "samples": samples}
+
+
+def _collect() -> dict[str, Any]:
+    state = _read(STATE_PATH)
+    brain = state.get("brain_state", {})
+    session = _bot_start_lines()
+
+    # health + snapshot (telemetry stall detection)
     health: dict[str, Any] = {}
-    try:
-        with urllib.request.urlopen(f"{TELEMETRY_URL}/health", timeout=5) as resp:
-            health = json.loads(resp.read().decode())
-    except Exception as exc:
-        health = {"status": f"unreachable: {exc}"}
+    snapshot: dict[str, Any] = {}
+    for url, out in (
+        (f"{TELEMETRY_URL}/health", health),
+        (f"{TELEMETRY_URL}/snapshot", snapshot),
+    ):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                out.update(json.loads(resp.read().decode()))
+        except Exception as exc:
+            out["_unreachable"] = str(exc)
+    snapshot_ok = (
+        bool(snapshot)
+        and isinstance(snapshot.get("health"), dict)
+        and not snapshot.get("_unreachable")
+    )
+    health_ok = health.get("status") == "ok" and bool(health.get("connected", False))
 
-    halim_ok, halim_mode = False, "unknown (unreachable)"
+    # brain-state field sanity
+    threshold = brain.get("threshold")
+    pred_error = brain.get("pred_error")
+    risk_ceiling = brain.get("risk_ceiling")
+    regime = brain.get("regime_risk") or (brain.get("regime_state") or {}).get(
+        "current_regime"
+    )
+    pos = brain.get("positions_open", 0)
+    policy = brain.get("policy_state", {})
+    field_issues = []
+    if not (isinstance(threshold, (int, float)) and 0.45 <= threshold <= 0.70):
+        field_issues.append(f"threshold={threshold!r} out of [0.45,0.70]")
+    # pred_error is legitimately None in normal operation; only flag a numeric
+    # value that has drifted outside the model's output range.
+    if pred_error is not None and not (
+        isinstance(pred_error, (int, float)) and 0.0 <= pred_error <= 1.0
+    ):
+        field_issues.append(f"pred_error={pred_error!r} not in [0,1]")
+    if not (isinstance(risk_ceiling, (int, float)) and risk_ceiling > 0):
+        field_issues.append(f"risk_ceiling={risk_ceiling!r} not positive")
+    if not isinstance(pos, int) or pos < 0:
+        field_issues.append(f"positions_open={pos!r} not a non-negative int")
+
+    # weights sanity (juli_state); sum |w| within enforcer band
+    juli = _read(JULI_STATE_PATH)
+    weights = juli.get("weights", {}) if isinstance(juli, dict) else {}
+    w_vals = [v for v in weights.values() if isinstance(v, (int, float))]
+    weights_issue = None if w_vals else "weights empty"
+    if w_vals and not weights_issue:
+        if any(v != v or v in (float("inf"), float("-inf")) for v in w_vals):
+            weights_issue = "weights contain NaN/inf"
+        elif not (all(-2.0 <= v <= 2.0 for v in w_vals)):
+            weights_issue = "weights outside [-2,2]"
+        elif len(w_vals) < 10:
+            weights_issue = "weights unexpectedly sparse"
+
+    # realized + episodes sanity
+    realized = _read(REALIZED_PATH)
+    total_closes = int(realized.get("total", 0) or 0)
+    polluted_episodes = sum(
+        1
+        for ep in (juli.get("episodes", []) or [])
+        if isinstance(ep, dict) and ep.get("ticker") in POLLUTED
+    )
+
+    journal = _journal_sample()
+    log_err = _log_errors_in(session)
+    settled = {
+        "guard": _count_in(session, GUARD_MARKER),
+        "tracebacks": _count_in(session, TRACE_MARKER),
+        "safety_halt": _count_in(session, SAFETY_HALT_MARKER),
+        "learn_blocked": _count_in(session, LEARN_BLOCKED_MARKER),
+    }
+    cycle_age = _last_cycle_age()
+
+    # subscriptions present in session?
+    subs = set(SUB_MARKER.findall(_tail(LOG_PATH, 1 << 20)))
+    feed = brain.get("account_feed", {})
+    return {
+        "ts": time.time(),
+        "session_lines": len(session),
+        "health_status": health.get("status"),
+        "connected": health.get("connected", False),
+        "snapshot_ok": snapshot_ok,
+        "cycle_age_s": cycle_age,
+        "equity": float(feed.get("equity", 0.0) or 0.0),
+        "daily_pnl": float(feed.get("daily_pnl", 0.0) or 0.0),
+        "positions_open": pos,
+        "regime": regime,
+        "threshold": threshold,
+        "pred_error": pred_error,
+        "risk_ceiling": risk_ceiling,
+        "safety": {
+            "enabled": bool(policy.get("enabled", False)),
+            "halted": bool(policy.get("halted", False)),
+            "authorized": bool(policy.get("authorized", True)),
+        },
+        "field_issues": field_issues,
+        "weights_issue": weights_issue,
+        "journal": journal,
+        "errors": log_err,
+        "incidents": journal["incidents"],
+        "counters": settled,
+        "subscriptions": len(subs),
+        "real_closes_total": total_closes,
+        "polluted_episodes": polluted_episodes,
+    }
+
+
+def _hard_rules(m: dict[str, Any]) -> list[tuple[str, str]]:
+    fails = []
+    if not m["health_ok"]:
+        fails.append(
+            ("health", f"status={m['health_status']} connected={m['connected']}")
+        )
+    if not m["snapshot_ok"]:
+        fails.append(("telemetry_stall", "snapshot empty/unreachable"))
+    if m["cycle_age_s"] is not None and m["cycle_age_s"] > CYCLE_STALE_SEC:
+        fails.append(("pipeline_stall", f"last CYCLE {m['cycle_age_s']:.0f}s ago"))
+    if m["counters"]["guard"]:
+        fails.append(("netting_guard", f"{m['counters']['guard']} trigger(s)"))
+    if m["counters"]["tracebacks"]:
+        fails.append(("tracebacks", f"{m['counters']['tracebacks']} Traceback(s)"))
+    if m["equity"] > 0 and m["daily_pnl"] <= -DRAWDOWN_LIMIT * m["equity"]:
+        pct = 100 * -m["daily_pnl"] / m["equity"]
+        fails.append(
+            ("drawdown", f"{m['daily_pnl']:.2f} = -{pct:.2f}% of equity (floor -1.0%)")
+        )
+    if m["polluted_episodes"]:
+        fails.append(("learning_purity", f"{m['polluted_episodes']} test episode(s)"))
+    return fails
+
+
+def _anomalies(m: dict[str, Any]) -> list[tuple[str, str]]:
+    """Non-streak-resetting findings; the bug-catcher feed."""
+    out = []
+    if m["field_issues"]:
+        out.append(("brain_state", "; ".join(m["field_issues"])))
+    if m["weights_issue"]:
+        out.append(("weights", m["weights_issue"]))
+    if m["journal"]["nan_scores"]:
+        out.append(
+            ("scores_nan", f"{m['journal']['nan_scores']}/{m['journal']['sample']} NaN")
+        )
+    if m["journal"]["invalid_actions"]:
+        out.append(("verdict_actions", f"{m['journal']['invalid_actions']} invalid"))
+    if m["errors"]["problems"]:
+        out.append(("log_errors", f"{m['errors']['problems']} non-noise ERROR lines"))
+    if m["incidents"]:
+        out.append(("journal_incidents", f"{m['incidents']} pipeline_incident(s)"))
+    if m["counters"]["safety_halt"]:
+        out.append(("safety_halt", f"{m['counters']['safety_halt']} trip(s)"))
+    if m["counters"]["learn_blocked"]:
+        out.append(
+            ("learn_blocked", f"{m['counters']['learn_blocked']} blocked close(s)")
+        )
+    return out
+
+
+def _halim_call_prompt(m: dict[str, Any]) -> str:
+    return (
+        "You are HALIM, safety auditor AND bug catcher for the hanoon-prime "
+        "PAPER bot. Using ONLY this real runtime data:\n"
+        f"{json.dumps(m, default=str)}\n\n"
+        "Return EXACTLY this JSON, no prose:\n"
+        '{"verdict": "PASS"|"FAIL", "gates": {"gate1": "GO"|"HOLD"}, '
+        '"issues": [{"gate": "<gate1|health|pipeline|halim|system>", '
+        '"risk": "critical|high|medium|low", '
+        '"detail": "<what the data shows>"}], '
+        '"bug_report": {"found": true|false, "summary": "<what broke>", '
+        '"root_cause": "<hypothesis>", "severity": "critical|high|medium|low", '
+        '"suggested_fix": "<one-line actionable fix>"}}'
+    )
+
+
+def _halim_call(metrics: dict[str, Any]) -> dict[str, Any]:
+    req = urllib.request.Request(
+        f"{HALIM_URL}/v1/complete",
+        data=json.dumps(
+            {
+                "prompt": _halim_call_prompt(metrics),
+                "purpose": "production_readiness",
+                "priority": "high",
+            }
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        result: dict[str, Any] = json.loads(resp.read().decode())
+    text = result.get("text", "")
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < 0:
+        return {}
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except (ValueError, TypeError):
+        return {}
+    verdict = str(parsed.get("verdict", "FAIL")).upper()
+    gates = parsed.get("gates") or {}
+    issues = parsed.get("issues") or []
+    bug = parsed.get("bug_report") or {}
+    return {
+        "verdict": verdict if verdict in ("PASS", "FAIL") else "FAIL",
+        "gates": {k: g for k, g in gates.items() if g in ("GO", "HOLD")},
+        "issues": issues if isinstance(issues, list) else [],
+        "bug_report": bug if isinstance(bug, dict) else {},
+    }
+
+
+def _halim_alive() -> bool:
     try:
         req = urllib.request.Request(
             f"{HALIM_URL}/v1/complete",
@@ -165,351 +452,211 @@ def collect() -> dict[str, Any]:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-        halim_ok = bool(result.get("ok", False))
-        halim_mode = (
-            "learn_by_action"
-            if (result.get("runtime", {}) or {}).get("learn_by_action")
-            else "read_only"
-        )
+            return bool(json.loads(resp.read().decode()).get("ok", False))
     except Exception:
-        pass
-
-    return {
-        "ts": now,
-        "start_ts": start_ts,
-        "health_status": health.get("status"),
-        "connected": bool(health.get("connected", False)),
-        "equity": float(feed.get("equity", 0.0) or 0.0),
-        "daily_pnl": float(feed.get("daily_pnl", 0.0) or 0.0),
-        "positions_open": int(brain.get("positions_open", 0) or 0),
-        "safety": safety,
-        "guard_triggers_session": _log_count_since(GUARD_MARKER, start_ts),
-        "tracebacks_session": _log_count_since(TRACE_MARKER, start_ts),
-        "real_closes_total": int(realized.get("total", 0) or 0),
-        "polluted_episodes": polluted_episodes,
-        "halim_ok": halim_ok,
-        "halim_mode": halim_mode,
-        "regime_label": (
-            brain.get("regime_label", "unknown")
-            or (brain.get("regime_state", {}) or {}).get("current_regime", "unknown")
-            or "unknown"
-        ),
-        "risk_ceiling": brain.get("risk_ceiling"),
-    }
+        return False
 
 
-def hard_rules(m: dict[str, Any]) -> list[tuple[str, str]]:
-    """Return [(rule, reason)] for every deterministically-violated rule."""
-    fails: list[tuple[str, str]] = []
-    if m["health_status"] != "ok" or not m["connected"]:
-        fails.append(
-            ("health", f"status={m['health_status']} connected={m['connected']}")
-        )
-    if m["guard_triggers_session"]:
-        fails.append(
-            ("netting_guard", f"{m['guard_triggers_session']} trigger(s) this session")
-        )
-    if m["tracebacks_session"]:
-        fails.append(
-            ("tracebacks", f"{m['tracebacks_session']} Traceback(s) this session")
-        )
-    if m["equity"] > 0 and m["daily_pnl"] <= -DRAWDOWN_LIMIT * m["equity"]:
-        pct = 100 * -m["daily_pnl"] / m["equity"]
-        fails.append(
-            (
-                "drawdown",
-                f"daily_pnl {m['daily_pnl']:.2f} is below -1.0% (-{pct:.2f}% of equity)",
-            )
-        )
-    if m["polluted_episodes"]:
-        fails.append(
-            ("learning_purity", f"{m['polluted_episodes']} test-episode(s) present")
-        )
-    return fails
-
-
-def halim_verdict(m: dict[str, Any]) -> dict[str, Any]:
-    """Ship real metrics to HALIM; return {verdict, gates, issues}."""
-    payload = {
-        "prompt": (
-            "You are HALIM, safety auditor for the hanoon-prime PAPER bot.\n"
-            "Evaluate production-readiness using ONLY this real runtime data:\n"
-            f"{json.dumps(m)}\n\n"
-            "Return EXACTLY this JSON, no prose:\n"
-            '{"verdict": "PASS"|"FAIL",'
-            ' "gates": {"gate1": "GO"|"HOLD"},'
-            ' "issues": [{"gate": "<gate1|health|halim|system>",'
-            ' "risk": "critical|high|medium|low",'
-            ' "detail": "<what the data shows>"}]}'
-        ),
-        "purpose": "production_readiness",
-        "priority": "high",
-    }
-    req = urllib.request.Request(
-        f"{HALIM_URL}/v1/complete",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result: dict[str, Any] = json.loads(resp.read().decode())
-    text = result.get("text", "")
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < 0:
-        return {"verdict": "FAIL", "gates": {"gate1": "HOLD"}, "issues": []}
+def _notify(text: str) -> bool:
     try:
-        parsed = json.loads(text[start : end + 1])
-    except (ValueError, TypeError):
-        return {"verdict": "FAIL", "gates": {"gate1": "HOLD"}, "issues": []}
-    verdict = str(parsed.get("verdict", "FAIL")).upper()
-    gates = parsed.get("gates") or {}
-    issues = parsed.get("issues") or []
-    return {
-        "verdict": verdict if verdict in ("PASS", "FAIL") else "FAIL",
-        "gates": {k: g for k, g in gates.items() if g in ("GO", "HOLD")},
-        "issues": issues if isinstance(issues, list) else [],
-    }
+        from hanoon_prime._telegram import send  # reused bot notify path
+
+        return bool(send(text))
+    except Exception:
+        return False
+
+
+def _alert(day: str, key: str, text: str, ledger: dict[str, Any]) -> None:
+    """Deduped notify: at most one Telegram per signature per day."""
+    alerted = ledger.setdefault("alerted", {}).setdefault(day, {})
+    if alerted.get(key):
+        return
+    ok = _notify(text)
+    if not ok:
+        _note(f"notify skipped (telegram unconfigured/rate-limited): {key}")
+    alerted[key] = {"ts": time.time(), "sent": ok}
+    _write(STATE_FILE, ledger)
 
 
 def _prev_trading_day(d: date) -> Optional[date]:
-    """Immediately preceding weekday (Mon-Fri) before ``d``."""
-    p = d
-    for _ in range(7):
-        p = p.fromordinal(p.toordinal() - 1)
-        if p.weekday() < 5:
-            return p
+    for _ in range(10):
+        d = d.fromordinal(d.toordinal() - 1)
+        if d.weekday() < 5:
+            return d
     return None
 
 
-def _roll_streak(wise: dict[str, Any], m: dict[str, Any]) -> int:
-    """Advance (or reset) the clean-day streak on a trading-day basis.
-
-    Only Mon-Fri count; weekends neither advance nor break the streak.
-    Same-weekday repeat runs advance at most once. A gap of more than one
-    trading day between consecutive PASSes breaks the streak.
-    """
-    today = date.today()
+def _roll_streak(wise: dict[str, Any], today: date) -> int:
     if today.weekday() >= 5:
         return wise.get("clean_days_streak", 0)
     today_s = today.isoformat()
     last = wise.get("last_clean_day")
     if last == today_s:
         return wise.get("clean_days_streak", 1)
-    if last:
-        last_d = date.fromisoformat(last)
-        if _prev_trading_day(today) == last_d:
-            wise["clean_days_streak"] = wise.get("clean_days_streak", 0) + 1
-        else:
-            wise["clean_days_streak"] = 1  # gap → new streak
+    prev = _prev_trading_day(today)
+    if last and prev and last == prev.isoformat():
+        wise["clean_days_streak"] = wise.get("clean_days_streak", 0) + 1
     else:
         wise["clean_days_streak"] = 1
     wise["last_clean_day"] = today_s
     return wise["clean_days_streak"]
 
 
-def _next_slot_minute(now_minute: int) -> int:
-    """Next run minute-of-day: every :00/:30 plus a 23:50 finalize."""
-    slots = [h * 60 + m for h in range(24) for m in (0, 30)]
-    slots.append(23 * 60 + 50)
-    nxt = next((t for t in sorted(slots) if t > now_minute), None)
-    if nxt is not None:
-        return nxt
-    return min(slots)  # wraps past midnight
+def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    m = _collect()
+    m["health_ok"] = m["health_status"] == "ok" and bool(m["connected"])
 
+    hard = _hard_rules(m)
+    anomalies = _anomalies(m)
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--json", action="store_true", help="metrics only, no HALIM")
-    ap.add_argument("--status", action="store_true", help="print ledger, no new checks")
-    ap.add_argument(
-        "--daemon",
-        action="store_true",
-        help="loop forever: check at :00/:30 and 23:50 local",
-    )
-    args = ap.parse_args()
+    # transitional: keep metrics that matter for halim call
+    halim_ok = _halim_alive()
+    verdict = "FAIL" if hard else ("PASS")
 
-    if args.daemon:
-        import time
+    ha: dict[str, Any] = {}
+    if halim_ok:
+        ha = _halim_call(m)
+        verdict = "FAIL" if (hard or ha.get("verdict") == "FAIL") else verdict
 
-        log_path = os.path.join(BASE_DIR, "logs", "production_monitor.log")
-        print("production_monitor daemon starting", flush=True)
-        while True:
-            try:
-                code = run_once(status=False, json_only=False)
-            except Exception as exc:  # keep the loop alive; log and retry
-                code = -1
-                with open(log_path, "a") as fh:
-                    fh.write("check crashed: %r\n" % (exc,))
-            now = datetime.now()
-            seconds = (
-                _next_slot_minute(now.hour * 60 + now.minute)
-                - now.hour * 60
-                - now.minute
-            ) * 60
-            seconds = max(60, seconds)
-            with open(log_path, "a") as fh:
-                fh.write(
-                    "[%s] check exit=%d; next in %d min\n"
-                    % (
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        code,
-                        seconds // 60,
-                    )
-                )
-            time.sleep(seconds)
-
-    return run_once(args.status, args.json)
-
-
-def run_once(status: bool, json_only: bool) -> int:
-    if status:
-        snap = _read(STATE_FILE)
-        print(
-            json.dumps(
-                {k: snap[k] for k in ("last_summary", "gate1") if k in snap}, indent=2
-            )
-        )
-        return 0
-
-    snap = _read(STATE_FILE)
-    m = collect()
-    if json_only:
-        print(json.dumps({"metrics": m, "ledger": snap}, indent=2))
-        return 0
-
-    hard = hard_rules(m)
-    verdict, marks = "FAIL", " . ".join(f"{r}:{why}" for r, why in hard) or "PASS"
-    if hard:
-        marks = "; ".join(f"{r}: {why}" for r, why in hard)
-    else:
-        marks = "ok"
-    g1_hard = bool(hard)
-
-    # HALIM verdict (advisory on top of deterministic rules).
-    if not m["halim_ok"]:
-        gate_state = snap.get("gate1", {})
-        snap["gate1"] = {
-            **gate_state,
-            "status": gate_state.get("status", "pending"),
-            "since": gate_state.get("since"),
-            "last_check_ts": m["ts"],
-            "last_skip_reason": "halim unreachable",
-        }
-        snap["last_summary"] = {
-            "ts": m["ts"],
-            "verdict": "DEGRADED",
-            "returns": None,
-            "hard_fail": g1_hard,
-            "metrics": {
-                k: m[k]
-                for k in (
-                    "health_status",
-                    "connected",
-                    "guard_triggers_session",
-                    "tracebacks_session",
-                    "daily_pnl",
-                    "equity",
-                    "real_closes_total",
-                    "polluted_episodes",
-                    "halim_ok",
-                )
-            },
-        }
-        _write(STATE_FILE, snap)
-        print(
-            "DEGRADED  HALIM unreachable; deterministic rules evaluated. "
-            "Exit 3 hard-fail=%s" % g1_hard
-        )
-        return 3
-
-    ha = halim_verdict(m)
-    llm_fail = ha.get("verdict") == "FAIL"
-
-    wise = snap.setdefault("roles", {}).setdefault("wise", {})
-    gate1 = snap.setdefault(
+    wise = ledger.setdefault("roles", {}).setdefault("wise", {})
+    gate1 = ledger.setdefault(
         "gate1", {"name": "Gate 1 - Paper soak", "status": "pending"}
     )
-    gate1["since"] = gate1.get("since") or _rfc(m["ts"])
-    gate1["last_check_ts"] = m["ts"]
-    gate1["last_verdict_ts"] = m["ts"]
+    gate1["since"] = gate1.get("since") or datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
 
-    if g1_hard or llm_fail:
+    if hard:
         wise["clean_days_streak"] = 0
         wise["last_clean_day"] = None
         gate1["status"] = "pending"
-        gate1["best_days_streak"] = gate1.get("best_days_streak", 0)
-        verdict = "FAIL"
-        parts: list[str] = []
-        if llm_fail:
-            parts.append("halim:" + ha.get("verdict", "FAIL"))
-        parts.extend(f"{r}: {why}" for r, why in hard)
-        marks = " + ".join(parts) or "PASS"
     else:
-        streak = _roll_streak(wise, m)
+        streak = _roll_streak(wise, date.today())
         gate1["best_days_streak"] = max(gate1.get("best_days_streak", 0), streak)
         gate1["status"] = (
             "GO"
             if streak >= DAYS_TARGET and m["real_closes_total"] >= CLOSES_TARGET
-            else (
-                "clean_streak_short_of_closes"
-                if streak >= DAYS_TARGET and m["real_closes_total"] < CLOSES_TARGET
-                else "soaking"
-            )
+            else ("soaking" if streak < DAYS_TARGET else "clean_but_short_on_closes")
         )
-        verdict = "PASS"
 
-    snap["last_verdict"] = ha
-    snap["last_summary"] = {
+    # ── bug-catcher: HALIM diagnosis + deduped notify per signature/day ──
+    bug = ha.get("bug_report") or {}
+    if anomalies and not bug.get("found"):
+        # HALIM silent/degraded? fall back to a deterministic summary — the
+        # user must still be told, so notify on the raw findings.
+        bug = {
+            "found": True,
+            "summary": "; ".join(f"{r}: {d}" for r, d in anomalies),
+            "root_cause": "deterministic anomaly feed (halim silent)",
+            "severity": "medium",
+            "suggested_fix": "inspect ledger / logs/production_monitor.log",
+        }
+    for rule, detail in anomalies:
+        _alert(
+            today_s,
+            rule,
+            (
+                "HANOON BUG-CATCHER\n"
+                f"finding: {rule} — {detail}\n"
+                f"halim diagnosis: {bug.get('summary', 'n/a')}\n"
+                f"root cause: {bug.get('root_cause', 'n/a')}\n"
+                f"severity: {bug.get('severity', 'medium')}\n"
+                f"suggested fix: {bug.get('suggested_fix', 'n/a')}"
+            ),
+            ledger,
+        )
+        ledger.setdefault("findings", {}).setdefault(today_s, {})[rule] = {
+            "detail": detail,
+            "ts": time.time(),
+            "halim": bool(bug.get("found")),
+        }
+
+    ledger["last_verdict_ts"] = m["ts"]
+    ledger["last_summary"] = {
         "ts": m["ts"],
         "verdict": verdict,
-        "hard_fail": g1_hard,
-        "llm_fail": llm_fail,
+        "hard_fail": bool(hard),
+        "anomalies": [f"{r}: {d}" for r, d in anomalies],
         "metrics": {
             "health": m["health_status"],
-            "connected": m["connected"],
-            "guard": m["guard_triggers_session"],
-            "tracebacks": m["tracebacks_session"],
+            "snapshot_ok": m["snapshot_ok"],
+            "cycle_age_s": round(m["cycle_age_s"] or 0, 1),
+            "guard": m["counters"]["guard"],
+            "tracebacks": m["counters"]["tracebacks"],
             "daily_pnl": round(m["daily_pnl"], 2),
             "equity": round(m["equity"], 2),
             "closes": m["real_closes_total"],
             "polluted": m["polluted_episodes"],
-            "halim_ok": m["halim_ok"],
+            "halim_ok": halim_ok,
+            "subscriptions": m["subscriptions"],
         },
         "streak": wise.get("clean_days_streak", 0),
         "gate_status": gate1["status"],
+        "bug_report": bug,
     }
-    _write(STATE_FILE, snap)
+    _write(STATE_FILE, ledger)
+    if hard:
+        code = 2
+    elif not halim_ok:
+        code = 3  # HALIM degraded — deterministic checks above still ran
+    elif anomalies:
+        code = 4  # bugs found and reported to the user
+    else:
+        code = 0
+    return code, ledger
 
-    print(
-        "verdict=%s  streak=%d/%d  closes=%d/%d  rules=[%s]  halim=%s  gate=%s"
-        % (
-            verdict,
-            wise.get("clean_days_streak", 0),
-            DAYS_TARGET,
-            m["real_closes_total"],
-            CLOSES_TARGET,
-            marks,
-            ha.get("verdict", "?"),
-            gate1["status"],
-        )
-    )
-    if ha.get("issues"):
-        for issue in ha["issues"]:
-            print(
-                "  halim-issue: %s/%s %s"
-                % (
-                    issue.get("gate", "?"),
-                    issue.get("risk", "?"),
-                    issue.get("detail", ""),
-                )
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--status", action="store_true")
+    ap.add_argument("--daemon", action="store_true")
+    args = ap.parse_args()
+
+    if args.json:
+        print(json.dumps(_collect(), indent=2, default=str))
+        return 0
+    if args.status:
+        led = _read(STATE_FILE)
+        print(
+            json.dumps(
+                {
+                    k: led.get(k)
+                    for k in ("last_summary", "gate1", "findings", "alerted")
+                    if k in led
+                },
+                indent=2,
             )
-
-    if g1_hard:
-        return 2
-    if llm_fail:
-        return 2
-    return 0
+        )
+        return 0
+    if args.daemon:
+        _note("production_monitor daemon starting")
+        down_cycles = 0
+        while True:
+            ledger = _read(STATE_FILE)
+            code, _led = run_once(date.today().isoformat(), ledger)
+            try:
+                with urllib.request.urlopen(
+                    f"{TELEMETRY_URL}/health", timeout=5
+                ) as resp:
+                    json.loads(resp.read().decode())
+                down_cycles = 0
+            except Exception:
+                down_cycles += 1
+                _note(f"bot unreachable (cycle {down_cycles}); idling")
+                if down_cycles >= BOT_DOWN_EXIT_CYCLES:
+                    _note("bot down too long — monitor exiting")
+                    return 0
+            now = datetime.now()
+            minute = now.hour * 60 + now.minute
+            slots = sorted(
+                set([h * 60 + m for h in range(24) for m in (0, 30)] + [23 * 60 + 50])
+            )
+            nxt = next((s for s in slots if s > minute), slots[0])
+            delay = max(60, (nxt - minute) * 60)
+            _note(f"check exit={code}; next in {delay // 60} min")
+            time.sleep(delay)
+    return run_once(date.today().isoformat(), _read(STATE_FILE))[0]
 
 
 if __name__ == "__main__":
