@@ -31,6 +31,7 @@ ROUTES_GET = {
     "/config": "_config",
     "/halim": "_halim_state",
     "/verdicts": "_verdicts",
+    "/session": "_session",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -184,6 +185,9 @@ class _H(BaseHTTPRequestHandler):
         j = getattr(bot, "journal", None)
         hp = getattr(bot, "hippocampus", None)
         policy = self._policy_state()
+        from .monitor.sleep_manager import SleepManager
+
+        _st = SleepManager().effective_state(TRADING_CONFIG)
         ts_keys = (
             list(bot.streamer.ticker_subs.keys())
             if bot and hasattr(bot.streamer.ticker_subs, "keys")
@@ -204,6 +208,8 @@ class _H(BaseHTTPRequestHandler):
             "authorized": policy.get("authorized", True),
             "pause_reason": policy.get("pause_reason", ""),
             "last_beat": round(float(getattr(bot, "_last_beat", 0.0)), 1),
+            "session": _st.session,
+            "session_active": bool(_st.active),
             "uptime": time.time(),
         }
 
@@ -350,6 +356,19 @@ class _H(BaseHTTPRequestHandler):
         d["minutes_to_close"] = round(sm.minutes_to_close(), 1)
         d["eod_window_active"] = sm.is_eod_window(TRADING_CONFIG.eod_flatten_minutes)
         return d
+
+    def _session(self) -> dict[str, Any]:
+        """Current session-gate state (source of truth for HALIM + ops)."""
+        from .monitor.sleep_manager import SleepManager
+
+        st = SleepManager().effective_state(TRADING_CONFIG)
+        return {
+            "session": st.session,
+            "active": bool(st.active),
+            "enabled": TRADING_CONFIG.to_dict().get("sessions", {}),
+            "reason": st.reason,
+            "ts": time.time(),
+        }
 
     def _halim_state(self) -> dict[str, Any]:
         """HALIM state: regime, modifier, postmortem, recommendations."""

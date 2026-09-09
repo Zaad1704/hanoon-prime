@@ -276,3 +276,45 @@ class TestBrainBackedTelemetry:
         assert body["risk_scalar"] == 0.5
         assert "halted" not in body
         assert "pause_reason" not in body
+
+
+class TestSessionEndpoint:
+    """Master session gate: /session route + /health session fields."""
+
+    def test_session_endpoint_shape(self) -> None:
+        handler = _H.__new__(_H)
+        handler.bot = None
+        body = handler._session()
+        assert body["session"] in {"pre_market", "rth", "post_market", "overnight"}
+        assert isinstance(body["active"], bool)
+        assert set(body["enabled"]) == {
+            "pre_market",
+            "rth",
+            "post_market",
+            "overnight",
+        }
+        assert isinstance(body["ts"], float)
+
+    def test_health_reports_session(self) -> None:
+        handler = _H.__new__(_H)
+        bot = MagicMock()
+        bot.streamer.ticker_subs = {}
+        bot.journal = MagicMock()
+        bot.journal.count.return_value = 0
+        bot.hippocampus = MagicMock()
+        bot.hippocampus.safety_enabled = True
+        bot.ib = MagicMock()
+        bot.ib.isConnected.return_value = True
+        bot.ib.positions.return_value = []
+        bot._halted = False
+        bot._last_beat = 0.0
+        handler.bot = bot
+        h = handler._health()
+        assert "session" in h
+        assert "session_active" in h
+        assert isinstance(h["session_active"], bool)
+
+    def test_session_route_registered(self) -> None:
+        from hanoon_prime.telemetry import ROUTES_GET
+
+        assert ROUTES_GET["/session"] == "_session"
