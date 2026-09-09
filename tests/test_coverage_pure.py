@@ -210,6 +210,21 @@ class TestDynamics:
         assert dyn.threshold < 0.58
         assert dyn.threshold >= THRESHOLD_MIN
 
+    def test_adapt_threshold_raises_at_boundary(self):
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.50)  # >= 0.50 (loss error)
+        assert abs(dyn.threshold - 0.59) < 1e-9
+
+    def test_adapt_threshold_lowers_at_boundary(self):
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.44)  # < 0.45 (confident win)
+        assert abs(dyn.threshold - 0.575) < 1e-9
+
+    def test_no_adapt_in_dead_band(self):
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.47)  # between 0.45 and 0.50 — no change
+        assert dyn.threshold == 0.58
+
     def test_refractory_then_expires(self):
         dyn = Dynamics()
         dyn.set_refractory(2.0)

@@ -82,10 +82,17 @@ class Dynamics:
         return self._threshold
 
     def adapt_threshold(self, prediction_error: float) -> None:
-        """Raise threshold when errors are high, lower when low."""
-        if prediction_error > 0.6:
+        """Raise threshold when errors are high, lower when low.
+
+        Bounded win-probability predictions (score_to_win_prob) make
+        trade-close prediction error sit in ~[0.40, 0.60]. The old
+        ``> 0.6 / < 0.3`` boundaries were unreachable so the threshold
+        never adapted. 0.50 is the dominant loss signal (pred >= threshold
+        typically); 0.45 is the confident-win zone (pred > 0.55 → low error).
+        """
+        if prediction_error >= 0.50:
             self._threshold = min(THRESHOLD_MAX, self._threshold + 0.01)
-        elif prediction_error < 0.3:
+        elif prediction_error < 0.45:
             self._threshold = max(THRESHOLD_MIN, self._threshold - 0.005)
 
     def set_refractory(self, duration: float = 2.0) -> None:
