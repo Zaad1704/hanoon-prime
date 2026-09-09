@@ -934,6 +934,9 @@ class NeuromorphicBrain:
         if not self._ironclade_gate(ticker, source):
             return
         self.dynamics.adapt_threshold(self.memory.pred_error)
+        self.memory.threshold = (
+            self.dynamics.threshold
+        )  # persist adapted threshold → survives restart
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
         self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)

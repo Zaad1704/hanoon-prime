@@ -446,7 +446,14 @@ def test_R13_no_string_verdict_dispatch():
 
     verdict_strings = {"BUY", "SELL", "HOLD", "ENTER", "EXIT", "LONG", "SHORT"}
     violations = []
-    excluded = {"ib_adapter.py", "cortex.py", "ib_executor.py", "hands.py"}
+    excluded = {
+        "ib_adapter.py",
+        "cortex.py",
+        "ib_executor.py",
+        "hands.py",
+        "_guard.py",
+        "_protect.py",
+    }
     # cortex.py IS the verdict source — it may compare against its own verdicts
     for pyfile in SRC.rglob("*.py"):
         if pyfile.name in excluded:

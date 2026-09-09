@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
+from ._guard import cancel_sell_legs, open_order_for, short_positions
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
 from ._protect import protect_position
 from ._telegram import trade_closed, trade_opened
@@ -51,6 +52,8 @@ class IBExecutor:
         # IB account context mirrored from ib_cycle each cycle (IB source).
         self._account_feed: dict[str, Any] = {}
         self._winrate_provider: Callable[[], tuple[float, int]] | None = None
+        # Netting guard state: ticker → qty last requested to flatten.
+        self._flattening: dict[str, int] = {}
 
     def place_bracket(
         self,
@@ -88,6 +91,7 @@ class IBExecutor:
         if action == "SELL" and not TRADING_CONFIG.is_direction_allowed(action):
             log.info("SHORT order blocked (long_only policy)")
             return
+        cancel_sell_legs(self.ib, ticker)
         contract = streamer.contracts[ticker]
         self._horizons[ticker] = horizon
         for order in self.ib.bracketOrder(
@@ -133,6 +137,7 @@ class IBExecutor:
                 len(self.brain._open_positions),
             )
             return
+        self._guard_netting(streamer, closing or set())
         self._notify_open_fills(ib_positions)
         # Fire exit for any tracked position that IB no longer reports.
         # Use _open_positions (not just _brackets) so adopted/orphan
@@ -144,6 +149,43 @@ class IBExecutor:
         if now - self._last_snapshot >= 10.0:
             self._last_snapshot = now
             journal_snapshot(self.journal, self.ib, ib_positions, self._brackets)
+
+    def _guard_netting(self, streamer: Any, closing: set[str]) -> None:
+        """Flatten accidental shorts while long_only (netting-reversal guard)."""
+        if TRADING_CONFIG.direction_mode != "long_only":
+            return
+        shorts = short_positions(self.ib, self.tracked_tickers)
+        for sym, size in shorts.items():
+            qty = int(size)
+            if sym in closing or qty <= 0:
+                continue
+            if self._flattening.get(sym) == qty:
+                continue
+            if open_order_for(self.ib, sym, "BUY"):
+                continue
+            contract = streamer.contracts.get(sym)
+            if contract is None:
+                continue
+            cancel_sell_legs(self.ib, sym)
+            try:
+                from ib_insync import MarketOrder
+
+                self.ib.placeOrder(
+                    contract,
+                    MarketOrder(
+                        "BUY", qty, tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS
+                    ),
+                )
+            except Exception as exc:
+                log.warning("netting guard flatten %s failed: %s", sym, exc)
+                continue
+            self._brackets.pop(sym, None)
+            self._pending_parent.discard(sym)
+            self._flattening[sym] = qty
+            log.info("NETTING GUARD: flattened accidental short %s qty=%d", sym, qty)
+        for sym in list(self._flattening):
+            if shorts.get(sym) is None:
+                self._flattening.pop(sym, None)
 
     def _adopt_orphan_positions(
         self, streamer: Any, closing: set[str] | None = None

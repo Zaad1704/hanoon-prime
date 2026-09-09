@@ -59,7 +59,7 @@ def _place_oca(ib_client: Any, contract: Any, order: BracketOrder) -> None:
     kw = dict(
         action=order.action,
         totalQuantity=order.qty,
-        tif="GTC",
+        tif="DAY",
         ocaGroup=order.oca,
         ocaType=1,
         transmit=True,
@@ -73,6 +73,17 @@ def _place_oca(ib_client: Any, contract: Any, order: BracketOrder) -> None:
     )
 
 
+def _cancel_flat_legs(ib_client: Any, sym: str, pending: set[str]) -> None:
+    """Cancel lingering OCA legs on a now-flat tracked position."""
+    if sym in pending:
+        return
+    trades = _get_oca_orders(ib_client, sym)
+    if not trades:
+        return
+    _cancel_oca(ib_client, trades)
+    log.info("CANCEL-LEGS %s: position flat", sym)
+
+
 def protect_position(
     ib_client: Any,
     tracked: set[str],
@@ -80,10 +91,26 @@ def protect_position(
     pending: set[str],
     streamer: Any,
 ) -> None:
-    """Validate and fix OCA protection for all tracked positions."""
+    """Validate and fix OCA protection for all tracked positions.
+
+    Flat tracked positions get any lingering SELL legs cancelled (their
+    stale GTC legs previously over-sold the position on netting accounts
+    and flipped it short). Negative (accidental short) positions are left
+    alone for the netting guard to flatten.
+    """
+    live = {}
     for pos in ib_client.positions():
         sym = pos.contract.symbol if pos.contract else ""
-        if sym not in tracked or sym in pending or sym in brackets:
+        if sym:
+            live[sym] = pos
+    for sym in tracked:
+        pos = live.get(sym)
+        if pos is None or abs(int(pos.position)) == 0:
+            _cancel_flat_legs(ib_client, sym, pending)
+            continue
+        if pos.position < 0:
+            continue
+        if sym in pending or sym in brackets:
             continue
         _reprotect_position(ib_client, sym, pos, streamer, brackets)
 

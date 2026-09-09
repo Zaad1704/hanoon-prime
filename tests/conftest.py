@@ -38,6 +38,10 @@ def _hermetic_learning_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(
         "hanoon_prime.brain.regime_weights.REGIME_FILE", tmp_path / "regime.json"
     )
+    # Redirect JuliMemory (the brain's persistent learning state) to the
+    # per-test directory too — without this, trade-close learning writes
+    # SMOKE/test episodes into the production runtime/juli_state.json.
+    monkeypatch.setenv("HANOO_MEMORY_FILE", str(tmp_path / "juli_state.json"))
 
 
 @pytest.fixture

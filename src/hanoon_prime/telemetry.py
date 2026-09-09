@@ -147,7 +147,10 @@ class _H(BaseHTTPRequestHandler):
     def _current_snapshot(self) -> dict[str, Any]:
         try:
             with self.cache_lock or threading.Lock():
-                return self.cache.get("data") or {}
+                cached = self.cache.get("data")
+                if not isinstance(cached, dict):
+                    return {}
+                return cached
         except Exception:
             return {}
 

@@ -15,7 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hanoon_prime._guard import cancel_sell_legs, open_order_for, short_positions
 from hanoon_prime._ib_sync import get_ib_pnl, read_ib_positions
+from hanoon_prime.brain.policy.trading_policy import TRADING_CONFIG
 from hanoon_prime.ib_executor import IBExecutor
 from hanoon_prime.types import Position
 
@@ -570,3 +572,187 @@ class TestCloseSummary:
     def test_close_summary_empty_without_context(self):
         exc = make_executor()
         assert exc._close_summary() == ""
+
+
+# ---------------------------------------------------------------------------
+# TestShortPositions — netting guard helper: negative tracked positions
+# ---------------------------------------------------------------------------
+
+
+class TestShortPositions:
+    """short_positions exposes only negative net positions for tracked tickers."""
+
+    def test_returns_negative_tracked_only(self):
+        fake_ib = MagicMock()
+        fake_ib.positions.return_value = [
+            _pos("OLB", -5, 0.3),
+            _pos("SOXS", -2, 42.0),
+            _pos("NOK", 100, 1.0),
+        ]
+        shorts = short_positions(fake_ib, {"OLB", "SOXS", "NOK"})
+        assert shorts == {"OLB": 5.0, "SOXS": 2.0}
+
+    def test_ignores_untracked_and_longs(self):
+        fake_ib = MagicMock()
+        fake_ib.positions.return_value = [
+            _pos("OLB", -5, 0.3),
+            _pos("NVDA", -10, 100.0),
+            _pos("TSLA", 10, 100.0),
+        ]
+        shorts = short_positions(fake_ib, {"OLB", "TSLA"})
+        assert shorts == {"OLB": 5.0}
+        assert "NVDA" not in shorts
+
+    def test_survives_error(self):
+        fake_ib = MagicMock()
+        fake_ib.positions.side_effect = RuntimeError("IB down")
+        assert short_positions(fake_ib, {"OLB"}) == {}
+
+
+# ---------------------------------------------------------------------------
+# TestCancelSellLegs — cancel stale SELL legs without touching BUY orders
+# ---------------------------------------------------------------------------
+
+
+def _open_trade(symbol, action, done=False, active=True):
+    """Helper: mock open Trade with order action + status."""
+    m = MagicMock()
+    order = MagicMock()
+    order.action = action
+    order.ocaGroup = f"JULI_{symbol}"
+    m.order = order
+    m.contract.symbol = symbol
+    m.isDone.return_value = done
+    return m
+
+
+class TestCancelSellLegs:
+    """cancel_sell_legs removes live SELL legs only."""
+
+    def test_cancels_sell_legs_only(self):
+        fake_ib = MagicMock()
+        done_sell = _open_trade("OLB", "SELL", done=True)
+        fake_ib.openTrades.return_value = [
+            _open_trade("OLB", "SELL"),
+            _open_trade("OLB", "BUY"),
+            _open_trade("TSLA", "SELL"),
+            done_sell,
+        ]
+        n = cancel_sell_legs(fake_ib, "OLB")
+        assert n == 1
+        cancelled_actions = [
+            c.args[0].action for c in fake_ib.cancelOrder.call_args_list
+        ]
+        assert cancelled_actions == ["SELL"]
+        assert done_sell.order not in [
+            c.args[0] for c in fake_ib.cancelOrder.call_args_list
+        ]
+
+    def test_returns_zero_when_none(self):
+        fake_ib = MagicMock()
+        fake_ib.openTrades.return_value = [_open_trade("OLB", "BUY")]
+        assert cancel_sell_legs(fake_ib, "OLB") == 0
+
+    def test_survives_error(self):
+        fake_ib = MagicMock()
+        fake_ib.openTrades.side_effect = RuntimeError("IB down")
+        assert cancel_sell_legs(fake_ib, "OLB") == 0
+
+
+# ---------------------------------------------------------------------------
+# TestNettingGuard — executor flattens accidental shorts in long_only
+# ---------------------------------------------------------------------------
+
+
+class TestNettingGuard:
+    """_guard_netting buys back accidental shorts while long_only."""
+
+    def test_flattens_short_when_long_only(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB", "SOXS"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = []
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock(), "SOXS": MagicMock()}
+        exc._guard_netting(streamer, set())
+        assert exc.ib.placeOrder.call_count == 1
+        args, kwargs = exc.ib.placeOrder.call_args
+        order = args[1]
+        assert order.action == "BUY"
+        assert int(order.totalQuantity) == 5
+        assert order.tif == "DAY"
+        assert order.outsideRth is True
+        assert exc._flattening == {"OLB": 5}
+
+    def test_skips_when_both_directions(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "both")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        exc._guard_netting(streamer, set())
+        exc.ib.placeOrder.assert_not_called()
+
+    def test_skips_when_buy_already_in_flight(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = [_open_trade("OLB", "BUY")]
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        exc._guard_netting(streamer, set())
+        exc.ib.placeOrder.assert_not_called()
+
+    def test_no_double_order_for_same_qty(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = []
+        exc._flattening = {"OLB": 5}
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        exc._guard_netting(streamer, set())
+        exc.ib.placeOrder.assert_not_called()
+
+    def test_prunes_flattening_when_short_closed(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", 50, 0.3)]
+        exc._flattening = {"OLB": 5}
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        exc._guard_netting(streamer, set())
+        assert exc._flattening == {}
+
+    def test_skips_sym_in_closing(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = []
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        exc._guard_netting(streamer, {"OLB"})
+        exc.ib.placeOrder.assert_not_called()
+
+    def test_skips_when_contract_missing(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = []
+        streamer = MagicMock()
+        streamer.contracts = {}
+        exc._guard_netting(streamer, set())
+        exc.ib.placeOrder.assert_not_called()
+
+    def test_cancels_sell_legs_before_flatten(self, monkeypatch):
+        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        exc = make_executor(tracked={"OLB"})
+        exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
+        exc.ib.openTrades.return_value = [_open_trade("OLB", "SELL")]
+        exc.ib.placeOrder.side_effect = lambda *a: None
+        streamer = MagicMock()
+        streamer.contracts = {"OLB": MagicMock()}
+        with patch("hanoon_prime.ib_executor.cancel_sell_legs") as cancel:
+            exc._guard_netting(streamer, set())
+        cancel.assert_called_once_with(exc.ib, "OLB")
+        assert exc.ib.placeOrder.call_count == 1

@@ -3,10 +3,7 @@
 Stores indicator weights, episodic patterns, score history, calibration
 state, and structured lessons. Persists to JSON across restarts.
 
-Thread-safe with RLock. Single-writer: reflection.py (on trade close).
-
-Separate from memory.py (journal) — that's the IB carbon copy.
-This is the BRAIN's learning state.
+Separate from memory.py (journal) — the IB carbon copy; this is the BRAIN's learning state.
 """
 
 from __future__ import annotations
@@ -19,7 +16,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import DEFAULT_WEIGHTS, EPISODIC_CAPACITY, JULI_STATE_FILE
+from .config import (
+    DEFAULT_WEIGHTS,
+    EPISODIC_CAPACITY,
+    JULI_STATE_FILE,
+    THRESHOLD_MAX,
+    THRESHOLD_MIN,
+)
 from .weight_enforcer import get_enforcer
 
 log = logging.getLogger(__name__)
@@ -162,7 +165,7 @@ class JuliMemory:
     @threshold.setter
     def threshold(self, value: float) -> None:
         """Set the entry threshold, clamped to the valid range."""
-        self._threshold = max(0.10, min(0.70, value))
+        self._threshold = max(THRESHOLD_MIN, min(THRESHOLD_MAX, value))
         self._save()
 
     def _load(self) -> None:

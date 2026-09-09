@@ -310,7 +310,7 @@ class TestJuliMemory:
         mem.threshold = 0.99
         assert mem.threshold == 0.70
         mem.threshold = -1.0
-        assert mem.threshold == 0.10
+        assert mem.threshold == 0.45  # THRESHOLD_MIN
 
     def test_snapshot_keys(self, tmp_path):
         mem = JuliMemory(path=tmp_path / "state.json")

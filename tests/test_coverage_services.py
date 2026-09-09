@@ -358,3 +358,38 @@ class TestProtect:
         protect_position(ib_client, {"TSLA"}, {}, set(), streamer)
         # no price -> cannot place protection
         ib_client.placeOrder.assert_not_called()
+
+    def test_protect_cancels_legs_when_flat(self, monkeypatch):
+        monkeypatch.setattr(
+            "hanoon_prime._protect._ib",
+            SimpleNamespace(Order=lambda **k: None, Stock=lambda *a: "c"),
+        )
+        ib_client = MagicMock()
+        ib_client.positions.return_value = []
+        stale = [_fake_trade("STP"), _fake_trade("LMT")]
+        ib_client.openTrades.return_value = stale
+        streamer = SimpleNamespace(
+            get_last_price=lambda s: 100.0, buffer_atr=lambda s: 2.0
+        )
+        brackets: dict[str, tuple[float, float]] = {}
+        protect_position(ib_client, {"TSLA"}, brackets, set(), streamer)
+        # stale SELL legs on a flat position must be cancelled, not re-adopted
+        assert ib_client.cancelOrder.call_count == 2
+        assert brackets == {}
+
+    def test_protect_skips_negative_position(self, monkeypatch):
+        monkeypatch.setattr(
+            "hanoon_prime._protect._ib",
+            SimpleNamespace(Order=lambda **k: None, Stock=lambda *a: "c"),
+        )
+        ib_client = MagicMock()
+        ib_client.positions.return_value = [
+            SimpleNamespace(contract=SimpleNamespace(symbol="TSLA"), position=-100)
+        ]
+        ib_client.openTrades.return_value = []
+        streamer = SimpleNamespace(
+            get_last_price=lambda s: 100.0, buffer_atr=lambda s: 2.0
+        )
+        # negative (accidental short) is left for the netting guard to flatten
+        protect_position(ib_client, {"TSLA"}, {}, set(), streamer)
+        ib_client.placeOrder.assert_not_called()
