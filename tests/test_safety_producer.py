@@ -15,13 +15,15 @@ from hanoon_prime.immune import (
 _CAPTURED: list[tuple[str, str]] = []
 
 
-def make(journal: list | None = None) -> SafetyProducer:
+def make(journal: list | None = None, enabled: bool = True) -> SafetyProducer:
     _CAPTURED.clear()
 
     def notify(reason: str) -> None:
         _CAPTURED.append(("notify", reason))
 
     s = SafetyProducer(journal=journal, notify=notify)
+    if enabled:
+        s.set_enabled(True)
     s.begin_call()
     return s
 
@@ -30,7 +32,14 @@ def captured() -> list[tuple[str, str]]:
     return list(_CAPTURED)
 
 
-def test_defaults_authorized():
+def test_producer_defaults_to_disabled():
+    s = SafetyProducer()
+    assert s.enabled is False
+    s.on_daily_pnl(-(DAILY_LOSS_LIMIT * 3))
+    assert s.authorized()[0] is True
+
+
+def test_enabled_no_stressors_authorizes():
     s = make()
     ok, reason = s.authorized()
     assert ok is True and reason == ""

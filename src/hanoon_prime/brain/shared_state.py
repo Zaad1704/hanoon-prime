@@ -21,7 +21,7 @@ DEFAULT_POLICY_STATE: dict[str, Any] = {
     "max_positions": 30,
     "holdings": {},
     "authorized": True,
-    "enabled": True,
+    "enabled": False,
     "halted": False,
     "pause_reason": "",
     "daily_pnl": 0.0,

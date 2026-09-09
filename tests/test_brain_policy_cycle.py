@@ -14,6 +14,7 @@ from hanoon_prime.immune import DAILY_LOSS_LIMIT
 def engine() -> tuple[ConsolidationEngine, BrainState]:
     state = BrainState()
     eng = ConsolidationEngine(state)
+    eng.safety.set_enabled(True)  # halt rules active (producer defaults off)
     eng._update_policy()
     return eng, state
 

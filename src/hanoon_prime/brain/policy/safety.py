@@ -30,9 +30,10 @@ class SafetyProducer:
         self,
         journal: Any = None,
         notify: Callable[[str], None] | None = None,
+        enabled: bool = False,
     ) -> None:
-        """Start enabled, unhalted, no pause reason."""
-        self.enabled: bool = True
+        """Start disabled (deactivated until the webapp enables), unhalted."""
+        self.enabled: bool = enabled
         self.halted: bool = False
         self.pause_reason: str = ""
         self._daily_pnl: float = 0.0
