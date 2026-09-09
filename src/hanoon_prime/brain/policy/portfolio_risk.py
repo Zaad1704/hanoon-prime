@@ -78,12 +78,13 @@ class PortfolioRiskManager:
         self._peak_unrealized = 0.0
         self._last_giveback = 0.0
 
-    def update_equity(self, equity: float) -> None:
-        """Update equity from IB NetLiq; recompute scalar + stress."""
+    def update_equity(self, equity: float, synced: bool = True) -> None:
+        """Update equity; synced=False keeps the account flagged unsynced."""
         if equity <= 0:
             return  # never fabricate equity from a failed read
         self._equity = float(equity)
-        self._equity_synced = True
+        if synced:
+            self._equity_synced = True
         if self._equity > self._peak_equity:
             self._peak_equity = self._equity
         if self._peak_equity > 0:

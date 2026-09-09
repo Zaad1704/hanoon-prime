@@ -15,6 +15,7 @@ from typing import Any
 
 from ._ib_sync import read_portfolio
 from ._telegram import shutdown
+from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
 from .brain.policy.verdict import ENTER, Verdict
 from .config import TRADING_CONFIG
@@ -445,12 +446,10 @@ class BotCycleMixin:
         if time.monotonic() - getattr(self, "_last_policy_sync", 0.0) >= RISK_SYNC_SECS:
             self._last_policy_sync = time.monotonic()
             try:
-                summary = self.ib.accountSummary(self.account)
-                net_liq = next(
-                    (float(i.value) for i in summary if i.tag == "NetLiquidation"),
-                    0.0,
-                )
-                feed["equity"] = net_liq
+                equity, synced = resolve_account_equity(self.ib, self.account)
+                if equity is not None:
+                    feed["equity"] = equity
+                    feed["equity_synced"] = synced
                 feed["positions"] = read_portfolio(self.ib)
             except Exception as exc:
                 log.debug("Account sync skipped: %s", exc)

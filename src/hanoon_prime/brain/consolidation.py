@@ -116,7 +116,9 @@ class ConsolidationEngine:
             self.portfolio_risk.update_positions(positions)
         equity = feed.get("equity")
         if equity is not None:
-            self.portfolio_risk.update_equity(float(equity))
+            self.portfolio_risk.update_equity(
+                float(equity), synced=bool(feed.get("equity_synced", True))
+            )
         risk: dict[str, Any] = self.portfolio_risk.get_risk_state()
         auth, reason = self.safety.authorized()
         risk.update(
