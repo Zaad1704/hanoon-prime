@@ -24,6 +24,9 @@ from typing import Any, Dict, List
 from halim.active_model import enforce_active_runtime, runtime_envelope
 from halim.engine import collect_status, complete_reasoning
 from halim.protocol import DEFAULT_HOST, DEFAULT_PORT, MODEL_NAME, PROTOCOL_VERSION
+from halim.session_gate import asleep as _system_asleep
+from halim.session_gate import snapshot as _session_snapshot
+from halim.session_gate import start as _start_session_poller
 
 # ── Inference Priority Levels ─────────────────────────────────────────
 # CRITICAL = entry qualification during active trading (must be served FIRST)
@@ -41,6 +44,18 @@ PRIORITY_LOW      = 3
 # 16000MB keeps 2 workers on 16GB+ machines only (user report 2026-08-17:
 # 2 workers on 8GB → OOM → 90s inference timeouts → Halim looked offline).
 MIN_RAM_FOR_SECOND_WORKER = 16000  # MB — need 2.5GB per worker minimum
+
+# ── Inference routes silenced while the whole system sleeps (session gate).
+_INFERENCE_ROUTES = frozenset(
+    {
+        "/v1/complete",
+        "/v1/complete-thinking",
+        "/v1/record",
+        "/v1/evolve",
+        "/v1/chat",
+        "/v1/generate",
+    }
+)
 
 # ── Inference Priority Levels ─────────────────────────────────────────
 # (duplicated above for documentation — these are the canonical definitions)
@@ -509,7 +524,16 @@ class HalimHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._json(200, {"ok": True, "model": MODEL_NAME, "protocol": PROTOCOL_VERSION})
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "model": MODEL_NAME,
+                    "protocol": PROTOCOL_VERSION,
+                    "asleep": _system_asleep(),
+                    "session": _session_snapshot().get("session", "unknown"),
+                },
+            )
         elif self.path == "/v1/status":
             st = collect_status()
             st["inference"] = _get_worker().get_stats()
@@ -543,6 +567,10 @@ class HalimHandler(BaseHTTPRequestHandler):
             body = self._read_json()
         except Exception:
             self._json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        if _system_asleep() and self.path in _INFERENCE_ROUTES:
+            self._json(503, {"ok": False, "reason": "system_asleep"})
             return
 
         if self.path == "/v1/complete":
@@ -654,6 +682,9 @@ def main(argv: list[str] | None = None) -> int:
     _get_worker().start()
     _st = _get_worker().get_stats()
     print(f"   Worker started (n_workers={_st['n_workers']})", flush=True)
+
+    _start_session_poller()
+    print("   Session poller started (whole-system gate)", flush=True)
 
     # Register with memory guardian (if available in path)
     try:
