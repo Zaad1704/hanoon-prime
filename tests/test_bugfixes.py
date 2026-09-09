@@ -72,8 +72,8 @@ class TestBug1ThresholdBypass:
         mixin.executor.place_bracket.assert_not_called()
         mixin.juli.brain.register_position.assert_not_called()
 
-    def test_places_bracket_and_registers_when_sizing_valid(self):
-        """Verdict with valid sizing MUST place bracket and register."""
+    def test_places_bracket_and_notes_cooldown_when_sizing_valid(self):
+        """Verdict with valid sizing MUST place bracket and stamp cooldown."""
         mixin = self._make_mixin()
         tk = MagicMock()
         tk.hasBidAsk = True
@@ -83,10 +83,19 @@ class TestBug1ThresholdBypass:
         v = self._enter_verdict(SizingResult(shares=3, risk_pass=True))
         mixin._execute_verdict(v)
         mixin.executor.place_bracket.assert_called_once()
+        mixin.juli.brain.register_position.assert_not_called()  # deferred to fill
+        mixin.juli.brain.note_entry.assert_called_once_with("TSLA")
+
+    def test_fill_confirmed_registers_and_watches(self):
+        """Only IB fill confirmation registers the exits-tracker + watchers."""
+        mixin = self._make_mixin()
+        mixin.executor._horizons = {"TSLA": "scalp"}
+        mixin.executor._brackets = {}
+        mixin._confirm_fill("TSLA", 100.5)
         mixin.juli.brain.register_position.assert_called_once_with(
             "TSLA", 100.5, horizon="scalp"
         )
-        mixin.juli.brain.note_entry.assert_called_once_with("TSLA")
+        mixin.streamer.attach_exit_watcher.assert_called_once()
 
     def test_risk_engine_rejects_below_threshold_score(self):
         """RiskEngine rejects tiny scores via EV gate (no 1-share trades)."""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -46,6 +46,7 @@ class IBExecutor:
         self._last_snapshot: float = 0.0
         self._closed_trades: list[dict[str, Any]] = []
         self.last_thoughts: dict[str, Any] = {}
+        self.on_fill_confirmed: Callable[[str, float], None] | None = None
 
     def place_bracket(
         self,
@@ -229,6 +230,15 @@ class IBExecutor:
             }
         )
 
+    def _confirm_fill_hook(self, sym: str, entry_price: float) -> None:
+        """Call the cycle's fill-confirmed accounting (if wired)."""
+        if self.on_fill_confirmed is None:
+            return
+        try:
+            self.on_fill_confirmed(sym, entry_price)
+        except Exception as exc:
+            log.debug("fill-confirm accounting failed for %s: %s", sym, exc)
+
     def _notify_open_fills(self, ib_positions: dict[str, Any]) -> None:
         """Fire fill-confirmed entry notifications for pending brackets."""
         for sym in list(self._pending_parent):
@@ -244,6 +254,7 @@ class IBExecutor:
                 float(pos.entry_price or 0.0),
                 ExitLevels(stop=float(stop or 0.0), target=float(target or 0.0)),
             )
+            self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
 
     def monitor_orders(self, ib_positions: dict[str, Any], streamer: Any) -> None:
         """Monitor ALL parent orders — cancel orphans, trail both."""
@@ -290,6 +301,7 @@ class IBExecutor:
                     pos.entry_price,
                     ExitLevels(stop=stop, target=target),
                 )
+                self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
             else:
                 return
         elif sym not in ib_positions:

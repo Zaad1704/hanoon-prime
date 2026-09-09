@@ -500,8 +500,6 @@ class BotCycleMixin:
             horizon=verdict.horizon,
         )
         self.executor.last_thoughts[ticker] = verdict.thought
-        self.juli.brain.register_position(ticker, price, horizon=verdict.horizon)
-        self._attach_position_watchers(ticker)
         self.juli.brain.note_entry(ticker)
 
     def _sync_subs(self) -> None:
@@ -629,6 +627,21 @@ class BotCycleMixin:
         closed = self.executor.close_all_positions(self.streamer, only=set(intraday))
         log.warning("EOD FLATTEN: sent limit orders for %d positions", closed)
         return bool(closed)
+
+    def _confirm_fill(self, ticker: str, entry_price: float) -> None:
+        """Account an entry only after IB reports the fill (post-fill).
+
+        Wired as executor.on_fill_confirmed; registers the exits-tracker
+        entry and attaches tick/PnL watchers once the bracket actually
+        fills — never at order placement.
+        """
+        try:
+            self.juli.brain.register_position(
+                ticker, entry_price, horizon=self.executor._horizons.get(ticker, "scalp")
+            )
+        except Exception as exc:
+            log.debug("fill register failed for %s: %s", ticker, exc)
+        self._attach_position_watchers(ticker)
 
     def _attach_position_watchers(self, ticker: str) -> None:
         """Attach tick-driven exit watcher + per-position PnL stream.

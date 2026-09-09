@@ -51,6 +51,7 @@ class IBStreamingBot(BotCycleMixin):
             consolidation.safety.attach_journal(self.journal)
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
+        self.executor.on_fill_confirmed = self._confirm_fill
         # Telegram chat (read-only queries answered from brain state)
         self._chat = TelegramChat(state_provider=self._chat_state)
         # Continuous pipeline health daemon (alerts + heal flags)

@@ -233,6 +233,16 @@ class TestNotifyOpenFills:
         exc._notify_open_fills({})
         assert "TSLA" in exc._pending_parent
 
+    def test_fill_hook_fires_once_position_fills(self):
+        exc = make_executor(tracked={"TSLA"})
+        exc._pending_parent.add("TSLA")
+        seen: list[tuple[str, float]] = []
+        exc.on_fill_confirmed = lambda sym, price: seen.append((sym, price))
+        pos = make_pos(direction=1, shares=10, entry_price=100.0)
+        with patch("hanoon_prime.ib_executor.trade_opened"):
+            exc._notify_open_fills({"TSLA": pos})
+        assert seen == [("TSLA", 100.0)]
+
 
 # ---------------------------------------------------------------------------
 # TestRecordExitNotify — all closes notify, including reconciled
