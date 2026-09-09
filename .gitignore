@@ -56,3 +56,6 @@ halim/data/checkpoints/__huggingface_repos__.json
 halim/data/training/sft/gold.jsonl
 halim/data/training/sft/gold_simulated.jsonl
 halim/data/training/sft/gold_fakeib.jsonl
+
+# Production monitor live ledger (daemon-owned; bootstraps from zero)
+scripts/production_state.json

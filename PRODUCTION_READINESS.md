@@ -93,6 +93,38 @@ disable, `halted` stayed `false`, final state `enabled=false`.
 ### Gate 0 — Hygiene (done, §2)
 - [x] All §2 baseline items green on the exact commit you'll run.
 
+### Gate 1 — Automated runtime ledger (HALIM-verified)
+
+An enforceable, always-on monitor keeps Gate 1 honest. It runs via launchd
+(`scripts/com.hanoon.production-monitor.plist`, load + RunAtLoad + KeepAlive)
+and executes `scripts/production_monitor.py --daemon` — checks at `:00`/`:30`
+local plus a 23:50 day-finalize. Install once (already done on this machine):
+
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hanoon.production-monitor.plist
+
+**Hierarchy of truth (read-only, never trades):**
+1. **Deterministic metrics** are computed first and CANNOT be overridden by an
+   LLM: telemetry `/health` must be `ok`+`connected`; zero `NETTING GUARD`
+   triggers since last restart; zero `Traceback` lines; daily P&L must never
+   break `-1.0%` of equity; learning state must stay hermetically test-free.
+2. **HALIM** independently re-derives a verdict from the SAME real runtime
+   data (shipped in the prompt) and attaches risk-annotated issues.
+3. A gate passes only when BOTH agree; any deterministic rule violation is an
+   immediate FAIL (exit 2) regardless of HALIM.
+
+**State & reads:**
+- Ledger (daemon-owned, gitignored): `scripts/production_state.json`
+- Inspect: `scripts/production_monitor.py --status`
+- Metrics only: `scripts/production_monitor.py --json`
+- Manual check: `.venv/bin/python scripts/production_monitor.py`
+- Log: `logs/production_monitor.log`
+- Exit codes: 0 PASS · 2 deterministic FAIL · 3 HALIM degraded (metrics only)
+
+**Current state (as of doc update):** `gate_status=pending`, streak `0/10`,
+closes `0/200` — today is FAILing the drawdown rule (paper `-1.09%`), so it
+does not count toward the soak. This is the expected, enforced behavior: the
+streak resumes only after 10 consecutive clean trading days (Mon-Fri counting).
+
 ### Gate 1 — Paper soak (IN PROGRESS start date 2026-09-10)
 - [ ] **10 consecutive trading-days** on PAPER with:
   - [ ] zero `NETTING GUARD` triggers,
