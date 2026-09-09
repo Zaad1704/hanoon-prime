@@ -30,6 +30,12 @@ log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
 
 
+def _is_hard_stop(es: dict[str, Any]) -> bool:
+    """True when an exit decision is a protective price stop (never bar-derived)."""
+
+    return str(es.get("reason", "")).startswith("hard_stop")
+
+
 @dataclass
 class CycleMeta:
     """Timing/session context bundled into _finish_cycle."""
@@ -414,7 +420,7 @@ class BotCycleMixin:
             if self.streamer.update_bar(tk.contract.symbol if tk.contract else "")
         )
         if not self._last_bars or session == "pre_market":
-            exit_s = []  # dead feed/premarket: no software exits; gateway brackets protect
+            exit_s = [es for es in exit_s if _is_hard_stop(es)]  # protective only
         self._drain_event_exits()
         for es in exit_s:
             t = es["ticker"]
