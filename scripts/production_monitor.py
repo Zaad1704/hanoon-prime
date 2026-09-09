@@ -46,6 +46,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -68,6 +69,7 @@ START_MARKER = re.compile(r"ib_adapter\s+Starting \(seed=")
 GUARD_MARKER = re.compile(r"NETTING GUARD")
 TRACE_MARKER = re.compile(r"Traceback \(most recent call last\)")
 CYCLE_MARKER = re.compile(r"ib_cycle\s+CYCLE ")
+HEARTBEAT_MARKER = re.compile(r"ib_cycle\s+HEARTBEAT")
 SUB_MARKER = re.compile(r"ib_streamer\s+Subscribed to (\S+)")
 ERROR_MARKER = re.compile(r"\bERROR\b")
 SNAPSHOT_FAIL_MARKER = re.compile(r"telemetry\s+snapshot build failed")
@@ -150,13 +152,13 @@ def _count_in(lines: list[str], marker: re.Pattern[str]) -> int:
     return sum(1 for line in lines if marker.search(line))
 
 
-def _last_cycle_age() -> Optional[float]:
-    """Age in seconds of the most recent CYCLE log line (None if absent)."""
+def _last_line_age(marker: re.Pattern[str]) -> Optional[float]:
+    """Age in seconds of the most recent matching log line (None if absent)."""
     latest = None
     try:
         with open(LOG_PATH, encoding="utf-8", errors="ignore") as fh:
             for line in fh:
-                if CYCLE_MARKER.search(line):
+                if marker.search(line):
                     t = _ts_of(line)
                     if t is not None:
                         latest = t
@@ -310,7 +312,11 @@ def _collect() -> dict[str, Any]:
         "safety_halt": _count_in(session, SAFETY_HALT_MARKER),
         "learn_blocked": _count_in(session, LEARN_BLOCKED_MARKER),
     }
-    cycle_age = _last_cycle_age()
+    # Liveness is gauged on HEARTBEAT (logged every 60s in every session
+    # state) rather than CYCLE (logged only while the session is active) —
+    # an overnight-sleeping bot must not look "stalled".
+    heartbeat_age = _last_line_age(HEARTBEAT_MARKER)
+    cycle_age = _last_line_age(CYCLE_MARKER)
 
     # subscriptions present in session?
     subs = set(SUB_MARKER.findall(_tail(LOG_PATH, 1 << 20)))
@@ -321,7 +327,9 @@ def _collect() -> dict[str, Any]:
         "health_status": health.get("status"),
         "connected": health.get("connected", False),
         "snapshot_ok": snapshot_ok,
+        "heartbeat_age_s": heartbeat_age,
         "cycle_age_s": cycle_age,
+        "session_active": bool(health.get("session_active", False)),
         "equity": float(feed.get("equity", 0.0) or 0.0),
         "daily_pnl": float(feed.get("daily_pnl", 0.0) or 0.0),
         "positions_open": pos,
@@ -354,8 +362,10 @@ def _hard_rules(m: dict[str, Any]) -> list[tuple[str, str]]:
         )
     if not m["snapshot_ok"]:
         fails.append(("telemetry_stall", "snapshot empty/unreachable"))
-    if m["cycle_age_s"] is not None and m["cycle_age_s"] > CYCLE_STALE_SEC:
-        fails.append(("pipeline_stall", f"last CYCLE {m['cycle_age_s']:.0f}s ago"))
+    if m["heartbeat_age_s"] is not None and m["heartbeat_age_s"] > CYCLE_STALE_SEC:
+        fails.append(
+            ("pipeline_stall", f"last HEARTBEAT {m['heartbeat_age_s']:.0f}s ago")
+        )
     if m["counters"]["guard"]:
         fails.append(("netting_guard", f"{m['counters']['guard']} trigger(s)"))
     if m["counters"]["tracebacks"]:
@@ -454,7 +464,8 @@ def _halim_call(metrics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _halim_alive() -> bool:
+def _halim_probe() -> str:
+    """Return "ok", "asleep" (expected post-market), or "down" (degraded)."""
     try:
         req = urllib.request.Request(
             f"{HALIM_URL}/v1/complete",
@@ -469,9 +480,24 @@ def _halim_alive() -> bool:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return bool(json.loads(resp.read().decode()).get("ok", False))
+            res = json.loads(resp.read().decode())
+        if res.get("ok"):
+            return "ok"
+        if res.get("reason") == "system_asleep":
+            return "asleep"
+        return "down"
+    except urllib.error.HTTPError as exc:
+        # A sleeping HALIM rejects inference with 503 +
+        # {"ok": false, "reason": "system_asleep"} — read the body.
+        try:
+            res = json.loads(exc.read().decode(errors="replace"))
+        except (json.JSONDecodeError, ValueError):
+            return "down"
+        if res.get("reason") == "system_asleep":
+            return "asleep"
+        return "down"
     except Exception:
-        return False
+        return "down"
 
 
 def _notify(text: str) -> bool:
@@ -526,14 +552,17 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
     hard = _hard_rules(m)
     anomalies = _anomalies(m)
 
-    # transitional: keep metrics that matter for halim call
-    halim_ok = _halim_alive()
+    # HALIM adjudicates only when awake; a post-market 'asleep' HALIM is
+    # expected (deterministic verdict stands), 'down' is genuine degradation.
+    halim_state = _halim_probe()
     verdict = "FAIL" if hard else ("PASS")
 
     ha: dict[str, Any] = {}
-    if halim_ok:
+    if halim_state == "ok":
         ha = _halim_call(m)
         verdict = "FAIL" if (hard or ha.get("verdict") == "FAIL") else verdict
+    elif halim_state == "down":
+        verdict = verdict  # deterministic verdict stands; exit 3 below
 
     wise = ledger.setdefault("roles", {}).setdefault("wise", {})
     gate1 = ledger.setdefault(
@@ -597,6 +626,7 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
         "metrics": {
             "health": m["health_status"],
             "snapshot_ok": m["snapshot_ok"],
+            "heartbeat_age_s": round(m["heartbeat_age_s"] or 0, 1),
             "cycle_age_s": round(m["cycle_age_s"] or 0, 1),
             "guard": m["counters"]["guard"],
             "tracebacks": m["counters"]["tracebacks"],
@@ -604,7 +634,7 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
             "equity": round(m["equity"], 2),
             "closes": m["real_closes_total"],
             "polluted": m["polluted_episodes"],
-            "halim_ok": halim_ok,
+            "halim_state": halim_state,
             "subscriptions": m["subscriptions"],
         },
         "streak": wise.get("clean_days_streak", 0),
@@ -614,7 +644,7 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
     _write(STATE_FILE, ledger)
     if hard:
         code = 2
-    elif not halim_ok:
+    elif halim_state == "down":
         code = 3  # HALIM degraded — deterministic checks above still ran
     elif anomalies:
         code = 4  # bugs found and reported to the user
