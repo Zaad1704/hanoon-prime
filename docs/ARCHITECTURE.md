@@ -453,3 +453,14 @@ cli.py
         │                + /verdicts from juli._recent_verdicts)
         └── (no top-level decision organs: brain-first, all gates inside brain/)
 ```
+
+### Whole-system session gate
+
+`SleepManager.effective_state()` is the single gate (clock window AND
+TradingConfig enabled-set; ids: pre_market/rth/post_market/overnight).
+Enabled sessions (pre_market + rth) run the full brain-first pipeline,
+including pre-market ENTER execution sized from the equity fallback chain
+(runtime/equity_cache.json). Disabled sessions put the WHOLE system to
+sleep: the bot runs only a keepalive (gateway supervision, on-demand
+flatten, telemetry heartbeat), and HALIM polls `GET /session` and 503s
+inference while asleep. Telemetry stays up in both states.

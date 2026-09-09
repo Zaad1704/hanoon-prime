@@ -147,9 +147,8 @@ class PortfolioRiskManager:
     def check_portfolio_giveback(self) -> GivebackDecision:
         """Exit weakest winners when unrealized P&L fades from peak.
 
-        Weakest = lowest unrealized P&L fraction; losers are never
-        exited (they are not profits to bank). Cooldown prevents
-        cascading exits every cycle.
+        Weakest = lowest unrealized P&L fraction; losers are never exited.
+        Cooldown prevents cascading exits every cycle.
         """
         d = GivebackDecision()
         total = sum(h.pnl for h in self._holdings.values())

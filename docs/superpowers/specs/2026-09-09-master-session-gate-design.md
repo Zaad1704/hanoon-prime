@@ -94,8 +94,10 @@ sessions a real sleep instead of a gated run.
    (unchanged safety).
 
 PnL remains clamped (nan→0.0, already committed in `ee93dc9`). `/risk` keeps the
-`equity` / `equity_synced` fields; semantics: `equity_synced=True` only when a real
-source produced the value this cycle (chain 1 or 2).
+`equity` / `equity_synced` fields; semantics: `equity_synced=True` for any real
+value (chains 1–3: live NetLiq, local cash+portfolio mark, or last-good cache).
+Only chain 4 (truly unknown) stays unsynced, so the sizing veto still owns the
+no-data case.
 
 ### 5. HALIM sleep — polled gate (`halim/halim/serve.py`, separate process)
 
