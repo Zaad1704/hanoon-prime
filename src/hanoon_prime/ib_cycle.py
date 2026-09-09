@@ -371,6 +371,8 @@ class BotCycleMixin:
         """Score the whole universe and finish the cycle (single funnel)."""
         positions = set(self.hippocampus._open_positions.keys())
         mkt_state = _SLEEP_MGR.effective_state(TRADING_CONFIG)
+        if mkt_state.session == "pre_market":
+            self.juli.brain.exits.reset_flat_pulses()
         pos_info = {
             t: {
                 "direction": p.direction,
@@ -411,6 +413,8 @@ class BotCycleMixin:
             for tk in self.ib.pendingTickers()
             if self.streamer.update_bar(tk.contract.symbol if tk.contract else "")
         )
+        if not self._last_bars or session == "pre_market":
+            exit_s = []  # dead feed/premarket: no software exits; gateway brackets protect
         self._drain_event_exits()
         for es in exit_s:
             t = es["ticker"]
@@ -426,7 +430,7 @@ class BotCycleMixin:
         market_open = bool(meta and meta.market_open)
         for v in verdicts:
             self.journal.append({"event": "verdict", "ts": time.time(), **v.to_dict()})
-            if market_open and v.action == ENTER:
+            if meta and meta.market_open and v.action == ENTER:
                 self._execute_verdict(v)
         self._reflect_closed()
         self.monitor.record_cycle(market_open, session=session)
@@ -434,8 +438,7 @@ class BotCycleMixin:
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)
         self._heartbeat()
-        npos = len(self.hippocampus._open_positions)
-        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, npos, len(verdicts), len(exit_s))
+        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, len(self.hippocampus._open_positions), len(verdicts), len(exit_s))
 
     def _publish_account_feed(self, pnl: Any) -> None:
         """Forward IB account facts to the slow cortex on BrainState."""

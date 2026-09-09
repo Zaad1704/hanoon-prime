@@ -236,6 +236,22 @@ def test_policy_exit_likelihood_bounds(monkeypatch):
     assert ll_decayed > ll
 
 
+def test_flat_pulses_reset_on_session_boundary():
+    """reset_flat_pulses clears consolidation pulse memory so premarket
+    flatness cannot pre-charge a mechanical exit at the RTH open."""
+    policy = ExitPolicy()
+    policy.register("TSLA", 100.0, {"rsi": 0.1})
+    for _ in range(6):
+        policy._check_consolidation("TSLA", _pnl=0.0, _direction=1, price=100.0)
+    assert policy._flat_pulses.get("TSLA", 0) >= 6
+    policy.reset_flat_pulses()
+    assert policy._flat_pulses.get("TSLA", 0) == 0
+    # A single flat nose after the reset is well under the pulse threshold.
+    sig = policy._check_consolidation("TSLA", _pnl=0.0, _direction=1, price=100.0)
+    assert policy._flat_pulses.get("TSLA", 0) == 1
+    assert not sig.should_exit
+
+
 # ── Hysteresis (rebuild HYSTERESIS_BARS port, off-by-default) ─────────
 from hanoon_prime.immune import HYSTERESIS_BARS, HYSTERESIS_EXIT_ENABLED  # noqa: E402
 

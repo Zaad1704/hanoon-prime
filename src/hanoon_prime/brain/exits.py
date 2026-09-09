@@ -487,6 +487,11 @@ class ExitPolicy:
         """Exit if held longer than the learned stale window."""
         return _stale(self._entry_ts.get(ticker, time.time()), self._stale_minutes)
 
+    def reset_flat_pulses(self) -> None:
+        """Clear per-ticker consolidation pulse counts (session boundary)."""
+
+        self._flat_pulses.clear()
+
     def _check_consolidation(
         self,
         ticker: str,
