@@ -22,6 +22,7 @@ from .monitor.sleep_manager import SleepManager
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
+SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
@@ -458,22 +459,36 @@ class BotCycleMixin:
             except Exception as e:
                 log.warning("Sub %s fail: %s", s, e)
         self._gc_stale_subs()
-        # Seed history one ticker per cycle (blocking call kept out of
-        # the hot path); positions take priority over scanner candidates.
+        self._seed_next_backfill(needed)
+
+    def _seed_next_backfill(self, needed: set[str]) -> None:
+        """Seed one ticker per cycle: any desired ticker missing backfill.
+
+        Positions take priority over scanner candidates. Every desired
+        subscribed ticker is eligible (not only same-cycle subscriptions),
+        and a failed seed retries up to SEED_RETRY_MAX instead of
+        stranding the ticker on live-bars-only data.
+        """
         seeded = self.__dict__.setdefault("_seeded_subs", set())
-        pending = [
-            s
-            for s in sorted(set(self.hippocampus._open_positions))
-            + sorted(set(missing))
-            if s in self.streamer.ticker_subs and s not in seeded
-        ]
-        if pending:
-            s = pending[0]
-            try:
-                self.streamer.seed_history(s)
-                seeded.add(s)
-            except Exception as e:
-                log.debug("Seed %s fail: %s", s, e)
+        retries = self.__dict__.setdefault("_seed_retries", {})
+        ordered = list(
+            dict.fromkeys(
+                sorted(set(self.hippocampus._open_positions)) + sorted(needed)
+            )
+        )
+        pending = [s for s in ordered if s in self.streamer.ticker_subs and s not in seeded]
+        if not pending:
+            return
+        s = pending[0]
+        try:
+            self.streamer.seed_history(s)
+            seeded.add(s)
+            retries.pop(s, None)
+        except Exception as e:
+            retries[s] = retries.get(s, 0) + 1
+            if retries[s] >= SEED_RETRY_MAX:
+                seeded.add(s)  # give up; live bars still accumulate
+            log.debug("Seed %s fail (%d/%d): %s", s, retries[s], SEED_RETRY_MAX, e)
 
     def _gc_stale_subs(self) -> None:
         """Unsubscribe tickers not seen in STALE_SUB_SECS (frees MD lines)."""
