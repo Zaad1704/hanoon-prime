@@ -1,7 +1,8 @@
 """hanoon_prime._protect — Position protection for IB.
 
 Places and validates OCA stop+target legs over existing IB positions.
-Self-heals broken protection on every sync cycle.
+Self-heals broken protection on every sync cycle. The resting-order
+sweep machinery lives in ``ib_order_sweep`` (R3b file cap).
 """
 
 from __future__ import annotations
@@ -11,75 +12,18 @@ import math
 from typing import Any
 
 from .ib_compat import ib as _ib
+from .ib_order_sweep import (
+    MIN_TARGET_PCT,
+    _cancel_oca,
+    _get_oca_orders,
+    _pair_prices,
+    _prices_sensible,
+    sweep_zombies,
+)
 from .immune import ALLOW_EXTENDED_HOURS
 from .types import BracketOrder
 
 log = logging.getLogger(__name__)
-
-
-def _is_valid_protection(trades: list[Any]) -> bool:
-    """Check if OCA group has exactly STP+LMT pair."""
-    return len(trades) == 2 and {t.order.orderType for t in trades} == {"STP", "LMT"}
-
-
-def sweep_zombies(ib_client: Any) -> None:
-    """Validate JULI_* OCA orders and fix broken ones.
-
-    Filters out cancelled/filled orders before checking group validity.
-    When an OCA leg is cancelled (by OCA mechanism, fill, or server),
-    the remaining leg stays in openTrades() with status Cancelled —
-    that's valid, not broken. Without this filter, every cancelled order
-    triggers a re-cancel attempt every cycle (infinite SWEEP loop).
-    """
-    try:
-        all_trades = ib_client.openTrades()
-    except Exception:
-        return
-    # Filter: only ACTIVE orders (not Cancelled/Filled/PendingCancel)
-    ACTIVE_STATUSES = {"PendingSubmit", "PreSubmitted", "Submitted", "Active"}
-    juli = [
-        t
-        for t in all_trades
-        if t.order.ocaGroup
-        and t.order.ocaGroup.startswith("JULI_")
-        and t.orderStatus.status in ACTIVE_STATUSES
-    ]
-    if not juli:
-        return
-    from collections import defaultdict
-
-    groups: dict[str, list[Any]] = defaultdict(list)
-    for t in juli:
-        groups[t.order.ocaGroup].append(t)
-    for grp, trades in groups.items():
-        if _is_valid_protection(trades):
-            continue
-        sym = grp.replace("JULI_", "")
-        types = {t.order.orderType for t in trades}
-        log.info("SWEEP %s: %d active orders (%s) — fixing", sym, len(trades), types)
-        _cancel_oca(ib_client, trades)
-
-
-def _get_oca_orders(ib_client: Any, sym: str) -> list[Any]:
-    """Get active trades for a JULI_* OCA group (excludes cancelled/filled)."""
-    ACTIVE_STATUSES = {"PendingSubmit", "PreSubmitted", "Submitted", "Active"}
-    try:
-        return [
-            t
-            for t in ib_client.openTrades()
-            if t.order.ocaGroup == f"JULI_{sym}"
-            and t.orderStatus.status in ACTIVE_STATUSES
-        ]
-    except Exception:
-        return []
-
-
-def _cancel_oca(ib_client: Any, trades: list[Any]) -> None:
-    for t in trades:
-        try:
-            ib_client.cancelOrder(t.order)
-        except Exception as e:
-            log.debug("cancel skip: %s", e)
 
 
 def _validate_protection(
@@ -96,6 +40,9 @@ def _validate_protection(
             return False
         if abs(t.order.totalQuantity - expected_qty) > 0.01:
             return False
+    stop, target = _pair_prices(trades)
+    if not _prices_sensible(expected_action, stop, target):
+        return False
     return True
 
 
@@ -144,13 +91,23 @@ def protect_position(
 def _atr_levels(px: float, atr: float, d: int) -> tuple[float, float]:
     """Compute ATR stop/target for the position direction.
 
-    Floors at $0.01 to prevent negative prices on penny stocks.
+    Floors at $0.01 and enforces a minimum target move (plus a stop
+    safety tick) so degenerate pairs (target == stop) are never created
+    for penny stocks or stale/zero ATR.
     """
     from .immune import ATR_STOP_MULT, ATR_TARGET_MULT
 
-    stop = max(0.01, round(px - d * ATR_STOP_MULT * atr, 2))
-    target = max(0.01, round(px + d * ATR_TARGET_MULT * atr, 2))
-    return stop, target
+    min_reward = max(0.01, round(abs(px) * MIN_TARGET_PCT, 3))
+    stop_tick = max(0.005, round(min_reward * 0.5, 3))
+    stop = round(px - d * ATR_STOP_MULT * atr, 2)
+    target = round(px + d * ATR_TARGET_MULT * atr, 2)
+    if d > 0:
+        stop = min(stop, round(px - stop_tick, 2))
+        target = max(target, round(px + min_reward, 2))
+    else:
+        stop = max(stop, round(px + stop_tick, 2))
+        target = min(target, round(px - min_reward, 2))
+    return max(0.01, stop), max(0.01, target)
 
 
 def _reprotect_position(
@@ -190,3 +147,6 @@ def _reprotect_position(
         log.info(f"ADOPT {tag} {sym} q={expected_qty} s={stop} t={target}")
     except Exception as e:
         log.warning("ADOPT fail %s: %s", sym, e)
+
+
+__all__ = ["sweep_zombies", "protect_position"]

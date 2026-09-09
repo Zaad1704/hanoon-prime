@@ -28,6 +28,7 @@ from .exit_checks import check_giveback as _giveback
 from .exit_checks import check_profit_lock as _profit_lock
 from .exit_checks import check_stale as _stale
 from .horizons import params_for
+from .threshold_limits import DEFAULTS, PILLAR_KEYS
 
 if TYPE_CHECKING:
     from .realized_ev import RealizedStats
@@ -278,6 +279,48 @@ class ExitPolicy:
                 self._stale_minutes - stale_shift,
             ),
         )
+
+    def exit_likelihood(
+        self, ticker: str, current_price: float, direction: int = 1
+    ) -> float:
+        """Combined adaptive exit signal from the available pillars.
+
+        Wires the 8 exit pillars into a single likelihood in [0, 1] using
+        the structural exit_w_* weights — the TIER2 input of the exit
+        ladder. Momentum deceleration is approximated from the last pulse;
+        flow / episodic / sentiment have no live sources yet and stay 0.
+        Returns 0.0 for unknown tickers (mechanical-only path).
+        """
+        if ticker not in self._entry_ts:
+            return 0.0
+        entry = self._entry_price.get(ticker) or current_price
+        if entry <= 0:
+            entry = current_price
+        prev = self._prev_price.get(ticker) or current_price
+        if prev <= 0:
+            prev = current_price
+        pnl_pct = (current_price / entry - 1.0) * direction
+        hold_minutes = max(
+            0.0, (time.time() - self._entry_ts.get(ticker, time.time())) / 60.0
+        )
+        health = min(1.0, max(0.0, 0.5 + pnl_pct * 2.0))
+        momentum = (current_price - prev) / prev
+        pillars = [
+            compute_setup_degradation(self._entry_alpha.get(ticker)),
+            compute_momentum_fading(
+                momentum=momentum, momentum_accel=momentum, pnl_pct=pnl_pct
+            ),
+            compute_flow_reversal(direction, institutional_flow=0.0),
+            compute_giveback_risk(health, pnl_pct),
+            compute_time_pressure(hold_minutes, self._stale_minutes, pnl_pct),
+            compute_stale_risk(
+                hold_minutes, self._stale_minutes, self._stale_minutes * 0.5, pnl_pct
+            ),
+            compute_episodic_recall(ticker),
+            compute_sentiment_exit(0.0),
+        ]
+        weights = [DEFAULTS[key] for key in PILLAR_KEYS]
+        return _combine_pillars(pillars, weights)
 
     def register(
         self,

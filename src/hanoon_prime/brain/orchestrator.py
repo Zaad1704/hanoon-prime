@@ -99,7 +99,9 @@ class NeuromorphicBrain:
         self.nash = NashBrain()
         self.risk = RiskEngine(realized=self._realized)
         self.exits = ExitPolicy()
-        self._exit_ladder = ExitLadder(self.exits)
+        self._exit_ladder = ExitLadder(
+            self.exits, win_rate_provider=self._realized.recent_win_rate
+        )
         self._reflector = Reflector(self.memory, self.episodic)
         self._advisor = GateAdvisor(realized=self._realized)
         self.governor = Governor()
@@ -1042,9 +1044,9 @@ class NeuromorphicBrain:
     ) -> ExitSignal:
         """Check if position should be exited via the 3-tier exit ladder.
 
-        Defaults keep behavior identical to the mechanical ExitPolicy
-        (TIER1/TIER2 dormant). Pass exit_likelihood/win_rate/stop_price
-        to activate adaptive JULI verdicts and hard stops.
+        Exit-likelihood not passed is derived from the pillar signal;
+        win_rate not passed falls back to the realized win rate. TIER1
+        stays dormant until a stop_price/force_exit is supplied.
         """
         return self._exit_ladder.evaluate(
             ticker,

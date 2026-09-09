@@ -10,14 +10,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from hanoon_prime._protect import (
-    _get_oca_orders,
-    _is_valid_protection,
+    _atr_levels,
     _place_oca,
     _validate_protection,
     protect_position,
-    sweep_zombies,
 )
 from hanoon_prime.data.budget import MAX_TBT, DataBudget
+from hanoon_prime.ib_order_sweep import (
+    _get_oca_orders,
+    _is_valid_protection,
+    _sweep_stale_orders,
+    sweep_zombies,
+)
 from hanoon_prime.reflection.buffer import BUY, SELL, Fill, TradeBuffer
 from hanoon_prime.reflection.review import (
     ReviewReport,
@@ -37,6 +41,41 @@ def _fake_trade(
         ),
         orderStatus=SimpleNamespace(status="Submitted"),
     )
+
+
+def _spot(
+    sym: str,
+    order_type: str,
+    qty: float,
+    action: str = "SELL",
+    status: str = "PreSubmitted",
+    oca: str = "",
+    aux: float | None = None,
+    lmt: float | None = None,
+) -> SimpleNamespace:
+    """A richer fake trade: contract symbol, price legs, and arbitrary status."""
+    fields: dict[str, object] = {
+        "orderType": order_type,
+        "action": action,
+        "totalQuantity": qty,
+        "ocaGroup": oca,
+    }
+    if aux is not None:
+        fields["auxPrice"] = aux
+    if lmt is not None:
+        fields["lmtPrice"] = lmt
+    return SimpleNamespace(
+        order=SimpleNamespace(**fields),
+        orderStatus=SimpleNamespace(status=status),
+        contract=SimpleNamespace(symbol=sym),
+    )
+
+
+def _positions(*held: tuple[str, float]) -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(contract=SimpleNamespace(symbol=sym), position=pos)
+        for sym, pos in held
+    ]
 
 
 # ── reflection/review ───────────────────────────────────────────────────
@@ -147,6 +186,41 @@ class TestProtect:
         bad_types = [_fake_trade("STP"), _fake_trade("STP")]
         assert _is_valid_protection(bad_types) is False
 
+    def test_is_valid_protection_rejects_degenerate_prices(self):
+        # target == stop (OLB-style) is not a real take-profit pair.
+        degenerate = [
+            _spot("OLB", "STP", 1003, aux=0.27, oca="JULI_OLB"),
+            _spot("OLB", "LMT", 1003, lmt=0.27, oca="JULI_OLB"),
+        ]
+        assert _is_valid_protection(degenerate) is False
+        sane = [
+            _spot("OLB", "STP", 1003, aux=0.27, oca="JULI_OLB"),
+            _spot("OLB", "LMT", 1003, lmt=0.29, oca="JULI_OLB"),
+        ]
+        assert _is_valid_protection(sane) is True
+
+    def test_validate_protection_price_sanity(self):
+        good = [
+            _spot("TSLA", "STP", 100, action="SELL", aux=99.0, oca="JULI_TSLA"),
+            _spot("TSLA", "LMT", 100, action="SELL", lmt=110.0, oca="JULI_TSLA"),
+        ]
+        assert _validate_protection(good, 100, "SELL") is True
+        degenerate = [
+            _spot("TSLA", "STP", 100, action="SELL", aux=110.0, oca="JULI_TSLA"),
+            _spot("TSLA", "LMT", 100, action="SELL", lmt=110.0, oca="JULI_TSLA"),
+        ]
+        assert _validate_protection(degenerate, 100, "SELL") is False
+
+    def test_atr_levels_never_degenerate(self):
+        stop, target = _atr_levels(0.27, 0.0, 1)
+        assert stop < target
+        assert target > 0.27
+        assert target - stop >= 0.009
+        short_stop, short_target = _atr_levels(0.27, 0.0, -1)
+        assert short_target < short_stop
+        assert short_stop > 0.27
+        assert short_stop - short_target >= 0.009
+
     def test_validate_protection(self):
         good = [
             _fake_trade("STP", action="SELL", qty=100),
@@ -169,6 +243,7 @@ class TestProtect:
         ib = MagicMock()
         broken = _fake_trade("STP", oca="JULI_X")  # only one order -> invalid
         ib.openTrades.return_value = [broken]
+        ib.positions.return_value = []
         sweep_zombies(ib)
         ib.cancelOrder.assert_called_once_with(broken.order)
 
@@ -176,6 +251,49 @@ class TestProtect:
         ib = MagicMock()
         ib.openTrades.side_effect = RuntimeError("conn")
         sweep_zombies(ib)
+        ib.cancelOrder.assert_not_called()
+
+    def test_sweep_cancels_stale_mkt_mismatching_position(self):
+        ib = MagicMock()
+        stale = _spot("OLB", "MKT", 446)  # 446 queued vs 1003 held -> stale
+        good = _spot("NOK", "MKT", 39)  # full-size queued exit -> keep
+        # LABT has a valid JULI OCA pair; its queued MARKET leg must survive.
+        ib.openTrades.return_value = [
+            stale,
+            good,
+            _spot("LABT", "STP", 148, oca="JULI_LABT"),
+            _spot("LABT", "LMT", 148, oca="JULI_LABT"),
+        ]
+        ib.positions.return_value = _positions(("OLB", 1003.0), ("NOK", 39.0))
+        ib.cancelOrder = MagicMock()
+        sweep_zombies(ib)
+        assert ib.cancelOrder.call_count == 1
+        assert ib.cancelOrder.call_args[0][0] is stale.order
+
+    def test_sweep_cancels_orphan_buy_on_flat_symbol(self):
+        ib = MagicMock()
+        orphan = _spot("PDSB", "LMT", 1227, action="BUY", status="Submitted")
+        kept = _spot("SOXS", "LMT", 12, action="BUY", status="Submitted")
+        ib.openTrades.return_value = [orphan, kept]
+        ib.positions.return_value = _positions(("SOXS", 8.0))
+        sweep_zombies(ib)
+        assert ib.cancelOrder.call_count == 1
+        assert ib.cancelOrder.call_args[0][0] is orphan.order
+
+    def test_sweep_keeps_known_pending_parent(self):
+        ib = MagicMock()
+        pending = _spot("ACCL", "LMT", 134, action="BUY", status="Submitted")
+        ib.openTrades.return_value = [pending]
+        ib.positions.return_value = []
+        sweep_zombies(ib, known_pending={"ACCL"})
+        ib.cancelOrder.assert_not_called()
+
+    def test_sweep_stale_orders_skips_without_positions(self):
+        ib = MagicMock()
+        stale = _spot("OLB", "MKT", 446)
+        ib.openTrades.return_value = [stale]
+        ib.positions.side_effect = RuntimeError("conn")
+        _sweep_stale_orders(ib, [stale])
         ib.cancelOrder.assert_not_called()
 
     def test_get_oca_orders(self):

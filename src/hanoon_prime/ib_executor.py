@@ -9,7 +9,7 @@ from typing import Any, Optional
 import numpy as np
 
 from ._ib_sync import get_ib_pnl, journal_exit, journal_snapshot, read_ib_positions
-from ._protect import protect_position, sweep_zombies
+from ._protect import protect_position
 from ._telegram import trade_closed, trade_opened
 from .brain.horizons import HORIZONS
 from .brain.risk import SizingResult
@@ -17,6 +17,7 @@ from .edge import score_to_win_prob
 from .hippocampus import Hippocampus
 from .ib_bracket import _brackets_from_trades
 from .ib_compat import ib as _ib
+from .ib_order_sweep import sweep_zombies
 from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
 from .types import ExitLevels
@@ -103,7 +104,7 @@ class IBExecutor:
         """Sync everything from IB — IB is source of truth."""
         if not self.ib.isConnected():
             return
-        sweep_zombies(self.ib)
+        sweep_zombies(self.ib, self._pending_parent)
         # Adopt orphan positions (not placed by this bot session)
         self._adopt_orphan_positions(streamer, closing or set())
         protect_position(

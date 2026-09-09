@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 from hanoon_prime.brain.adaptive_thresholds import AdaptiveThresholds
 from hanoon_prime.brain.exit_checks import ExitSignal
 from hanoon_prime.brain.exit_ladder import ExitLadder
+from hanoon_prime.brain.exits import ExitPolicy
 
 
 class _FakePolicy:
@@ -161,6 +162,78 @@ def test_ladder_wired_into_orchestrator():
     got = brain.check_exit("TSLA", 100.0)
     assert got is sentinel
     brain._exit_ladder.evaluate.assert_called_once()
+
+
+def test_ladder_derives_exit_likelihood_from_policy(tmp_path):
+    """Unset exit_likelihood is derived from the policy's pillar signal.
+
+    This is the wiring that activates TIER2 for existing juli.py callers
+    without changing their call sites.
+    """
+    _, _, at = _mk(tmp_path)
+    thr = at.get_exit_threshold(0.5)
+
+    class _LlPolicy:
+        def exit_likelihood(self, ticker, current_price, direction):
+            return thr + 0.01
+
+        def evaluate(self, *args, **kwargs):
+            return _MECH
+
+    out = ExitLadder(_LlPolicy(), thresholds=at).evaluate("TSLA", 100.0)
+    assert out.should_exit is True
+    assert out.exit_type == "exit"
+    assert "juli_verdict" in out.reason
+
+
+def test_ladder_consults_win_rate_provider(tmp_path):
+    """A win_rate_provider overrides the 0.5 default win rate."""
+
+    class _RecThresholds:
+        def __init__(self):
+            self.received = None
+
+        def get_exit_threshold(self, wr):
+            self.received = wr
+            return 0.0
+
+        def get_watch_threshold(self, wr):
+            self.received = wr
+            return 0.0
+
+        def get_ride_winners_params(self):
+            return 999.0, 0.0
+
+    class _LlPolicy:
+        def exit_likelihood(self, ticker, current_price, direction):
+            return 0.9
+
+        def evaluate(self, *args, **kwargs):
+            return _MECH
+
+    rec = _RecThresholds()
+    ladder = ExitLadder(
+        _LlPolicy(), thresholds=rec, win_rate_provider=lambda: (0.66, 9)
+    )
+    out = ladder.evaluate("TSLA", 100.0)
+    assert out.should_exit is True
+    assert rec.received == 0.66
+
+
+def test_policy_exit_likelihood_bounds(monkeypatch):
+    """exit_likelihood is bounded to [0,1], 0 for unknown tickers, and
+    grows as a position degrades (time + drawdown)."""
+    base = 1_700_000_000.0
+    monkeypatch.setattr("hanoon_prime.brain.exits.time.time", lambda: base)
+    policy = ExitPolicy()
+    assert policy.exit_likelihood("NOPE", 100.0) == 0.0
+    policy.register("TSLA", 100.0, {"rsi": 0.1})
+    ll = policy.exit_likelihood("TSLA", 100.0)
+    assert 0.0 <= ll <= 1.0
+    monkeypatch.setattr("hanoon_prime.brain.exits.time.time", lambda: base + 70 * 60)
+    ll_decayed = policy.exit_likelihood("TSLA", 90.0)
+    # Long-held loser degrades the setup far past a fresh flat position.
+    assert ll_decayed > ll
 
 
 # ── Hysteresis (rebuild HYSTERESIS_BARS port, off-by-default) ─────────

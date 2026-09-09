@@ -17,12 +17,12 @@ Hierarchy (first decisive tier wins):
   3. TIER3 MECHANICAL — :class:`ExitPolicy` (profit_lock, giveback, stale,
      consolidation). Only consulted when TIER2 yields hold.
 
-Dormant by default: with ``exit_likelihood=0.0`` / ``stop_price=None`` /
-``force_exit=False``, TIER1 and TIER2 are no-ops, so behavior is identical
-to the current mechanical ExitPolicy — and with HYSTERESIS_EXIT_ENABLED off
-(false), the soft-exit path is byte-identical to prior (immediate). The
-live caller in ``juli.py`` needs no change until the exit-likelihood signal
-is wired in.
+Dormant by default: with ``stop_price=None`` / ``force_exit=False``, TIER1
+is a no-op; when ``exit_likelihood`` is not passed (0.0) it is derived from
+the policy's ``exit_likelihood`` pillar signal, and ``win_rate`` defaults to
+0.5 unless a ``win_rate_provider`` supplies the realized win rate. Behavior
+is otherwise identical to the current mechanical ExitPolicy — the live
+caller in ``juli.py`` needs no change.
 
 Per R1, BUY/SELL/HOLD verdicts live only in cortex; here we use lowercase
 exit_type labels (exit/watch/hold + the mechanical types) and never compare
@@ -31,7 +31,7 @@ against verdict tokens (R13).
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from ..immune import HYSTERESIS_BARS, HYSTERESIS_EXIT_ENABLED
 from .adaptive_thresholds import AdaptiveThresholds, get_adaptive_thresholds
@@ -43,10 +43,14 @@ class ExitLadder:
     """Coordinates the TIER1/TIER2/TIER3 exit decision (non-breaking)."""
 
     def __init__(
-        self, policy: ExitPolicy, thresholds: Optional[AdaptiveThresholds] = None
+        self,
+        policy: ExitPolicy,
+        thresholds: Optional[AdaptiveThresholds] = None,
+        win_rate_provider: Optional[Callable[[], tuple[float, int]]] = None,
     ) -> None:
         self._policy = policy
         self._thresholds = thresholds or get_adaptive_thresholds()
+        self._win_rate_provider = win_rate_provider
         # Per-ticker soft-exit confirmation streak (hysteresis gate).
         self._exit_streak: dict[str, int] = {}
 
@@ -62,7 +66,13 @@ class ExitLadder:
         stop_price: Optional[float] = None,
         force_exit: bool = False,
     ) -> ExitSignal:
-        """Run TIER1→TIER2→TIER3; the first decisive tier wins."""
+        """Run TIER1→TIER2→TIER3; the first decisive tier wins. Unset
+        exit_likelihood derives from the policy pillar signal and the 0.5
+        default win_rate is overridden by the win-rate provider.
+        """
+        exit_likelihood, win_rate = self._resolve_defaults(
+            ticker, current_price, direction, exit_likelihood, win_rate
+        )
         tier1 = self._tier1(current_price, stop_price, force_exit, direction)
         if tier1.should_exit:
             return tier1
@@ -79,6 +89,26 @@ class ExitLadder:
         if tier2.exit_type == "watch":
             return tier2
         return self._tier3(ticker, current_price, ib_pnl, direction)
+
+    def _resolve_defaults(
+        self,
+        ticker: str,
+        current_price: float,
+        direction: int,
+        exit_likelihood: float,
+        win_rate: float,
+    ) -> tuple[float, float]:
+        """Derive TIER2 inputs not supplied by the caller."""
+        if exit_likelihood <= 0.0:
+            derive = getattr(self._policy, "exit_likelihood", None)
+            exit_likelihood = (
+                float(derive(ticker, current_price, direction)) if derive else 0.0
+            )
+        if win_rate == 0.5 and self._win_rate_provider is not None:
+            derived, n = self._win_rate_provider()
+            if n > 0:
+                win_rate = derived
+        return exit_likelihood, win_rate
 
     def _hysteresis_confirm(self, ticker: str, fired: bool) -> bool:
         """Soft-exit persistence gate (rebuild HYSTERESIS_BARS; off by default).
