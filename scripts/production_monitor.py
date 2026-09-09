@@ -70,6 +70,7 @@ TRACE_MARKER = re.compile(r"Traceback \(most recent call last\)")
 CYCLE_MARKER = re.compile(r"ib_cycle\s+CYCLE ")
 SUB_MARKER = re.compile(r"ib_streamer\s+Subscribed to (\S+)")
 ERROR_MARKER = re.compile(r"\bERROR\b")
+SNAPSHOT_FAIL_MARKER = re.compile(r"telemetry\s+snapshot build failed")
 SAFETY_HALT_MARKER = re.compile(r"SAFETY HALT")
 LEARN_BLOCKED_MARKER = re.compile(r"LEARN BLOCKED")
 
@@ -210,9 +211,13 @@ def _journal_sample() -> dict[str, Any]:
 
 
 def _log_errors_in(lines: list[str]) -> dict[str, Any]:
-    """ERROR lines in the current session minus the known-safe allowlist."""
+    """ERROR lines + telemetry snapshot rebuild failures in this session."""
     total, flagged, samples = 0, 0, []
+    snapshot_fails = 0
     for line in lines:
+        if SNAPSHOT_FAIL_MARKER.search(line):
+            snapshot_fails += 1
+            continue
         if ERROR_MARKER.search(line):
             total += 1
             if NOISE_ERROR.search(line):
@@ -220,7 +225,12 @@ def _log_errors_in(lines: list[str]) -> dict[str, Any]:
             flagged += 1
             if len(samples) < 8:
                 samples.append(line.strip()[:200])
-    return {"errors_total": total, "problems": flagged, "samples": samples}
+    return {
+        "errors_total": total,
+        "problems": flagged,
+        "samples": samples,
+        "snapshot_fails": snapshot_fails,
+    }
 
 
 def _collect() -> dict[str, Any]:
@@ -375,6 +385,13 @@ def _anomalies(m: dict[str, Any]) -> list[tuple[str, str]]:
         out.append(("verdict_actions", f"{m['journal']['invalid_actions']} invalid"))
     if m["errors"]["problems"]:
         out.append(("log_errors", f"{m['errors']['problems']} non-noise ERROR lines"))
+    if m["errors"]["snapshot_fails"]:
+        out.append(
+            (
+                "telemetry_snapshot",
+                f"{m['errors']['snapshot_fails']} failed snapshot rebuild(s)",
+            )
+        )
     if m["incidents"]:
         out.append(("journal_incidents", f"{m['incidents']} pipeline_incident(s)"))
     if m["counters"]["safety_halt"]:

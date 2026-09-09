@@ -83,15 +83,30 @@ class Journal:
         return result
 
     def tail(self, n: int) -> list[dict[str, Any]]:
-        """Read the last n entries (newest last) — reads only the file tail."""
+        """Read the last n entries (newest last) — reads only the file tail.
+
+        Resilient by construction: the fixed-size read window can begin in the
+        middle of a large entry, leaving a torn fragment as its first "line".
+        That fragment (and any other unparseable line) is skipped, never
+        raised — one straddled ~65KB ib_state_snapshot entry must not brick
+        telemetry snapshot feeds.
+        """
         if not self.path.exists() or self.path.stat().st_size == 0:
             return []
         with open(self.path, "rb") as f:
             size = f.seek(0, 2)
-            f.seek(max(0, size - _TAIL_BYTES))
+            offset = max(0, size - _TAIL_BYTES)
+            f.seek(offset)
             data = f.read().decode("utf-8", "replace")
         lines = [ln for ln in data.split("\n") if ln.strip()]
-        parsed = [json.loads(ln) for ln in lines[-n:]]
+        if offset > 0:
+            lines = lines[1:]  # first line of an interior window is torn
+        parsed = []
+        for ln in lines[-n:]:
+            try:
+                parsed.append(json.loads(ln))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
         return parsed
 
     def verify_chain(self) -> bool:
