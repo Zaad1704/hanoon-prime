@@ -447,12 +447,18 @@ class BotCycleMixin:
             self._last_policy_sync = time.monotonic()
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
-                if equity is not None:
-                    feed["equity"] = equity
-                    feed["equity_synced"] = synced
                 feed["positions"] = read_portfolio(self.ib)
+                if equity is not None:
+                    self._account_equity = equity
+                    self._account_equity_synced = synced
             except Exception as exc:
                 log.debug("Account sync skipped: %s", exc)
+        carried = getattr(self, "_account_equity", None)
+        if carried is not None:
+            # Feed is rebuilt every cycle; carry the last known equity so
+            # the slow-cortex pulse always sees it between 30s refresh ticks.
+            feed["equity"] = carried
+            feed["equity_synced"] = getattr(self, "_account_equity_synced", True)
         self.juli._state.update(
             account_feed=feed,
             consecutive_losses=getattr(self.hippocampus, "_consecutive_losses", 0),

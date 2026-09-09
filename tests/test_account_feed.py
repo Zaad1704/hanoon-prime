@@ -5,6 +5,7 @@ update, and NaN must never leak into policy_state/telemetry JSON.
 from __future__ import annotations
 
 import math
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -49,6 +50,17 @@ class TestAccountFeedSanitization:
         feed = mixin.juli._state["account_feed"]
         assert feed["daily_pnl"] == 0.0
         assert math.isfinite(feed["daily_pnl"])
+
+    def test_publish_account_feed_carries_last_equity_between_syncs(self):
+        """Non-sync cycles keep the last known equity (never drop it)."""
+        mixin = _make_mixin()
+        mixin._account_equity = 123_456.0
+        mixin._account_equity_synced = True
+        mixin._last_policy_sync = time.monotonic()  # suppress the 30s refresh
+        mixin._publish_account_feed(SimpleNamespace(dailyPnL=0.0))
+        feed = mixin.juli._state["account_feed"]
+        assert feed["equity"] == 123_456.0
+        assert feed["equity_synced"] is True
 
     def test_finish_cycle_sanitizes_nan_pnl(self):
         """finish_cycle never stores nan on the hippocampus."""
