@@ -1,7 +1,9 @@
-"""tests/test_trade_notify.py — hold milestones + flat-book postmortem notify."""
+"""tests/test_trade_notify.py — hold milestones + postmortem notify."""
 
 from __future__ import annotations
 
+import json
+import time
 from unittest.mock import MagicMock, patch
 
 from hanoon_prime._telegram import postmortem, trade_closed
@@ -61,7 +63,7 @@ class TestNotifyHolds:
 
 
 class TestSendPostmortem:
-    """_send_postmortem forwards HALIM's insight verbatim when flat."""
+    """_send_postmortem forwards HALIM's insight when new and throttled."""
 
     def test_sends_verbatim_insight(self):
         bot = _fake_bot()
@@ -78,9 +80,29 @@ class TestSendPostmortem:
             bot._send_postmortem()
         fn.assert_not_called()
 
+    def test_skips_duplicate_within_interval(self):
+        bot = _fake_bot()
+        insight = {"insight": "same"}
+        bot.juli.brain.state.get.return_value = insight
+        with patch("hanoon_prime.ib_cycle.postmortem") as fn:
+            bot._send_postmortem()
+            bot._send_postmortem()
+        fn.assert_called_once()
+
+    def test_resends_after_interval_with_new_body(self):
+        bot = _fake_bot()
+        bot.juli.brain.state.get.return_value = {"insight": "one"}
+        with patch("hanoon_prime.ib_cycle.postmortem") as fn:
+            bot._send_postmortem()
+            bot._last_postmortem_ts = time.monotonic() - 1800.0
+            bot._last_postmortem_body = json.dumps({"insight": "one"}, sort_keys=True)
+            bot.juli.brain.state.get.return_value = {"insight": "two"}
+            bot._send_postmortem()
+        assert fn.call_count == 2
+
 
 class TestReflectClosedPostmortem:
-    """_reflect_closed posts the postmortem exactly when the book goes flat."""
+    """_reflect_closed posts the newest postmortem for any close batch."""
 
     def test_flat_after_batch_sends_postmortem(self):
         bot = _fake_bot()
@@ -105,7 +127,8 @@ class TestReflectClosedPostmortem:
             bot._reflect_closed()
         fn.assert_called_once_with({"insight": "done"})
 
-    def test_positions_left_skips_postmortem(self):
+    def test_positions_left_still_sends_postmortem(self):
+        """A standing open book must NOT suppress the postmortem anymore."""
         bot = _fake_bot()
         bot.executor = MagicMock()
         bot.executor.get_newly_closed_trades.return_value = [
@@ -121,6 +144,29 @@ class TestReflectClosedPostmortem:
         pos = MagicMock()
         pos.direction = 1
         bot.hippocampus._open_positions = {"NVDA": pos}
+        bot.streamer = MagicMock()
+        bot._closing = set()
+        bot._watched = set()
+        bot._exit_reasons = {}
+        bot._hold_notified = {}
+        with patch("hanoon_prime.ib_cycle.postmortem") as fn:
+            bot._reflect_closed()
+        fn.assert_called_once_with({"insight": "done"})
+
+    def test_closed_batch_requires_insight(self):
+        bot = _fake_bot()
+        bot.executor = MagicMock()
+        bot.executor.get_newly_closed_trades.return_value = [
+            {
+                "ticker": "TSLA",
+                "pnl": 1.0,
+                "return_pct": 0.1,
+                "direction": 1,
+                "source": "ib_fill",
+            }
+        ]
+        bot.juli.brain.state.get.return_value = {}
+        bot.hippocampus._open_positions = {}
         bot.streamer = MagicMock()
         bot._closing = set()
         bot._watched = set()

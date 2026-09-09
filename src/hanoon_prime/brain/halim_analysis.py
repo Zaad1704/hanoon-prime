@@ -10,19 +10,54 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-def analyze_trade(base_url: str, trade_data: dict[str, Any]) -> dict[str, Any]:
-    """Post-trade analysis - returns insights for learning."""
+def _postmortem_prompt(trade_data: dict[str, Any]) -> str:
+    """Prompt HALIM for a compact post-trade self-critique (flat JSON)."""
+    return (
+        "You are the trading architect HALIM. Critique this just-closed trade "
+        "and return EXACTLY this JSON, nothing else:\n"
+        '{"insight": "<2-3 sentence critique: what worked, what failed, and the '
+        'one thing to carry into the next trade>"}\n'
+        f"trade={json.dumps(trade_data)}"
+    )
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    """Pull the first balanced JSON object out of free-form model text."""
     try:
-        data = json.dumps(trade_data).encode()
+        start = text.index("{")
+        end = text.rindex("}")
+        parsed = json.loads(text[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def analyze_trade(base_url: str, trade_data: dict[str, Any]) -> dict[str, Any]:
+    """Post-trade analysis - returns insights for learning.
+
+    Uses the live /v1/complete endpoint (the /analyze_trade route does not
+    exist on the running HALIM server) and parses the flat insight JSON.
+    """
+    try:
+        data = json.dumps(
+            {
+                "prompt": _postmortem_prompt(trade_data),
+                "purpose": "analyze_trade",
+                "priority": "high",
+            }
+        ).encode()
         req = urllib.request.Request(
-            f"{base_url}/analyze_trade",
+            f"{base_url}/v1/complete",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result: dict[str, Any] = json.loads(resp.read().decode())
-            return result
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw: dict[str, Any] = json.loads(resp.read().decode())
+        parsed = _extract_json(raw.get("text", ""))
+        if parsed and parsed.get("insight"):
+            return {"insight": str(parsed["insight"])}
+        return {}
     except Exception as e:
         log.debug("HALIM trade analysis failed: %s", e)
         return {}

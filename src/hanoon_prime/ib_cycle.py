@@ -7,6 +7,7 @@ that IBStreamingBot mixes in. Also provides connect helpers.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import time
@@ -27,6 +28,7 @@ CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
 HOLD_FIRST_MIN: float = 15.0  # first open-position hold notice (minutes)
 HOLD_REPEAT_MIN: float = 60.0  # repeat hold notice every this many minutes
+POSTMORTEM_MIN_INTERVAL: float = 900.0  # min seconds between post-mortem sends
 
 log = logging.getLogger(__name__)
 _SLEEP_MGR = SleepManager()
@@ -711,15 +713,29 @@ class BotCycleMixin:
                 trade["pnl"],
                 source,
             )
-        if trades and not self.hippocampus._open_positions:
+        if trades:
             self._send_postmortem()
 
     def _send_postmortem(self) -> None:
-        """After the book goes flat, forward HALIM's post-mortem verbatim."""
+        """Forward HALIM's latest post-mortem when it's new and throttled.
+
+        The book rarely goes fully flat with a standing long book, so this
+        fires off any close batch instead — deduped on insight content and
+        rate-limited so it never spams the main chat.
+        """
         try:
             insight = self.juli.brain.state.get("halim_last_insight") or {}  # array-safe
-            if insight:
-                postmortem(insight)
+            if not insight:
+                return
+            now = time.monotonic()
+            if now - getattr(self, "_last_postmortem_ts", 0.0) < POSTMORTEM_MIN_INTERVAL:
+                return
+            body = json.dumps(insight, sort_keys=True)
+            if body == getattr(self, "_last_postmortem_body", ""):
+                return
+            self._last_postmortem_ts = now
+            self._last_postmortem_body = body
+            postmortem(insight)
         except Exception as exc:
             log.debug("postmortem notify failed: %s", exc)
 
