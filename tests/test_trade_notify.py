@@ -131,26 +131,18 @@ class TestReflectClosedPostmortem:
         fn.assert_not_called()
 
 
-class TestHalimSeparateChat:
-    """HALIM post-mortems route to their own chat when configured."""
+class TestPostmortemMainChat:
+    """HALIM post-mortems are their own standalone message in the main chat."""
 
-    def test_postmortem_routes_to_halim_chat(self, monkeypatch):
-        monkeypatch.setenv("HALIM_TELEGRAM_CHAT_ID", "-100123456789")
+    def test_postmortem_sends_own_message_to_main_chat(self):
+        import json
+
+        expected = "📋 HALIM POST-MORTEM\n" + json.dumps(
+            {"insight": "done"}, indent=2, ensure_ascii=False
+        )
         with patch("hanoon_prime._telegram.send") as fn:
             postmortem({"insight": "done"})
-        fn.assert_called_once()
-        args, kwargs = fn.call_args
-        assert kwargs["chat_id"] == "-100123456789"
-        assert "HALIM POST-MORTEM" in args[0]
-
-    def test_postmortem_falls_back_to_main_chat(self, monkeypatch):
-        from hanoon_prime._telegram import _get_chat_id
-
-        monkeypatch.delenv("HALIM_TELEGRAM_CHAT_ID", raising=False)
-        with patch("hanoon_prime._telegram.send") as fn:
-            postmortem({"insight": "done"})
-        args, kwargs = fn.call_args
-        assert kwargs["chat_id"] == _get_chat_id()  # main chat fallback
+        fn.assert_called_once_with(expected)
 
 
 class TestTradeClosedDetails:
