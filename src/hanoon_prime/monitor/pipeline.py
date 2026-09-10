@@ -182,7 +182,7 @@ class PipelineMonitor:
 
     def _journal_path_size(self) -> int:
         try:
-            p: Path = self._journal._path
+            p: Path = self._journal.path
             return p.stat().st_size if p.exists() else 0
         except Exception:
             return -1

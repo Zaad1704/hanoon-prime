@@ -545,7 +545,7 @@ class BotCycleMixin:
             self._last_policy_sync = time.monotonic()
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
-                feed["positions"] = feed_positions(self.ib)
+                self._positions = feed_positions(self.ib)
                 self._account_summary = _float_account_summary(
                     read_account_summary(self.ib)
                 )
@@ -564,8 +564,10 @@ class BotCycleMixin:
         if summary:
             # Same carry semantics: raw IB accountSummary tags between ticks.
             feed["account_summary"] = summary
-        positions = feed.get("positions")
-        feed["positions_open"] = len(positions) if positions else 0
+        # Carry cached positions (set on 30s sync) so the brain always sees
+        # open positions between refresh ticks, just like equity.
+        positions = feed.get("positions") or getattr(self, "_positions", None) or []
+        feed["positions"], feed["positions_open"] = positions, len(positions)
         self.juli._state.update(
             account_feed=feed,
             consecutive_losses=getattr(self.hippocampus, "_consecutive_losses", 0),
@@ -910,7 +912,12 @@ class BotCycleMixin:
         if pnl:
             self.ib.cancelPnL(self.account)
         if self.ib.isConnected():
-            self.ib.disconnect()
+            try:
+                self.ib.disconnect()
+            except Exception as exc:
+                # Socket may already be dead on a crashed connection;
+                # isConnected() can still report True during teardown.
+                log.debug("ib.disconnect during cleanup: %s", exc)
         shutdown()
 
 

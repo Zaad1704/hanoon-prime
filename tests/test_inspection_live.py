@@ -140,12 +140,14 @@ def test_bars_advance_ok_when_closing(tmp_path) -> None:
 
 def test_bars_advance_warns_intermittent(tmp_path) -> None:
     ctx = _health(InspectionContext(base_dir=tmp_path), active=True, count=14)
+    # 2/50 = 4% — above the 1% FAIL floor but below the 5% WARN ceiling
+    # for a 1s-cycle / 1-min-bar configuration.
     lines = [
         (
-            f"{_now_t()}.000 INFO ib_cycle CYCLE bars={3 if i % 10 == 0 else 0} "
+            f"{_now_t()}.000 INFO ib_cycle CYCLE bars={3 if i % 25 == 0 else 0} "
             f"open=14 d=0 x=0"
         )
-        for i in range(20)
+        for i in range(50)
     ]
     ctx.log_path.parent.mkdir(parents=True)
     ctx.log_path.write_text("\n".join(lines) + "\n")

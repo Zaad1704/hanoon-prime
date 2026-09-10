@@ -105,10 +105,16 @@ def bars_advance_when_active(ctx: InspectionContext) -> CheckResult:
         return CheckResult(
             "pipeline", "bars_advance_when_active", FAIL, detail="no CYCLE lines"
         )
+    # Cycle runs every ~1s; 1-minute bars close at the minute boundary.
+    # Only tickers in pendingTickers() that cross a boundary in this cycle
+    # are counted, so the expected rate is ~1.7% (1/60). Thresholds are
+    # calibrated to catch a genuinely stuck feed (0% closure) while
+    # tolerating the natural burst pattern of minute-bar aggregation.
     closed = sum(1 for n in counts if n > 0)
-    if closed < 0.10 * len(counts):
+    rate = closed / len(counts) if counts else 0.0
+    if rate < 0.01:
         status = FAIL
-    elif closed < 0.30 * len(counts):
+    elif rate < 0.05:
         status = WARN
     else:
         status = OK

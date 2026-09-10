@@ -144,6 +144,21 @@ class _H(BaseHTTPRequestHandler):
     def log_message(self, *_a: Any) -> None:
         """Suppress default stderr logging."""
 
+    def handle(self) -> None:
+        """Guard against client disconnects during request-line reading.
+
+        BaseHTTPRequestHandler.handle() calls self.rfile.readline() to read
+        the raw request line; a client that closes the connection mid-handshake
+        raises ConnectionResetError / BrokenPipeError, which propagates to
+        ThreadingHTTPServer.process_request_thread → handle_error and produces
+        a noisy traceback. Catching it here keeps the server silent on the
+        common client-flush pattern (e.g. health checkers, browser preflights).
+        """
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError, ConnectionError):
+            log.debug("client disconnected during request line read")
+
     # ── Routing ─────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:
