@@ -38,6 +38,8 @@ def _print_manifest(args: argparse.Namespace) -> int:
     if args.json:
         payload = asdict(m)
         payload["status"] = m.status
+        payload["hard_fails"] = [asdict(r) for r in m.hard_fails]
+        payload["anomalies"] = [asdict(r) for r in m.anomalies]
         sys.stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
     else:
         out: list[str] = [f"INSIDE-MAN MANIFEST  ts={m.ts:.0f}  head={m.git_head}"]

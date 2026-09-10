@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ._ib_sync import read_portfolio
+from ._ib_sync import read_account_summary, read_portfolio
 from ._telegram import postmortem, shutdown, trade_hold
 from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
@@ -38,6 +38,33 @@ def _is_hard_stop(es: dict[str, Any]) -> bool:
     """True when an exit decision is a protective price stop (never bar-derived)."""
 
     return str(es.get("reason", "")).startswith("hard_stop")
+
+
+# IB accountSummary tags → snake_case telemetry keys (scalar, NaN-safe).
+_ACCOUNT_SUMMARY_KEYS: tuple[tuple[str, str], ...] = (
+    ("NetLiquidation", "net_liq"),
+    ("BuyingPower", "buying_power"),
+    ("CashBalance", "cash"),
+    ("RealizedPnL", "realized_pnl"),
+    ("UnrealizedPnL", "unrealized_pnl"),
+)
+
+
+def _float_account_summary(tags: dict[str, str]) -> dict[str, float | None]:
+    """Convert IB accountSummary string tags to finite floats (None if absent)."""
+    out: dict[str, float | None] = {}
+    for tag, key in _ACCOUNT_SUMMARY_KEYS:
+        raw = tags.get(tag)
+        if raw is None:
+            out[key] = None
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            out[key] = None
+            continue
+        out[key] = value if math.isfinite(value) else None
+    return out
 
 
 @dataclass
@@ -462,6 +489,9 @@ class BotCycleMixin:
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
                 feed["positions"] = read_portfolio(self.ib)
+                self._account_summary = _float_account_summary(
+                    read_account_summary(self.ib)
+                )
                 if equity is not None:
                     self._account_equity = equity
                     self._account_equity_synced = synced
@@ -473,6 +503,10 @@ class BotCycleMixin:
             # the slow-cortex pulse always sees it between 30s refresh ticks.
             feed["equity"] = carried
             feed["equity_synced"] = getattr(self, "_account_equity_synced", True)
+        summary = getattr(self, "_account_summary", None)
+        if summary:
+            # Same carry semantics: raw IB accountSummary tags between ticks.
+            feed["account_summary"] = summary
         positions = feed.get("positions")
         feed["positions_open"] = len(positions) if positions else 0
         self.juli._state.update(

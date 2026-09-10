@@ -15,12 +15,15 @@ Transport model (v2):
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from .config import TRADING_CONFIG
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
@@ -49,8 +52,24 @@ ROUTES_GET = {
     "/halim": "_halim_state",
     "/verdicts": "_verdicts",
     "/session": "_session",
+    "/account": "_account",
+    "/resources": "_resources",
+    "/inspection": "_inspection",
 }
 POST_ROUTES = {"/safety-net", "/config"}
+
+# Routes computed outside the 1s snapshot (they are served on demand with a
+# time-to-live cache). /account is cheap (a dict read) so it stays uncached.
+EXTRA_TTL: dict[str, float] = {"/resources": 2.0, "/inspection": 30.0}
+
+# Runtime daemon roles → pidfile name under <repo>/runtime/pids/.
+_PROCESS_ROLES: tuple[tuple[str, str], ...] = (
+    ("bot", "hanoon_prime"),
+    ("halim", "halim_serve"),
+    ("watchdog", "ib_gateway_watchdog"),
+    ("overnight_monitor", "overnight_monitor"),
+    ("production_monitor", "production_monitor"),
+)
 
 # Route → handler method for POST mutations (also flipped via /config UI).
 POST_HANDLERS = {
@@ -87,6 +106,11 @@ class _H(BaseHTTPRequestHandler):
     cache_lock: threading.Lock | None = None
     builder: Callable[[], dict[str, Any]] | None = None
     sse_registry: "SseRegistry | None" = None
+    # TTL cache for the on-demand routes (see EXTRA_TTL); set by TelemetryAPI.
+    extra_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    extra_lock: threading.Lock | None = None
+    # Overridable in tests so /inspection can be served without a subprocess.
+    inspection_builder: Callable[[], dict[str, Any]] | None = None
     # Called after a successful POST so the cache reflects the mutation
     # immediately (no 1s staleness on user-initiated changes).
     on_mutation: Callable[[], None] | None = None
@@ -110,11 +134,33 @@ class _H(BaseHTTPRequestHandler):
         if path not in ROUTES_GET:
             self._r(404, {"error": "not found", "path": path})
             return
-        snap = self._current_snapshot()
-        payload = snap.get(_ROUTE_KEY[path], _MISSING)
-        if payload is _MISSING:
-            payload = getattr(self, ROUTES_GET[path])()
-        self._r(200, payload)
+        self._r(200, self._serve_route(path))
+
+    def _serve_route(self, path: str) -> dict[str, Any]:
+        """Resolve a route payload: cached snapshot or on-demand builder."""
+        if path in EXTRA_TTL:
+            return self._extra_route(path)
+        key = _ROUTE_KEY.get(path)
+        if key is not None:
+            payload = self._current_snapshot().get(key, _MISSING)
+            if payload is not _MISSING:
+                return cast(dict[str, Any], payload)
+        return cast(dict[str, Any], getattr(self, ROUTES_GET[path])())
+
+    def _extra_route(self, path: str) -> dict[str, Any]:
+        """Serve a TTL-cached out-of-snapshot route (e.g. /inspection)."""
+        ttl = EXTRA_TTL[path]
+        lock = self.extra_lock or threading.Lock()
+        with lock:
+            hit = self.extra_cache.get(path)
+            if hit is not None and time.time() - hit[0] < ttl:
+                return hit[1]
+        payload = cast(
+            dict[str, Any], getattr(self, ROUTES_GET[path])()
+        )
+        with lock:
+            self.extra_cache[path] = (time.time(), payload)
+        return payload
 
     def do_OPTIONS(self) -> None:
         """Handle CORS preflight."""
@@ -431,6 +477,127 @@ class _H(BaseHTTPRequestHandler):
             "refractory": s.get("refractory_until", 0) > time.time(),
         }
 
+    def _account(self) -> dict[str, Any]:
+        """Raw IB account feed published by ib_cycle (equity, summary, holdings)."""
+        brain = self._brain()
+        state = getattr(brain, "state", None) if brain else None
+        feed = state.snapshot().get("account_feed", {}) if state is not None else {}
+        return dict(feed) if isinstance(feed, dict) else {}
+
+    def _resources(self) -> dict[str, Any]:
+        """Per-process CPU/RAM plus host loadavg (cached, ps-based, no deps)."""
+        pids_dir = (
+            self.journal_path.resolve().parent.parent / "runtime" / "pids"
+            if self.journal_path
+            else None
+        )
+        bot_pid = os.getpid()
+        procs: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for role, fname in _PROCESS_ROLES:
+            pid = self._pidfile_pid(pids_dir, fname)
+            if pid is None or pid in seen:
+                continue
+            seen.add(pid)
+            usage = self._process_usage(pid)
+            procs.append(
+                {"role": role, **usage} if usage else {"role": role, "alive": False}
+            )
+        if bot_pid not in seen:
+            usage = self._process_usage(bot_pid)
+            procs.append(
+                {"role": "bot", **usage} if usage else {"role": "bot", "alive": False}
+            )
+        try:
+            load1, load5, load15 = os.getloadavg()
+            loadavg = [round(load1, 2), round(load5, 2), round(load15, 2)]
+        except (OSError, AttributeError):
+            loadavg = []
+        return {"procs": procs, "loadavg": loadavg, "ts": time.time()}
+
+    @staticmethod
+    def _pidfile_pid(pids_dir: Path | None, fname: str) -> int | None:
+        if not pids_dir:
+            return None
+        p = pids_dir / f"{fname}.pid"
+        if not p.exists():
+            return None
+        try:
+            pid = int(p.read_text().strip())
+        except (OSError, ValueError):
+            return None
+        return pid if pid > 0 else None
+
+    @staticmethod
+    def _process_usage(pid: int) -> dict[str, Any] | None:
+        """ps-based %CPU + RSS(kB) for one pid. None when not readable."""
+        try:
+            out = subprocess.run(
+                ["ps", "-o", "pid=,pcpu=,rss=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        parts = out.stdout.split()
+        if len(parts) < 3:
+            return None
+        try:
+            return {
+                "pid": int(parts[0]),
+                "cpu_pct": float(parts[1]),
+                "rss_kb": int(float(parts[2])),
+            }
+        except ValueError:
+            return None
+
+    def _inspection(self) -> dict[str, Any]:
+        """Inside Man manifest, TTL-cached. Runs in an isolated subprocess so
+        heavy log scans never stall the bot's telemetry thread."""
+        # type() lookup keeps the overridable class attr an unbound callable.
+        fn = type(self).inspection_builder or self._run_inspection
+        try:
+            return fn()
+        except Exception as exc:
+            return {"status": "UNVERIFIABLE", "error": str(exc)[:200]}
+
+    def _run_inspection(self) -> dict[str, Any]:
+        exe = sys.executable or "python3"
+        cmd = [exe, "-m", "hanoon_prime.inspection", "manifest", "--json"]
+        try:
+            out = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=28,
+                cwd=self._repo_root(),
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "UNVERIFIABLE", "error": "inspection timed out"}
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "UNVERIFIABLE", "error": f"inspection failed: {exc}"}
+        if out.returncode not in (0, 2, 3, 4):
+            return {
+                "status": "UNVERIFIABLE",
+                "error": (out.stderr or "").strip()[:200] or f"exit {out.returncode}",
+            }
+        try:
+            payload: dict[str, Any] = json.loads(out.stdout)
+        except json.JSONDecodeError as exc:
+            return {"status": "UNVERIFIABLE", "error": f"bad manifest json: {exc}"}
+        payload["_runner"] = "subprocess"
+        return payload
+
+    def _repo_root(self) -> str:
+        if self.journal_path:
+            for p in self.journal_path.resolve().parents:
+                if (p / "src" / "hanoon_prime").is_dir():
+                    return str(p)
+        return str(Path.cwd())
+
     def _safety_net_status(self) -> dict[str, Any]:
         policy = self._policy_state()
         hp = getattr(self.bot, "hippocampus", None) if self.bot else None
@@ -617,6 +784,9 @@ class TelemetryAPI:
         # fixtures (and any external harness) work without start().
         _H.bot = bot
         _H.journal_path = journal_path
+        _H.extra_cache = {}
+        _H.extra_lock = threading.Lock()
+        _H.inspection_builder = None
 
     # ── wiring ──────────────────────────────────────────────────────────
 
