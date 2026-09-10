@@ -18,6 +18,7 @@ from .config import (
     THRESHOLD_MAX,
     THRESHOLD_MIN,
 )
+from .realized_ev import CONF_LOSS_AGGRESSIVE_MAX, CONF_LOSS_AGGRESSIVE_STEP
 
 # Rolling quintile constants (from rebuild's adaptive_threshold.py)
 _QUINTILE_LOOKBACK: int = 100
@@ -81,7 +82,7 @@ class Dynamics:
         """Current dynamic entry threshold."""
         return self._threshold
 
-    def adapt_threshold(self, prediction_error: float) -> None:
+    def adapt_threshold(self, prediction_error: float, losing_bins: int = 0) -> None:
         """Raise threshold when errors are high, lower when low.
 
         Bounded win-probability predictions (score_to_win_prob) make
@@ -89,11 +90,23 @@ class Dynamics:
         ``> 0.6 / < 0.3`` boundaries were unreachable so the threshold
         never adapted. 0.50 is the dominant loss signal (pred >= threshold
         typically); 0.45 is the confident-win zone (pred > 0.55 → low error).
+
+        Aggressive learning: when ``losing_bins`` confidence bins have 0
+        wins and >= CONF_LOSS_STREAK_WARN losses, the threshold is raised
+        by CONF_LOSS_AGGRESSIVE_STEP per bin — capped at
+        CONF_LOSS_AGGRESSIVE_MAX per trade-close. This accelerates
+        adaptation from proven-losing regions instead of waiting for the
+        full CONF_MIN_SAMPLES to accumulate.
         """
         if prediction_error >= 0.50:
             self._threshold = min(THRESHOLD_MAX, self._threshold + 0.01)
         elif prediction_error < 0.45:
             self._threshold = max(THRESHOLD_MIN, self._threshold - 0.005)
+        if losing_bins > 0:
+            step = min(
+                CONF_LOSS_AGGRESSIVE_MAX, losing_bins * CONF_LOSS_AGGRESSIVE_STEP
+            )
+            self._threshold = min(THRESHOLD_MAX, self._threshold + step)
 
     def set_refractory(self, duration: float = 2.0) -> None:
         """Set refractory period after trade event (neuronal hyperpolarization)."""

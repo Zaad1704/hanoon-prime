@@ -34,6 +34,19 @@ _BAND_COUNT: int = 10
 # refuses; thin bins fall back to the structural prior.
 CONF_BIN_COUNT: int = 10  # bin 0 = conf 0.50, bin 9 = conf 0.95
 
+# Aggressive learning: confidence bins below CONF_MIN_SAMPLES normally
+# don't influence the gate. But a bin with >= this many losses AND zero
+# wins is an active money-burner — trigger emergency threshold tightening
+# immediately rather than waiting for CONF_MIN_SAMPLES (20) to accumulate.
+CONF_LOSS_STREAK_WARN: int = 10
+
+# Per loss in a losing bin, raise the entry threshold by this much.
+CONF_LOSS_AGGRESSIVE_STEP: float = 0.025
+
+# Cap on how aggressively a single trade-close can raise the threshold
+# when losing conf bins are detected.
+CONF_LOSS_AGGRESSIVE_MAX: float = 0.15
+
 
 def _conf_bin(conf: float) -> int:
     """Map confidence [0.50, 1.0] to a bin index (0..CONF_BIN_COUNT-1)."""
@@ -176,6 +189,23 @@ class RealizedStats:
             return 0.5, 0
         wins = sum(1 for f, _p, _d in samples if f)
         return wins / len(samples), len(samples)
+
+    def losing_conf_bins(self) -> list[tuple[int, int, int]]:
+        """Return bins with 0 wins and >= CONF_LOSS_STREAK_WARN losses.
+
+        Each entry is ``(bin_index, losses, wins)``. These are confidence
+        bands that are actively losing money — the aggressive learning
+        hook in Dynamics reads these to accelerate threshold adaptation
+        rather than waiting for CONF_MIN_SAMPLES (20).
+        """
+        result: list[tuple[int, int, int]] = []
+        with self._lock:
+            for b in sorted(set(self._conf_losses)):
+                wins = self._conf_wins.get(b, 0)
+                losses = self._conf_losses.get(b, 0)
+                if wins == 0 and losses >= CONF_LOSS_STREAK_WARN:
+                    result.append((b, losses, wins))
+        return result
 
     def dynamic_prior_top(self) -> float:
         """Dynamic PRIOR_TOP for the brain's confidence cap (see edge).

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from .checks import FAIL, MANIFEST_STATUS, OK, WARN, CheckResult, CheckSpec, run_check
 from .ctx import InspectionContext
 from .halim import halim_engaged_in_decisions, halim_state_matches_clock
+from .inside_man import brain_halim_bounded, conf_bin_loss_streak, exits_ib_pnl_fed
 from .journals import (
     chain_intact_from_anchor,
     journal_grows,
@@ -76,6 +77,7 @@ JOINT_ORDER = [
     "purity",
     "execution_oracle",
     "halim",
+    "inside_man",
     "trade_quality",
     "notify",
 ]
@@ -149,14 +151,15 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec(
         "halim", "halim_engaged_in_decisions", halim_engaged_in_decisions, report=True
     ),
+    CheckSpec("inside_man", "brain_halim_bounded", brain_halim_bounded, hard=True),
+    CheckSpec("inside_man", "exits_ib_pnl_fed", exits_ib_pnl_fed, report=True),
+    CheckSpec("inside_man", "conf_bin_loss_streak", conf_bin_loss_streak, report=True),
 )
 
-HARD_KEYS: frozenset[tuple[str, str]] = frozenset(
-    (s.joint, s.name) for s in SPECS if s.hard
-)
-REPORT_KEYS: frozenset[tuple[str, str]] = frozenset(
-    (s.joint, s.name) for s in SPECS if s.report
-)
+# fmt: off
+HARD_KEYS: frozenset[tuple[str, str]] = frozenset((s.joint, s.name) for s in SPECS if s.hard)
+REPORT_KEYS: frozenset[tuple[str, str]] = frozenset((s.joint, s.name) for s in SPECS if s.report)
+# fmt: on
 
 
 @dataclass(frozen=True)
@@ -176,25 +179,20 @@ class Manifest:
     @property
     def hard_fails(self) -> list[CheckResult]:
         """Hard-spec checks currently FAILing."""
-        return [
-            r
-            for r in self.results
-            if (r.joint, r.name) in HARD_KEYS and r.status == FAIL
-        ]
+        # fmt: off
+        return [r for r in self.results if (r.joint, r.name) in HARD_KEYS and r.status == FAIL]
+        # fmt: on
 
     @property
     def anomalies(self) -> list[CheckResult]:
         """Reported checks in WARN or FAIL."""
-        return [
-            r
-            for r in self.results
-            if (r.joint, r.name) in REPORT_KEYS and r.status in (WARN, FAIL)
-        ]
+        # fmt: off
+        return [r for r in self.results if (r.joint, r.name) in REPORT_KEYS and r.status in (WARN, FAIL)]
+        # fmt: on
 
 
 def run_all(ctx: InspectionContext) -> Manifest:
     """Execute every registered check against a single tick context."""
-    results = tuple(run_check(s, ctx) for s in SPECS)
-    return Manifest(
-        ts=time.time(), git_head=ctx.git_head(), pid=os.getpid(), results=results
-    )
+    # fmt: off
+    return Manifest(ts=time.time(), git_head=ctx.git_head(), pid=os.getpid(), results=tuple(run_check(s, ctx) for s in SPECS))
+    # fmt: on

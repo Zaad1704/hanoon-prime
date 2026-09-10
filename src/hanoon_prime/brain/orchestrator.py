@@ -27,6 +27,7 @@ from .config import (
     _IRONYCLADE,
     DEFAULT_WEIGHTS,
     GATE_CLOSED_SIZE_SCALAR,
+    HALIM_MOD_BOUND,
     NASH_PENALTY_MAX,
     NASH_VETO_HIGH,
     NASH_VETO_LOW,
@@ -622,11 +623,10 @@ class NeuromorphicBrain:
         horizon = self._classify_horizon(bars)
         horizon, hz_reason = self._bandit.select(canon, horizon)
         self._apply_regime_weights(canon)
-        # Episodic k-NN modifier is queried LIVE against the current alpha
-        # (bounded ±EPISODIC_MOD_BOUND, confidence-gated) and mirrored into
-        # shared state so telemetry shows the applied bias.
+        # Episodic k-NN modifier queried LIVE (bounded ±EPISODIC_MOD_BOUND).
         eb = self.episodic.modifier(alpha)
         self.state.update(episodic_bias=eb)
+        hm = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(hm or 0.0)))
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
         ctx["horizon"] = horizon
         ctx["horizon_reason"] = hz_reason
@@ -935,7 +935,10 @@ class NeuromorphicBrain:
         vp = self._last_vol_pct.get(ticker, vol_pct)
         if not self._ironclade_gate(ticker, source):
             return
-        self.dynamics.adapt_threshold(self.memory.pred_error)
+        self.dynamics.adapt_threshold(
+            self.memory.pred_error,
+            losing_bins=len(self._realized.losing_conf_bins()),
+        )
         self.memory.threshold = (
             self.dynamics.threshold
         )  # persist adapted threshold → survives restart

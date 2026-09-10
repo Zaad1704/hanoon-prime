@@ -164,7 +164,7 @@ class JuliBrain:
         closing: set[str],
         pos_info: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Evaluate open positions for exit signals (direction-aware)."""
+        """Evaluate open positions for exit signals. ib_pnl feeds profit-lock/giveback."""
         exits = []
         watched = []
         for t in positions:
@@ -175,15 +175,15 @@ class JuliBrain:
                 continue
             info = pos_info.get(t, {})
             direction = int(info.get("direction", 1)) or 1
-            entry = info.get("entry_price") or snap["last"]
+            cur = float(snap["last"])
+            entry = info.get("entry_price") or cur
             if entry > 0 and not self.brain.exits.is_registered(t):
                 self.brain.register_position(t, entry)
-            sig = self.brain.check_exit(
-                t,
-                snap["last"],
-                direction=direction,
-                stop_price=info.get("stop_price") or None,
-            )
+            shares = float(info.get("shares", 0.0) or 0.0)
+            ib_pnl = (cur - float(entry)) * direction * shares if entry > 0 else 0.0
+            # fmt: off
+            sig = self.brain.check_exit(t, cur, ib_pnl=ib_pnl, direction=direction, stop_price=info.get("stop_price") or None)
+            # fmt: on
             if sig.should_exit:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)

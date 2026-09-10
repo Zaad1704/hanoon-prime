@@ -448,6 +448,7 @@ class BotCycleMixin:
                 "direction": p.direction,
                 "entry_price": p.entry_price,
                 "stop_price": p.stop_price,
+                "shares": p.shares,
             }
             for t, p in self.hippocampus._open_positions.items()
         }
