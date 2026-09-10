@@ -260,6 +260,22 @@ def _format_exec_time(ex: Any) -> str:
     return str(raw or "")
 
 
+def _epoch_seconds(raw: Any) -> int | None:
+    """Convert a ticker/event timestamp (datetime, epoch, or None) to int
+    epoch seconds. IB Ticker.time is a datetime — int(datetime) raises
+    TypeError, which previously took down the whole /ib route."""
+    if raw is None:
+        return None
+    ts_fn = getattr(raw, "timestamp", None)
+    if callable(ts_fn):
+        try:
+            return int(ts_fn())
+        except Exception:
+            return None
+    n = _H._num(raw)
+    return int(n) if n is not None else None
+
+
 def _ib_fill_rows(trade: Any) -> list[dict[str, Any]]:
     """Fill executions for one IB Trade."""
     rows: list[dict[str, Any]] = []
@@ -846,7 +862,7 @@ class _H(BaseHTTPRequestHandler):
             "halted": bool(getattr(tk, "halted", 0)),
             "spread": spread,
             "market_price": cls._num(cls._safe(getattr(tk, "marketPrice", lambda: None), None)),
-            "time": int(getattr(tk, "time", 0) or 0),
+            "time": _epoch_seconds(getattr(tk, "time", None)),
         }
 
     @classmethod

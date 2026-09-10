@@ -318,3 +318,44 @@ class TestSessionEndpoint:
         from hanoon_prime.telemetry import ROUTES_GET
 
         assert ROUTES_GET["/session"] == "_session"
+
+
+class TestIbTickerRowDatetime:
+    """Regression: Ticker.time is a datetime — int(datetime) raised TypeError
+    and took down the whole /ib route (empty reply → webapp showed DOWN)."""
+
+    def test_epoch_seconds_accepts_datetime_and_epoch(self) -> None:
+        from datetime import datetime, timezone
+
+        from hanoon_prime.telemetry import _epoch_seconds
+
+        dt = datetime(2026, 9, 11, 0, 0, tzinfo=timezone.utc)
+        assert _epoch_seconds(dt) == int(dt.timestamp())
+        assert _epoch_seconds(1787123456) == 1787123456
+        assert _epoch_seconds(None) is None
+        assert _epoch_seconds("garbage") is None
+
+    def test_ib_ticker_row_with_datetime_time(self) -> None:
+        from datetime import datetime, timezone
+
+        from hanoon_prime.telemetry import _H
+
+        tk = MagicMock()
+        tk.contract.symbol = "SPY"
+        tk.bid = 100.0
+        tk.ask = 100.5
+        tk.last = 100.25
+        tk.close = 99.0
+        tk.open = 99.5
+        tk.high = 101.0
+        tk.low = 98.5
+        tk.volume = 1_000
+        tk.bidSize = 3
+        tk.askSize = 4
+        tk.lastSize = 2
+        tk.halted = 0
+        tk.marketPrice = MagicMock(return_value=100.25)
+        tk.time = datetime.now(tz=timezone.utc)
+        row = _H._ib_ticker_row(tk)
+        assert row["symbol"] == "SPY"
+        assert isinstance(row["time"], int)
