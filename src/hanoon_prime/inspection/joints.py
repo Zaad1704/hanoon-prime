@@ -78,7 +78,7 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("telemetry", "health_ok", health_ok, hard=True),
     CheckSpec("telemetry", "snapshot_fresh", snapshot_fresh, hard=True),
     CheckSpec("telemetry", "positions_surface", positions_surface, report=True),
-    CheckSpec("telemetry", "positions_marked_live", positions_marked_live, report=True),
+    CheckSpec("telemetry", "positions_marked_live", positions_marked_live, hard=True),
     CheckSpec("pipeline", "heartbeat_fresh", heartbeat_fresh, hard=True),
     CheckSpec(
         "pipeline", "cycle_flows_when_active", cycle_flows_when_active, hard=True
@@ -95,7 +95,7 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("safety", "no_learn_blocked", no_learn_blocked, report=True),
     CheckSpec("safety", "policy_flags", policy_flags, report=True),
     CheckSpec("safety", "drawdown_bound", drawdown_bound, hard=True),
-    CheckSpec("safety", "no_error_burst", no_error_burst, report=True),
+    CheckSpec("safety", "no_error_burst", no_error_burst, hard=True),
     CheckSpec("memory", "journal_grows", journal_grows, hard=True),
     CheckSpec("memory", "seq_forward", seq_forward, report=True),
     CheckSpec("memory", "verdicts_valid", verdicts_valid, hard=True),

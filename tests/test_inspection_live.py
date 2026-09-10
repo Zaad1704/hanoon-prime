@@ -77,6 +77,20 @@ def test_positions_marked_live_warns_stale_marks(tmp_path) -> None:
     assert live.positions_marked_live(ctx).status == WARN
 
 
+def test_positions_marked_live_fails_systemic_stale(tmp_path) -> None:
+    ctx = _health(InspectionContext(base_dir=tmp_path), active=True, count=2)
+    ctx.memo["positions"] = {
+        "positions": [
+            {"ticker": "A", "entry_price": 10.0, "market_price": 10.0},
+            {"ticker": "B", "entry_price": 20.0, "market_price": 20.0},
+        ],
+        "total_pnl": 0.0,
+        "count": 2,
+    }
+    ctx.memo["account"] = {"account_summary": {"unrealized_pnl": "0.00"}}
+    assert live.positions_marked_live(ctx).status == FAIL
+
+
 def test_positions_marked_live_ok_when_marked(tmp_path) -> None:
     ctx = _health(InspectionContext(base_dir=tmp_path), active=True, count=1)
     ctx.memo["positions"] = {

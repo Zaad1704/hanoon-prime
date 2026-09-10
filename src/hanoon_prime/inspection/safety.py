@@ -16,8 +16,8 @@ from .probe import (
     session_lines,
 )
 
-ERROR_BURST_WARN = 10
-ERROR_BURST_FAIL = 50
+ERROR_BURST_WARN = 5
+ERROR_BURST_FAIL = 20
 ERROR_MARKER = re.compile(r" (ERROR|CRITICAL) ")
 
 

@@ -43,9 +43,9 @@ def test_error_burst_quiet_ok(tmp_path) -> None:
 
 def test_error_burst_warns_then_fails(tmp_path) -> None:
     ctx = InspectionContext(base_dir=tmp_path)
-    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 10)
+    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 5)
     assert safety.no_error_burst(ctx).status == WARN
-    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 60)
+    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 25)
     assert safety.no_error_burst(InspectionContext(base_dir=tmp_path)).status == FAIL
 
 

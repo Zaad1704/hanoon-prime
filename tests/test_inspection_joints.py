@@ -100,6 +100,12 @@ def test_manifest_hard_and_anomaly_partition(tmp_path) -> None:
     )
 
 
+def test_live_failure_checks_are_hard(tmp_path) -> None:
+    keys = {(s.joint, s.name) for s in joints.SPECS if s.hard}
+    assert ("telemetry", "positions_marked_live") in keys
+    assert ("safety", "no_error_burst") in keys
+
+
 def test_cli_manifest_json(tmp_path, monkeypatch, capsys) -> None:
     from hanoon_prime.inspection import __main__ as cli
 

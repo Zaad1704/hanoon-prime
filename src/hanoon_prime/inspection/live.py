@@ -29,11 +29,9 @@ def _mark_verdict(
     summary = account(ctx).get("account_summary")
     if not isinstance(summary, dict):
         summary = {}
-    account_pnl = 0.0
-    if isinstance(summary, dict):
-        account_pnl = float(
-            summary.get("unrealized_pnl") or summary.get("UnrealizedPnL") or 0.0
-        )
+    account_pnl = float(
+        summary.get("unrealized_pnl") or summary.get("UnrealizedPnL") or 0.0
+    )
     if total == 0.0 and abs(account_pnl) > 0.5:
         return CheckResult(
             "telemetry",
@@ -46,11 +44,17 @@ def _mark_verdict(
         p["ticker"] for p in listed if p.get("market_price") == p.get("entry_price")
     ]
     if stale:
+        all_stuck = len(stale) == len(listed)
+        detail = (
+            f"all {len(listed)} mark(s) stuck at entry"
+            if all_stuck
+            else f"{len(stale)} mark(s) still at entry: {','.join(stale)}"
+        )
         return CheckResult(
             "telemetry",
             name,
-            WARN,
-            detail=f"{len(stale)} mark(s) still at entry: {','.join(stale)}",
+            FAIL if all_stuck else WARN,
+            detail=detail,
         )
     return CheckResult(
         "telemetry",
