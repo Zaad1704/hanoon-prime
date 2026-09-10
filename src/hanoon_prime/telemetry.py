@@ -582,7 +582,8 @@ class _H(BaseHTTPRequestHandler):
 
     def _positions(self) -> dict[str, Any]:
         """Live-marked positions surface (portfolio marks + ticker fallback)."""
-        return mark_positions(self._ib())
+        get_snap = getattr(self.bot, "_snapshot", None)
+        return mark_positions(self._ib(), get_snap)
 
     def _recent_trades(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():
