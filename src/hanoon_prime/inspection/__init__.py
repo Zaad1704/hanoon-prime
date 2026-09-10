@@ -10,6 +10,7 @@ from .checks import (
     CheckSpec,
 )
 from .ctx import InspectionContext
+from .joints import JOINT_ORDER, SPECS, Manifest, run_all
 
 __all__ = [
     "FAIL",
@@ -19,5 +20,9 @@ __all__ = [
     "CheckResult",
     "CheckSpec",
     "InspectionContext",
+    "JOINT_ORDER",
     "MANIFEST_STATUS",
+    "Manifest",
+    "SPECS",
+    "run_all",
 ]
