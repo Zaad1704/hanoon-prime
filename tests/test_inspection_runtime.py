@@ -94,15 +94,24 @@ def test_state_matches_clock_unknown_session_is_warn(tmp_path) -> None:
     assert runtime.state_matches_clock(ctx).status == WARN
 
 
-def test_positions_reconciled_residual_tolerated(tmp_path) -> None:
+def test_positions_reconciled_inactive_mismatch_is_residual(tmp_path) -> None:
     ctx = _healthy_memo(InspectionContext(base_dir=tmp_path))
     ctx.memo["health"]["position_count"] = 2
     ctx.memo["runtime_state"] = {"brain_state": {"positions_open": 0}}
     assert runtime.positions_reconciled(ctx).status == OK
     ctx.memo["runtime_state"] = {"brain_state": {"positions_open": 2}}
     assert runtime.positions_reconciled(ctx).status == OK
-    ctx.memo["runtime_state"] = {"brain_state": {"positions_open": 3}}
-    assert runtime.positions_reconciled(ctx).status == WARN
+
+
+def test_positions_reconciled_active_mismatch_fails(tmp_path) -> None:
+    ctx = _healthy_memo(
+        InspectionContext(base_dir=tmp_path), session="pre_market", active=True
+    )
+    ctx.memo["health"]["position_count"] = 14
+    ctx.memo["runtime_state"] = {"brain_state": {"positions_open": 0}}
+    result = runtime.positions_reconciled(ctx)
+    assert result.status == FAIL
+    assert "while session active" in result.detail
 
 
 def test_telegram_configured(tmp_path, monkeypatch) -> None:

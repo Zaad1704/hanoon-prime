@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import queue
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 import numpy as np
 
@@ -20,6 +21,20 @@ from .immune import DEPTH_ROWS, EDGE_LOOKBACK, LOOKBACK_BARS
 from .types import BarSeries
 
 log = logging.getLogger(__name__)
+
+_IB_LOGGER_NAME = "ib_insync.ib"
+
+
+@contextmanager
+def _silence_ib_errors() -> Iterator[None]:
+    """Temporarily quiet ib_insync's ERROR noise during cancel teardown."""
+    ib_logger = logging.getLogger(_IB_LOGGER_NAME)
+    prev_level = ib_logger.level
+    ib_logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        ib_logger.setLevel(prev_level)
 
 
 @dataclass
@@ -193,10 +208,11 @@ class IBStreamer:
         if old is None or self.contracts.get(ticker) is None:
             self.subscribe(ticker)
             return
-        try:
-            self.ib.cancelMktData(old)
-        except Exception as exc:
-            log.debug("cancelMktData %s failed: %s", ticker, exc)
+        with _silence_ib_errors():
+            try:
+                self.ib.cancelMktData(old)
+            except Exception as exc:
+                log.debug("cancelMktData %s failed: %s", ticker, exc)
         self.ticker_subs[ticker] = self.ib.reqMktData(
             self.contracts[ticker], "", False, False
         )
@@ -336,13 +352,8 @@ class IBStreamer:
         The error is harmless — ib_insync logs it at ERROR level because it
         can't find the reqId in its internal map after a disconnect.
         """
-        ib_logger = __import__("logging").getLogger("ib_insync.ib")
-        prev_level = ib_logger.level
-        ib_logger.setLevel(__import__("logging").WARNING)
-        try:
+        with _silence_ib_errors():
             self._cancel_mkt_subs()
-        finally:
-            ib_logger.setLevel(prev_level)
         self.ticker_subs.clear()
         self.depth_subs.clear()
 

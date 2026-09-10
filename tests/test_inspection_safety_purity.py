@@ -35,6 +35,20 @@ def test_learn_blocked_flags(tmp_path) -> None:
     assert safety.no_learn_blocked(ctx).status == FAIL
 
 
+def test_error_burst_quiet_ok(tmp_path) -> None:
+    ctx = InspectionContext(base_dir=tmp_path)
+    _log(ctx, ["12:00:00.000 INFO ib_cycle HEARTBEAT open=0\n"])
+    assert safety.no_error_burst(ctx).status == OK
+
+
+def test_error_burst_warns_then_fails(tmp_path) -> None:
+    ctx = InspectionContext(base_dir=tmp_path)
+    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 10)
+    assert safety.no_error_burst(ctx).status == WARN
+    _log(ctx, ["12:00:00.000 ERROR ib_insync.ib cancelMktData: no reqId\n"] * 60)
+    assert safety.no_error_burst(InspectionContext(base_dir=tmp_path)).status == FAIL
+
+
 def test_policy_flags_deferred_when_inactive(tmp_path) -> None:
     ctx = InspectionContext(base_dir=tmp_path)
     ctx.memo["health"] = {"session_active": False}

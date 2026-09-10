@@ -25,6 +25,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable, cast
 
+from ._ib_marks import mark_positions
 from .config import TRADING_CONFIG
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
 from .memory import Journal
@@ -55,12 +56,13 @@ ROUTES_GET = {
     "/account": "_account",
     "/resources": "_resources",
     "/inspection": "_inspection",
+    "/logs": "_log_tail",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
 # Routes computed outside the 1s snapshot (they are served on demand with a
 # time-to-live cache). /account is cheap (a dict read) so it stays uncached.
-EXTRA_TTL: dict[str, float] = {"/resources": 2.0, "/inspection": 30.0}
+EXTRA_TTL: dict[str, float] = {"/resources": 2.0, "/inspection": 30.0, "/logs": 1.0}
 
 # Runtime daemon roles → pidfile name under <repo>/runtime/pids/.
 _PROCESS_ROLES: tuple[tuple[str, str], ...] = (
@@ -93,9 +95,31 @@ _ROUTE_KEY = {
     "/halim": "halim",
     "/verdicts": "verdicts",
     "/session": "session",
+    "/logs": "logs",
 }
 
 _MISSING = object()
+
+
+def _tail_log(log_file: Path) -> list[str]:
+    """Read the last 64KB of a log as up-to-200 tail lines."""
+    with open(log_file, "rb") as fh:
+        fh.seek(0, 2)
+        size = fh.tell()
+        read_size = min(size, 64 * 1024)
+        fh.seek(max(0, size - read_size))
+        data = fh.read().decode("utf-8", errors="replace")
+    return data.strip().splitlines()[-200:]
+
+
+def _log_tail_lines(candidates: list[Path]) -> list[str]:
+    """First readable candidate log tail, else empty."""
+    for log_file in candidates:
+        try:
+            return _tail_log(log_file)
+        except (OSError, ValueError):
+            continue
+    return []
 
 
 class _H(BaseHTTPRequestHandler):
@@ -386,29 +410,8 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _positions(self) -> dict[str, Any]:
-        out = []
-        for p in self._ib_positions():
-            sym = p.contract.symbol
-            mp = round(float(getattr(p, "marketPrice", p.avgCost)), 2)
-            ep = round(p.avgCost, 2)
-            up = round(float(getattr(p, "unrealizedPnl", 0)), 2)
-            pp = round(((mp - ep) / ep) * 100, 2) if ep > 0 else 0.0
-            out.append(
-                {
-                    "ticker": sym,
-                    "entry_price": ep,
-                    "shares": abs(int(p.position)),
-                    "direction": "LONG" if p.position > 0 else "SHORT",
-                    "market_price": mp,
-                    "unrealized_pnl": up,
-                    "pnl_pct": pp,
-                }
-            )
-        return {
-            "positions": out,
-            "total_pnl": round(sum(p["unrealized_pnl"] for p in out), 2),
-            "count": len(out),
-        }
+        """Live-marked positions surface (portfolio marks + ticker fallback)."""
+        return mark_positions(self._ib())
 
     def _recent_trades(self) -> dict[str, Any]:
         if not self.journal_path or not self.journal_path.exists():
@@ -692,6 +695,20 @@ class _H(BaseHTTPRequestHandler):
         if not self.journal_path or not self.journal_path.exists():
             return {"entries": []}
         return {"entries": Journal(self.journal_path).tail(20)[::-1]}
+
+    def _log_tail(self) -> dict[str, Any]:
+        """Return raw tail lines from the bot log file."""
+        candidates: list[Path] = []
+        if self.journal_path:
+            jp = self.journal_path.resolve()
+            for parent in jp.parents:
+                if (parent / "src" / "hanoon_prime").is_dir():
+                    candidates.append(parent / "logs" / "hanoon_prime.log")
+                    candidates.append(parent / "runtime" / "hanoon_prime.log")
+                    break
+        candidates.append(Path("/tmp/hanoon_prime.log"))
+        candidates.append(Path.home() / "Library" / "Logs" / "hanoon_prime.log")
+        return {"lines": _log_tail_lines(candidates), "ts": time.time()}
 
 
 class SseRegistry:

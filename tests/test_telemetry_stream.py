@@ -16,14 +16,32 @@ class StubIB:
     def isConnected(self):
         return True
 
+    @property
+    def tickers(self):
+        t = SimpleNamespace(
+            contract=SimpleNamespace(symbol="SPY"),
+            last=0.0,
+            close=0.0,
+            bid=0.0,
+            ask=0.0,
+        )
+        return [t]
+
     def positions(self):
         p = SimpleNamespace()
         p.contract = SimpleNamespace(symbol="SPY")
-        p.position = 100
+        p.position = 100.0
         p.avgCost = 500.0
-        p.marketPrice = 505.0
-        p.unrealizedPnl = 500.0
         return [p]
+
+    def portfolio(self):
+        item = SimpleNamespace()
+        item.contract = SimpleNamespace(symbol="SPY")
+        item.position = 100.0
+        item.marketPrice = 505.0
+        item.unrealizedPNL = 500.0
+        item.marketValue = 50500.0
+        return [item]
 
 
 class StubBot:

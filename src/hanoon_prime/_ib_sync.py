@@ -105,7 +105,7 @@ def read_ib_positions(
                 direction=1 if pos.position > 0 else -1,
                 stop_price=b[0],
                 target_price=b[1],
-                peak_price=getattr(pos, "marketPrice", 0.0) or 0.0,
+                peak_price=pos.avgCost,
                 score=0.0,
                 atr=0.0,
             )

@@ -25,6 +25,7 @@ from .probe_halim import halim_probe as halim_probe
 START_MARKER = re.compile(r"ib_adapter\s+Starting \(seed=")
 HEARTBEAT_MARKER = re.compile(r"ib_cycle\s+HEARTBEAT")
 CYCLE_MARKER = re.compile(r"ib_cycle\s+CYCLE ")
+CYCLE_BARS_RE = re.compile(r"ib_cycle\s+CYCLE\s+bars=(\d+)")
 SLEEP_MARKER = re.compile(r"SESSION SLEEP")
 GUARD_MARKER = re.compile(r"NETTING GUARD")
 TRACE_MARKER = re.compile(r"Traceback \(most recent call last\)")
@@ -86,6 +87,28 @@ def health(ctx: InspectionContext) -> dict[str, Any]:
 def snapshot(ctx: InspectionContext) -> dict[str, Any]:
     """Live telemetry /snapshot payload."""
     return _surface(ctx, "snapshot", url=f"{ctx.telemetry_url}/snapshot")
+
+
+def account(ctx: InspectionContext) -> dict[str, Any]:
+    """Live telemetry account feed (equity, positions_open, summary)."""
+    return _surface(ctx, "account", url=f"{ctx.telemetry_url}/account")
+
+
+def positions(ctx: InspectionContext) -> dict[str, Any]:
+    """Live telemetry /positions payload (per-position live marks)."""
+    return _surface(ctx, "positions", url=f"{ctx.telemetry_url}/positions")
+
+
+def recent_cycle_bars(ctx: InspectionContext, window: int = 120) -> list[int]:
+    """Closed-bar counts from the most recent CYCLE log lines."""
+    counts: list[int] = []
+    for line in _log_lines(ctx):
+        match = CYCLE_BARS_RE.search(line)
+        if match:
+            counts.append(int(match.group(1)))
+            if len(counts) > window:
+                counts.pop(0)
+    return counts[-window:]
 
 
 def runtime_state(ctx: InspectionContext) -> dict[str, Any]:

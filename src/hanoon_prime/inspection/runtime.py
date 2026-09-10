@@ -147,7 +147,7 @@ def state_matches_clock(ctx: InspectionContext) -> CheckResult:
 
 
 def positions_reconciled(ctx: InspectionContext) -> CheckResult:
-    """IB position_count agrees with the brain's positions_open."""
+    """IB position_count agrees with the brain's positions_open while active."""
     h = health(ctx)
     if h.get("_unreachable"):
         return CheckResult(
@@ -163,18 +163,18 @@ def positions_reconciled(ctx: InspectionContext) -> CheckResult:
             OK,
             evidence={"ib": ib_count, "brain": brain_count},
         )
-    if brain_count == 0 and ib_count > 0:
+    if not h.get("session_active"):
         return CheckResult(
             "session",
             "positions_reconciled",
             OK,
-            detail=f"{ib_count} residual IB positions",
+            detail=f"{ib_count} residual positions while session inactive",
         )
     return CheckResult(
         "session",
         "positions_reconciled",
-        WARN,
-        detail=f"IB {ib_count} vs bot {brain_count}",
+        FAIL,
+        detail=f"IB {ib_count} vs bot {brain_count} while session active",
         evidence={"ib": ib_count, "brain": brain_count},
     )
 

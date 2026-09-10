@@ -14,7 +14,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ._ib_sync import read_account_summary, read_portfolio
+from ._ib_marks import feed_positions
+from ._ib_sync import read_account_summary
 from ._telegram import postmortem, shutdown, trade_hold
 from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
@@ -505,7 +506,7 @@ class BotCycleMixin:
             self._last_policy_sync = time.monotonic()
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
-                feed["positions"] = read_portfolio(self.ib)
+                feed["positions"] = feed_positions(self.ib)
                 self._account_summary = _float_account_summary(
                     read_account_summary(self.ib)
                 )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .checks import FAIL, OK, UNVERIFIABLE, WARN, CheckResult
 from .ctx import InspectionContext
 from .probe import (
@@ -13,6 +15,10 @@ from .probe import (
     runtime_state,
     session_lines,
 )
+
+ERROR_BURST_WARN = 10
+ERROR_BURST_FAIL = 50
+ERROR_MARKER = re.compile(r" (ERROR|CRITICAL) ")
 
 
 def _counts(ctx: InspectionContext) -> dict[str, int]:
@@ -89,6 +95,26 @@ def policy_flags(ctx: InspectionContext) -> CheckResult:
     if not authorized:
         return CheckResult("safety", "policy_flags", WARN, detail="bot not authorized")
     return CheckResult("safety", "policy_flags", OK)
+
+
+def no_error_burst(ctx: InspectionContext) -> CheckResult:
+    """No ERROR/CRITICAL log flood since the last start."""
+    errors = [ln for ln in session_lines(ctx) if ERROR_MARKER.search(ln)]
+    if len(errors) >= ERROR_BURST_FAIL:
+        return CheckResult(
+            "safety",
+            "no_error_burst",
+            FAIL,
+            detail=f"{len(errors)} error lines since last start",
+        )
+    if len(errors) >= ERROR_BURST_WARN:
+        return CheckResult(
+            "safety",
+            "no_error_burst",
+            WARN,
+            detail=f"{len(errors)} error lines since last start",
+        )
+    return CheckResult("safety", "no_error_burst", OK, detail="none")
 
 
 def drawdown_bound(ctx: InspectionContext) -> CheckResult:

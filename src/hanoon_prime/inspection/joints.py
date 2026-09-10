@@ -15,6 +15,7 @@ from .journals import (
     seq_forward,
     verdicts_valid,
 )
+from .live import bars_advance_when_active, positions_marked_live
 from .oracle import closes_reconciled, enters_minted, equity_synced
 from .purity import brain_fields_bounded, no_test_episodes, weights_finite_in_band
 from .runtime import (
@@ -31,6 +32,7 @@ from .runtime import (
 )
 from .safety import (
     drawdown_bound,
+    no_error_burst,
     no_learn_blocked,
     no_netting_guard,
     no_safety_halt,
@@ -76,19 +78,24 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("telemetry", "health_ok", health_ok, hard=True),
     CheckSpec("telemetry", "snapshot_fresh", snapshot_fresh, hard=True),
     CheckSpec("telemetry", "positions_surface", positions_surface, report=True),
+    CheckSpec("telemetry", "positions_marked_live", positions_marked_live, report=True),
     CheckSpec("pipeline", "heartbeat_fresh", heartbeat_fresh, hard=True),
     CheckSpec(
         "pipeline", "cycle_flows_when_active", cycle_flows_when_active, hard=True
     ),
+    CheckSpec(
+        "pipeline", "bars_advance_when_active", bars_advance_when_active, hard=True
+    ),
     CheckSpec("pipeline", "sleep_is_expected", sleep_is_expected, report=True),
     CheckSpec("session", "state_matches_clock", state_matches_clock, report=True),
-    CheckSpec("session", "positions_reconciled", positions_reconciled, report=True),
+    CheckSpec("session", "positions_reconciled", positions_reconciled, hard=True),
     CheckSpec("safety", "no_netting_guard", no_netting_guard, hard=True),
     CheckSpec("safety", "no_traceback", no_traceback, hard=True),
     CheckSpec("safety", "no_safety_halt", no_safety_halt, hard=True),
     CheckSpec("safety", "no_learn_blocked", no_learn_blocked, report=True),
     CheckSpec("safety", "policy_flags", policy_flags, report=True),
     CheckSpec("safety", "drawdown_bound", drawdown_bound, hard=True),
+    CheckSpec("safety", "no_error_burst", no_error_burst, report=True),
     CheckSpec("memory", "journal_grows", journal_grows, hard=True),
     CheckSpec("memory", "seq_forward", seq_forward, report=True),
     CheckSpec("memory", "verdicts_valid", verdicts_valid, hard=True),

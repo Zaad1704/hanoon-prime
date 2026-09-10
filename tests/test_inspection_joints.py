@@ -12,7 +12,7 @@ def test_spec_registry_no_duplicates() -> None:
 
 
 def test_full_manifest_empty_stack(tmp_path) -> None:
-    ctx = InspectionContext(base_dir=tmp_path)
+    ctx = InspectionContext(base_dir=tmp_path, telemetry_url="http://127.0.0.1:1")
     m = joints.run_all(ctx)
     assert m.pid > 0
     assert len(m.results) == len(joints.SPECS)
@@ -31,7 +31,9 @@ def test_full_manifest_healthy_mock_stack(tmp_path, monkeypatch) -> None:
     from hanoon_prime.inspection import system as system_mod
     from hanoon_prime.memory import Journal
 
-    ctx = InspectionContext(base_dir=tmp_path, prev_journal_count=1)
+    ctx = InspectionContext(
+        base_dir=tmp_path, prev_journal_count=1, telemetry_url="http://127.0.0.1:1"
+    )
     ctx.memo["health"] = {
         "status": "ok",
         "connected": True,
@@ -41,6 +43,8 @@ def test_full_manifest_healthy_mock_stack(tmp_path, monkeypatch) -> None:
         "positions": [],
     }
     ctx.memo["snapshot"] = {"health": {}}
+    ctx.memo["positions"] = {"positions": [], "total_pnl": 0.0, "count": 0}
+    ctx.memo["account"] = {"account_summary": {}, "positions_open": 0}
     ctx.memo["runtime_state"] = {
         "brain_state": {
             "positions_open": 0,
