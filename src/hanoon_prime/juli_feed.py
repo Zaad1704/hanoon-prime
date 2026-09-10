@@ -68,9 +68,9 @@ def entry_bars(
 
 
 def check_tick_latency(t0: int, ticker: str) -> None:
-    """Warn on tick latency spikes (>1ms)."""
+    """Warn only on real stalls (>=25ms); sub-ms JIT noise is expected."""
     latency_us = (time.perf_counter_ns() - t0) / 1000.0
-    if latency_us > 1000.0:
+    if latency_us > 25_000.0:
         log.warning("Tick latency spike: %.0f us for %s", latency_us, ticker)
 
 

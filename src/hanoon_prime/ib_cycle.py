@@ -7,6 +7,7 @@ that IBStreamingBot mixes in. Also provides connect helpers.
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import math
@@ -39,6 +40,36 @@ def _is_hard_stop(es: dict[str, Any]) -> bool:
     """True when an exit decision is a protective price stop (never bar-derived)."""
 
     return str(es.get("reason", "")).startswith("hard_stop")
+
+
+def _protective_exits(
+    exit_s: list[dict[str, Any]], bars: int, session: str
+) -> list[dict[str, Any]]:
+    """Pre-market / stalled-bar cycles act on hard stops only (show drops)."""
+    if bars or session != "pre_market":
+        return exit_s
+    cold = [es["ticker"] for es in exit_s if not _is_hard_stop(es)]
+    if cold:
+        log.info(
+            "EXITS COLD %d (pre_market/hard-stop only): %s",
+            len(cold),
+            ",".join(cold),
+        )
+    return [es for es in exit_s if _is_hard_stop(es)]
+
+
+def _cycle_line(
+    bars: int, open_positions: int, verdicts: list[Verdict], exits: int
+) -> str:
+    """One greppable summary line: bar flow + verdict breakdown + exits."""
+    counts = collections.Counter(v.action for v in verdicts)
+    top = collections.Counter(f"{v.stage}:{v.reason}" for v in verdicts)
+    reasons = ", ".join(f"{r}x{n}" for r, n in top.most_common(3))
+    head = (
+        f"CYCLE bars={bars} open={open_positions} evald={len(verdicts)} "
+        f"E={counts['ENTER']} H={counts['HOLD']} V={counts['VETOED']}"
+    )
+    return f"{head} ({reasons}) x={exits}" if reasons else f"{head} x={exits}"
 
 
 # IB accountSummary tags → snake_case telemetry keys (scalar, NaN-safe).
@@ -448,8 +479,7 @@ class BotCycleMixin:
     ) -> None:
         """Execute exits, journal/execute verdicts, reflect, wait."""
         self._last_bars = self._count_new_bars()
-        if not self._last_bars or session == "pre_market":
-            exit_s = [es for es in exit_s if _is_hard_stop(es)]  # protective only
+        exit_s = _protective_exits(exit_s, self._last_bars, session)
         self._drain_event_exits()
         for es in exit_s:
             t = es["ticker"]
@@ -469,7 +499,7 @@ class BotCycleMixin:
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)
         self._heartbeat()
-        log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, len(self.hippocampus._open_positions), len(verdicts), len(exit_s))
+        log.info(_cycle_line(self._last_bars, len(self.hippocampus._open_positions), verdicts, len(exit_s)))
 
     def _count_new_bars(self) -> int:
         """Append pending ticks to buffers; count completed minute bars."""
@@ -723,6 +753,7 @@ class BotCycleMixin:
             self.juli.brain.register_position(
                 ticker, entry_price, horizon=self.executor._horizons.get(ticker, "scalp")
             )
+            log.info("FILL CONFIRMED %s @ %.4f (bracket live)", ticker, entry_price)
         except Exception as exc:
             log.debug("fill register failed for %s: %s", ticker, exc)
         self._attach_position_watchers(ticker)

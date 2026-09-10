@@ -26,6 +26,12 @@ MAX_CANDIDATES: int = 20
 EVAL_WINDOW: int = 4
 
 
+def _fmt_verdict(v: Verdict) -> str:
+    """One verdict as a compact, greppable log token."""
+    where = f"{v.stage}:{v.reason}" if v.stage else (v.reason or v.action)
+    return f"{v.ticker}:{v.action}({v.score:.3f})[{where}]"
+
+
 class JuliBrain:
     """Scanner + router. NeuromorphicBrain makes all decisions."""
 
@@ -67,10 +73,7 @@ class JuliBrain:
                 return [], []
             verdicts = self._eval_window(universe, snapshot, held_positions, session)
             exits = self._evaluate_exits(
-                set(held_positions or ()),
-                snapshot,
-                closing or set(),
-                pos_info or {},
+                set(held_positions or ()), snapshot, closing or set(), pos_info or {}
             )
             policy_exits = self.brain.state.get("policy_exits")  # array-safe list
             if policy_exits:
@@ -110,8 +113,9 @@ class JuliBrain:
             )
             for ticker in window
         ]
-        for v in verdicts:
-            self._recent_verdicts.append(v)
+        self._recent_verdicts.extend(verdicts)
+        if verdicts:
+            log.info("EVAL %s", " ".join(_fmt_verdict(v) for v in verdicts))
         return verdicts
 
     @staticmethod
@@ -146,8 +150,11 @@ class JuliBrain:
         if not self._candidates:
             return
         snaps = [get_snapshot(c.symbol) for c in self._candidates[:MAX_CANDIDATES]]
-        passed = sum(1 for s in snaps if s and s.get("last", 0) > 0)
-        log.info("SCREEN: %d/%d passed", passed, len(self._candidates))
+        log.info(
+            "SCREEN: %d/%d passed",
+            sum(1 for s in snaps if s and s.get("last", 0) > 0),
+            len(self._candidates),
+        )
         self.feed.publish_ref_prices(get_snapshot)
 
     def _maybe_allocate(self, positions: set[str]) -> None:
@@ -168,6 +175,7 @@ class JuliBrain:
     ) -> list[dict[str, Any]]:
         """Evaluate open positions for exit signals (direction-aware)."""
         exits = []
+        watched = []
         for t in positions:
             if t in closing:
                 continue
@@ -188,6 +196,12 @@ class JuliBrain:
             if sig.should_exit:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)
+            else:
+                watched.append(
+                    f"{t}@{snap['last']:.2f} {'LONG' if direction > 0 else 'SHORT'}"
+                )
+        if watched:
+            log.info("WATCH %s", " ".join(watched))
         return exits
 
     def on_trade_close(
