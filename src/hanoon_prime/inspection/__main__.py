@@ -17,7 +17,16 @@ from .checks import OK
 from .ctx import InspectionContext
 from .joints import JOINT_ORDER, run_all
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _resolve_root() -> Path:
+    """Repo root: the ancestor holding src/hanoon_prime (editable install)."""
+    for p in Path(__file__).resolve().parents:
+        if (p / "src" / "hanoon_prime").is_dir():
+            return p
+    return Path(__file__).resolve().parents[3]
+
+
+ROOT = _resolve_root()
 
 
 def _ctx() -> InspectionContext:
