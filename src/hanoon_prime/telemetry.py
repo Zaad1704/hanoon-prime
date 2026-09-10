@@ -845,7 +845,7 @@ class _H(BaseHTTPRequestHandler):
             "last_size": cls._num(tk.lastSize),
             "halted": bool(getattr(tk, "halted", 0)),
             "spread": spread,
-            "market_price": cls._num(getattr(tk, "marketPrice", lambda: None)()),
+            "market_price": cls._num(cls._safe(getattr(tk, "marketPrice", lambda: None), None)),
             "time": int(getattr(tk, "time", 0) or 0),
         }
 
