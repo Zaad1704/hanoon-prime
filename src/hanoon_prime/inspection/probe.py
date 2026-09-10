@@ -17,8 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from .ctx import InspectionContext
-from .probe_chain import journal, journal_chain_state, journal_tail
-from .probe_halim import halim_probe
+from .probe_chain import journal as journal
+from .probe_chain import journal_chain_state as journal_chain_state
+from .probe_chain import journal_tail as journal_tail
+from .probe_halim import halim_probe as halim_probe
 
 START_MARKER = re.compile(r"ib_adapter\s+Starting \(seed=")
 HEARTBEAT_MARKER = re.compile(r"ib_cycle\s+HEARTBEAT")
