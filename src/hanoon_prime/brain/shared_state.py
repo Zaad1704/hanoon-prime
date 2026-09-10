@@ -58,6 +58,7 @@ class BrainState:
             "policy_exits": [],
             "account_feed": {},
             "consecutive_losses": 0,
+            "positions_open": 0,
             "timestamp": 0.0,
         }
 
