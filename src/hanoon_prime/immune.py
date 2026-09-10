@@ -52,6 +52,7 @@ ENTRY_REUSE_COOLDOWN_SEC: float = 60.0  # min gap re-entering same ticker
 
 # ── Direction ─────────────────────────────────────────────────────────
 SHORT_ALLOWED: bool = True  # dual-screen: LONG + SHORT
+DIRECTION_MIN_SCORE: float = 0.02  # |score| floor; below = no_signal, not a veto
 
 # ── Position sizing (CONTRACT.md 194-196) ─────────────────────────────
 MAX_POSITION_NOTIONAL: float = 5_000.0  # $5,000 max notional per trade

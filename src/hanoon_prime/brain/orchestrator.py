@@ -16,6 +16,7 @@ from typing import Any, Optional
 from ..cortex import Cortex
 from ..edge import score_to_win_prob
 from ..hippocampus import Hippocampus
+from ..immune import DIRECTION_MIN_SCORE
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from ..types import FillInfo
 from . import horizons
@@ -293,7 +294,7 @@ class NeuromorphicBrain:
             direction = int(result.get("direction", 0))
             score = float(result.get("score", 0.0))
             confidence = float(result.get("confidence", 0.5))
-        if direction == 0:
+        if direction == 0 or abs(score) < DIRECTION_MIN_SCORE:
             return Verdict(
                 ticker=ticker, action=HOLD, reason="no_signal", stage="pipeline"
             )

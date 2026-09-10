@@ -81,6 +81,17 @@ def test_direction_vetoed():
     assert v.action == VETOED and v.reason == "direction_rejected"
 
 
+def test_zero_conviction_direction_is_no_signal():
+    """A direction with |score| below the conviction floor is a HOLD,
+    not a confident-sounding veto — no short/long claimed at score 0.000."""
+    b = _brain()
+    b.tick = lambda alpha, ticker, **kw: _fake_result(
+        side="SELL", direction=-1, score=0.0
+    )
+    v = b.decide_entry("NVD", _snap(), {}, "rth")
+    assert v.action == HOLD and v.reason == "no_signal"
+
+
 def test_no_signal_is_hold():
     b = _brain()
     b.tick = lambda alpha, ticker, **kw: _fake_result(
