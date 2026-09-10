@@ -1,21 +1,12 @@
 """hanoon_prime.cortex — signal scoring and entry verdict.
 
-R1: This is the ONLY module that produces verdict strings (BUY, SELL, HOLD).
-All other modules compute indicators or probabilities. Validated by
-tests/test_contract.py.
+R1: ONLY module that produces verdict strings (BUY, SELL, HOLD).
+Validated by tests/test_contract.py.
 
-Architecture (simplified from the 880-line thinker.py):
-  1. Receive raw indicators (core 5 + tech set from cerebellum/indicators)
-  2. Z-score normalize each against rolling history (scale-invariant)
-  3. score = tanh(Σ w_i × z_i)  → symmetric [-1, +1]
-  4. Verdict: BUY if score > +threshold, SELL if score < -threshold
-
-Learning integration (v2.1): the Cortex scores EVERY weighted indicator,
-not just the core 5. Weights are learned across all 27 keys by
-brain/reflection.py and hot-swapped here via ``set_weights`` after each
-trade close — the live tanh therefore evolves with every trade. Backtests
-keep the historical 5-core behavior via ``core_weights_only=True`` so the
-calibration pipeline and legacy backtests are unchanged.
+Pipeline: indicators → z-score normalize → tanh(Σ w_i z_i / Σ |w_i|)
+→ BUY if score > +threshold, SELL if score < -threshold.
+Weights are learned across all 27 keys and hot-swapped after every trade
+close; backtests keep the legacy 5-core path via ``core_weights_only=True``.
 """
 
 from __future__ import annotations
@@ -139,27 +130,30 @@ class Cortex:
     def _tanh_score(
         self, z: dict[str, float], present: set[str] | None = None
     ) -> float:
-        """score = tanh(Σ w_i × z_i / Σ w_i) over available indicators.
+        """score = tanh(Σ w_i × z_i / Σ |w_i|) over available indicators.
 
         Iterates the WEIGHTS (not a hard-coded name list) so the 22 tech
-        indicators participate in the score and learned weight drift is
-        expressed. The sum is renormalized over indicators PRESENT in the
-        current alpha (a proper weighted average), so partial snapshots —
-        e.g. the 5-core fallback when tech indicators lack data — are not
-        diluted by absent keys. With the full core-5 weight set and all 5
-        present this reproduces the legacy sum exactly (Σw = 1.0).
-        In core_weights_only mode (backtests, calibration) only the
-        historical 5 core names contribute.
+        indicators participate and learned weight drift is expressed.
+        Normalization is over the indicators PRESENT in the current alpha,
+        so partial snapshots are not diluted by absent keys.
+
+        Dividing by Σ|w| (not signed Σw) is deliberate: negative learned
+        weights stay meaningful, a negative-sum regime budget cannot flip the
+        score sign, and a drifted budget cannot zero it. The previous signed
+        guard (``total_w <= 1e-12 → 0.0``) was triggered by any negative-sum
+        vector — e.g. a regime vector at -2.86 — forcing a zeroed score the
+        orchestrator read as SHORT. Only a genuinely degenerate budget
+        (all weights ~0) now forces the score flat.
         """
         names = INDICATOR_NAMES if self._core_weights_only else tuple(self._weights)
         keys = tuple(n for n in names if present is None or n in present)
         if not keys:
             return 0.0
         weighted = sum(float(self._weights.get(n, 0.0)) * z.get(n, 0.0) for n in keys)
-        total_w = sum(float(self._weights.get(n, 0.0)) for n in keys)
-        if total_w <= 1e-12:
+        total_abs_w = sum(abs(float(self._weights.get(n, 0.0))) for n in keys)
+        if total_abs_w <= 1e-12:
             return 0.0
-        return float(math.tanh(weighted / total_w))
+        return float(math.tanh(weighted / total_abs_w))
 
     def _verdict(self, score: float) -> tuple[str, int]:
         """Dual-direction verdict: BUY/SELL/HOLD."""

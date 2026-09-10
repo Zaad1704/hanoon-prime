@@ -155,6 +155,23 @@ class TestRegimeWeights:
         assert snap["range"]["n"] == 1
         assert snap["range"]["active"] is False
 
+    def test_learn_drift_stays_in_budget(self):
+        """A losing streak can never drift a regime vector into corruption.
+
+        The live `range` vector had drifted to signed_sum ≈ -3.14 (~4.1
+        absolute) with per-weight values at -0.55/-0.79, which zeroed the
+        cortex score via the old signed-sum guard. The enforcer must keep
+        the budget near |sum| ≈ 1 with every weight in [-0.20, +0.20].
+        """
+        rw = RegimeWeights()
+        for _ in range(REGIME_MIN_TRADES + 200):
+            rw.learn("range", {"momentum": -0.8, "vwap_deviation": -0.8}, False, -1)
+        vec = rw.weights_for("range")
+        assert vec is not None
+        total_abs = sum(abs(v) for v in vec.values())
+        assert 0.80 <= total_abs <= 1.50, f"regime budget drifted: {total_abs:.3f}"
+        assert all(-0.20 <= v <= 0.20 for v in vec.values())
+
 
 # ── Orchestrator fan-out wiring ──────────────────────────────────────
 

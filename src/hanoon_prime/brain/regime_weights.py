@@ -7,8 +7,10 @@ Reflector's asymmetric gradient only for the regime the trade CLOSED
 in. A regime vector applies (blended) once it has REGIME_MIN_TRADES
 real closes; below that the structural default applies.
 
-Single-writer: the orchestrator's close path. Bounded by the same
-WEIGHT_MIN/MAX clamp the Reflector uses.
+Single-writer: the orchestrator's close path. Every vector is routed
+through the weight enforcer on learn and on load — clamped to the
+enforcer band ([-0.20, +0.20]) and renormalized to |sum| ≈ 1 so a drifted
+regime budget can never zero or sign-flip the cortex score.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from .config import (
     WEIGHT_MIN,
 )
 from .learning_config import REGIME_FILE, REGIME_MIN_TRADES
+from .weight_enforcer import get_enforcer
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ class RegimeWeights:
                 vec[key] = max(self._wmin, min(self._wmax, vec[key] + delta))
             for key in vec:
                 vec[key] *= self._decay
+            get_enforcer().repair_on_load(vec)
             self._vectors[regime] = vec
             self._counts[regime] = self._counts.get(regime, 0) + 1
             self._save()
@@ -90,20 +94,34 @@ class RegimeWeights:
             }
 
     def _load(self) -> None:
-        """Load persisted vectors; corrupt/missing file → fresh."""
+        """Load persisted vectors; corrupt/missing file → fresh.
+
+        Vectors are routed through the weight enforcer on load so drifted
+        budgets (unbounded negative sums back-fill the cortex with a corrupt
+        vector that zeroes the score via the old signed-sum guard) are
+        clamped to the enforcer band and renormalized to |sum| ≈ 1 before
+        they can reach the cortex. Repaired files are re-persisted.
+        """
         if not self._path.exists():
             return
+        repaired_any = False
         try:
             d = json.loads(self._path.read_text())
             for regime, vec in d.get("vectors", {}).items():
                 if isinstance(vec, dict) and vec:
-                    self._vectors[regime] = {
+                    cleaned = {
                         k: float(v) for k, v in vec.items() if k in DEFAULT_WEIGHTS
                     }
+                    repaired = get_enforcer().repair_on_load(cleaned)
+                    self._vectors[regime] = cleaned
+                    repaired_any = repaired_any or repaired
             for regime, n in d.get("counts", {}).items():
                 self._counts[regime] = int(n)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             log.warning("Regime weights load failed (fresh): %s", exc)
+        if repaired_any:
+            log.info("Regime weight vectors repaired on load; persisting")
+            self._save()
 
     def _save(self) -> None:
         """Persist atomically (tmp + replace)."""

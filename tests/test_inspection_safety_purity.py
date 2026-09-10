@@ -1,5 +1,6 @@
 """safety + purity joint checks."""
-from hanoon_prime.inspection import purity, safety
+from hanoon_prime.brain.config import DEFAULT_WEIGHTS
+from hanoon_prime.inspection import purity, safety, weight_purity
 from hanoon_prime.inspection.checks import FAIL, OK, WARN
 from hanoon_prime.inspection.ctx import InspectionContext
 
@@ -132,3 +133,56 @@ def test_brain_fields_bounded(tmp_path) -> None:
         }
     }
     assert purity.brain_fields_bounded(ctx).status == FAIL
+
+
+def _regime_counts(active: int, inactive: int) -> dict[str, int]:
+    return {"range": active, "trend_up": inactive}
+
+
+def test_regime_weights_healthy_ok(tmp_path) -> None:
+    ctx = InspectionContext(base_dir=tmp_path)
+    healthy = {k: max(-0.1, min(0.1, v)) for k, v in DEFAULT_WEIGHTS.items()}
+    ctx.memo["regime_weights"] = {
+        "vectors": {"range": healthy},
+        "counts": _regime_counts(active=40, inactive=3),
+    }
+    assert weight_purity.regime_weights_bounded(ctx).status == OK
+
+
+def test_regime_weights_drift_fails(tmp_path) -> None:
+    """The live incident vector (abs_sum ≈ 4.16, weights at -0.55) must FAIL."""
+    ctx = InspectionContext(base_dir=tmp_path)
+    drifted = dict(DEFAULT_WEIGHTS)
+    drifted.update(
+        {"adx": -0.55, "vw_macd_hist": -0.45, "volume_profile_proximity": -0.3}
+    )
+    ctx.memo["regime_weights"] = {
+        "vectors": {"range": drifted},
+        "counts": _regime_counts(active=40, inactive=3),
+    }
+    assert weight_purity.regime_weights_bounded(ctx).status == FAIL
+
+
+def test_cortex_score_degenerate_ok(tmp_path) -> None:
+    ctx = InspectionContext(base_dir=tmp_path)
+    ctx.memo["juli_state"] = {"weights": dict(DEFAULT_WEIGHTS)}
+    ctx.memo["regime_weights"] = {"vectors": {}, "counts": {}}
+    assert weight_purity.cortex_score_degenerate(ctx).status == OK
+
+
+def test_cortex_score_collapse_fails(tmp_path) -> None:
+    """A budget pinned at ~0 forces the score to 0.0 → the brain is blind."""
+    ctx = InspectionContext(base_dir=tmp_path)
+    ctx.memo["juli_state"] = {"weights": {k: 0.0 for k in DEFAULT_WEIGHTS}}
+    ctx.memo["regime_weights"] = {"vectors": {}, "counts": {}}
+    assert weight_purity.cortex_score_degenerate(ctx).status == FAIL
+
+
+def test_cortex_negative_polarity_warns(tmp_path) -> None:
+    """Non-positive signed sum flags the exact corruption the guard used to hit."""
+    ctx = InspectionContext(base_dir=tmp_path)
+    ctx.memo["juli_state"] = {"weights": {k: -v for k, v in DEFAULT_WEIGHTS.items()}}
+    ctx.memo["regime_weights"] = {"vectors": {}, "counts": {}}
+    result = weight_purity.cortex_score_degenerate(ctx)
+    assert result.status == WARN
+    assert "non-positive signed" in result.detail

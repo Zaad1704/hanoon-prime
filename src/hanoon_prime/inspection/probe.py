@@ -121,6 +121,11 @@ def juli_state(ctx: InspectionContext) -> dict[str, Any]:
     return _surface(ctx, "juli_state", path=ctx.juli_state_path)
 
 
+def regime_weights(ctx: InspectionContext) -> dict[str, Any]:
+    """Persisted juli per-regime weight vectors."""
+    return _surface(ctx, "regime_weights", path=ctx.regime_weights_path)
+
+
 def ledger(ctx: InspectionContext) -> dict[str, Any]:
     """Guardian production-state ledger."""
     return _surface(ctx, "ledger", path=ctx.state_file)

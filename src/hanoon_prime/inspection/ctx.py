@@ -74,6 +74,11 @@ class InspectionContext:
         return self.runtime / "juli_state.json"
 
     @property
+    def regime_weights_path(self) -> Path:
+        """Juli per-regime weight vectors."""
+        return self.runtime / "juli_regime_weights.json"
+
+    @property
     def realized_path(self) -> Path:
         """Juli realized-PnL history."""
         return self.runtime / "juli_realized.json"

@@ -64,6 +64,7 @@ def test_full_manifest_healthy_mock_stack(tmp_path, monkeypatch) -> None:
         "weights": {f"w{i}": 0.1 for i in range(20)},
         "episodes": [{"ticker": "NVDA", "vector": []}],
     }
+    ctx.memo["regime_weights"] = {"vectors": {}, "counts": {}}
     ctx.memo["ledger"] = {"notify": {"last_ok": 1e20}}
     j = Journal(ctx.journal_path)
     j.append({"event": "verdict", "action": "HOLD", "score": 0.5, "ticker": "NVDA"})

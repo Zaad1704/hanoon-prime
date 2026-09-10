@@ -48,6 +48,7 @@ from .system import (
     monitor_alive,
     single_bot,
 )
+from .weight_purity import cortex_score_degenerate, regime_weights_bounded
 
 JOINT_ORDER = [
     "processes",
@@ -104,6 +105,10 @@ SPECS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec("purity", "no_test_episodes", no_test_episodes, hard=True),
     CheckSpec("purity", "weights_finite_in_band", weights_finite_in_band, hard=True),
+    CheckSpec("purity", "regime_weights_bounded", regime_weights_bounded, hard=True),
+    CheckSpec(
+        "purity", "cortex_score_degenerate", cortex_score_degenerate, report=True
+    ),
     CheckSpec("purity", "brain_fields_bounded", brain_fields_bounded, hard=True),
     CheckSpec("execution_oracle", "enters_minted", enters_minted, report=True),
     CheckSpec("execution_oracle", "closes_reconciled", closes_reconciled, report=True),
