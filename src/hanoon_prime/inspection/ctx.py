@@ -7,6 +7,7 @@ tick touches each source (log, json files, journal, HTTP) only once.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,21 @@ class InspectionContext:
     halim_url: str = "http://127.0.0.1:8765"
     prev_journal_count: int | None = None
     heal_enabled: bool = True
+    halim_start_script: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "halim_start.sh"
+    )
+    launch_detached_script: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "launch_detached.py"
+    )
+    watchdog_script: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "ib_gateway_watchdog.py"
+    )
     memo: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -71,6 +87,24 @@ class InspectionContext:
     def state_file(self) -> Path:
         """Guardian production-state ledger."""
         return self.base_dir / "scripts" / "production_state.json"
+
+    @property
+    def ledger_path(self) -> Path:
+        """Shared production-state ledger (inspection + guardian)."""
+        return self.base_dir / "scripts" / "production_state.json"
+
+    def ledger(self) -> dict[str, Any]:
+        """Shared production-state ledger, read fresh each call."""
+        try:
+            raw = self.ledger_path.read_text()
+        except FileNotFoundError:
+            raw = ""
+        data: dict[str, Any] = {}
+        if raw.strip():
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                data = loaded
+        return data
 
     @property
     def venv_python(self) -> Path:

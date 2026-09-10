@@ -54,6 +54,15 @@ def _print_manifest(args: argparse.Namespace) -> int:
     return 3
 
 
+def _print_heal(args: argparse.Namespace) -> int:
+    from .heal import heal as heal_actions
+
+    manifest = run_all(_ctx())
+    for line in heal_actions(_ctx(), manifest, dry_run=args.dry_run):
+        sys.stdout.write(line + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv and dispatch to the requested inspection subcommand."""
     ap = argparse.ArgumentParser(description="Inside Man facility inspection")
@@ -61,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     pm = sub.add_parser("manifest", help="print the full check manifest")
     pm.add_argument("--json", action="store_true")
     pm.set_defaults(func=_print_manifest)
+    ph = sub.add_parser("heal", help="gated auto-heal of mechanical services")
+    ph.add_argument(
+        "--dry-run", action="store_true", help="show candidate actions, take none"
+    )
+    ph.set_defaults(func=_print_heal)
     args = ap.parse_args(argv)
     return int(args.func(args))
 
