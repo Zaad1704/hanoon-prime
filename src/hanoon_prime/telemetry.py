@@ -276,6 +276,11 @@ def _epoch_seconds(raw: Any) -> int | None:
     return int(n) if n is not None else None
 
 
+def _is_async(v: Any) -> bool:
+    """Detect unawaited coroutines from ib_insync async-mode calls."""
+    return hasattr(v, "close") and hasattr(v, "__await__")
+
+
 def _ib_fill_rows(trade: Any) -> list[dict[str, Any]]:
     """Fill executions for one IB Trade."""
     rows: list[dict[str, Any]] = []
@@ -821,9 +826,13 @@ class _H(BaseHTTPRequestHandler):
     def _safe(fn: Any, default: Any) -> Any:
         """Call an ib_insync accessor; return *default* on any failure."""
         try:
-            return fn()
+            result = fn()
         except Exception:
             return default
+        if _is_async(result):
+            result.close()
+            return default
+        return result
 
     @staticmethod
     def _num(v: Any) -> float | None:
@@ -939,7 +948,8 @@ class _H(BaseHTTPRequestHandler):
         """Per-account raw summary tag values."""
         summary: dict[str, dict[str, Any]] = {}
         for acct in accounts[:2]:
-            items = self._safe(lambda a=acct: list(ib.accountSummary(a)), [])
+            raw = self._safe(lambda a=acct: ib.accountSummary(a), None)
+            items = list(raw) if raw is not None else []
             vals: dict[str, Any] = {}
             for it in items:
                 v = self._num(getattr(it, "value", None))
