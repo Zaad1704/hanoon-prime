@@ -23,7 +23,7 @@ def lifecycle_verdict(ctx: InspectionContext) -> CheckResult:
     if _inactive(ctx):
         return _stage_result("verdict", True, "session inactive", {})
     v = _get(ctx, "/verdicts")
-    rows = v.get("verdicts") or []
+    rows = v.get("verdicts") or []  # array-safe
     if not rows:
         return _stage_result(
             "verdict",
@@ -58,16 +58,15 @@ def lifecycle_execution(ctx: InspectionContext) -> CheckResult:
         return _stage_result("execution", True, "session inactive", {})
     ib = _get(ctx, "/ib")
     pos = _get(ctx, "/positions")
-    ib_positions = [
-        p for p in (ib.get("positions") or []) if abs(p.get("position") or 0) > 0
-    ]
-    surface = pos.get("positions") or []
+    ib_pos_raw = ib.get("positions") or []  # array-safe
+    ib_positions = [p for p in ib_pos_raw if abs(p.get("position") or 0) > 0]
+    surface = pos.get("positions") or []  # array-safe
     ib_syms = {p.get("symbol") for p in ib_positions if p.get("symbol")}
     surface_syms = {
         p.get("ticker") for p in surface if isinstance(p, dict) and p.get("ticker")
     }
     drift = ib_syms ^ surface_syms
-    fills = ib.get("executions") or []
+    fills = ib.get("executions") or []  # array-safe
     sorted_drift = sorted(drift, key=str)
     return _stage_result(
         "execution",

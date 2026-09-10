@@ -102,7 +102,7 @@ def lifecycle_seed(ctx: InspectionContext) -> CheckResult:
     if _inactive(ctx):
         return _stage_result("seed", True, "session inactive", {})
     h = health(ctx)
-    tickers = h.get("tickers") or []
+    tickers = h.get("tickers") or []  # array-safe
     if not tickers:
         return _stage_result(
             "seed", False, "no tickers subscribed", {"tickers": []}, warn_only=True
@@ -127,7 +127,7 @@ def lifecycle_stream(ctx: InspectionContext) -> CheckResult:
         return _stage_result(
             "stream", False, "gateway disconnected", {"error": ib.get("error")}
         )
-    tickers = ib.get("tickers") or []
+    tickers = ib.get("tickers") or []  # array-safe
     if not tickers:
         return _stage_result(
             "stream", False, "no live tick objects", {}, warn_only=True

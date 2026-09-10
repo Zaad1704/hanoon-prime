@@ -121,7 +121,9 @@ def _sysctl_boot_time() -> float:
     """macOS boot time via ``sysctl kern.boottime``."""
     out = subprocess.run(
         ["sysctl", "-n", "kern.boottime"],
-        capture_output=True, text=True, timeout=2,
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     for part in out.stdout.replace(",", " ").split():
         if part.startswith("sec="):
@@ -195,23 +197,24 @@ def _macos_mem_stats() -> dict[str, Any]:
     """macOS memory via ``sysctl hw.memsize`` + ``vm_stat``."""
     out = subprocess.run(
         ["sysctl", "-n", "hw.memsize"],
-        capture_output=True, text=True, timeout=2,
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     total_b = int(out.stdout.strip())
     total_mb = round(total_b / 1048576, 1)
-    vm = subprocess.run(
-        ["vm_stat"], capture_output=True, text=True, timeout=2
-    )
+    vm = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2)
     page = 16384
     used_pages = 0
     for line in vm.stdout.splitlines():
-        if line.startswith(
-            ("Pages active", "Pages wired down", "Pages compressed")
-        ):
+        if line.startswith(("Pages active", "Pages wired down", "Pages compressed")):
             used_pages += int(line.split(":")[1].strip().rstrip("."))
     used_mb = round(used_pages * page / 1048576, 1)
-    return {"mem_total_mb": total_mb, "mem_used_mb": used_mb,
-            "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None}
+    return {
+        "mem_total_mb": total_mb,
+        "mem_used_mb": used_mb,
+        "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None,
+    }
 
 
 def _linux_mem_stats() -> dict[str, Any]:
@@ -225,8 +228,11 @@ def _linux_mem_stats() -> dict[str, Any]:
     avail_kb = mem.get("MemAvailable", 0)
     total_mb = round(total_kb / 1024, 1)
     used_mb = round((total_kb - avail_kb) / 1024, 1)
-    return {"mem_total_mb": total_mb, "mem_used_mb": used_mb,
-            "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None}
+    return {
+        "mem_total_mb": total_mb,
+        "mem_used_mb": used_mb,
+        "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None,
+    }
 
 
 def _ib_order_meta(order: Any, contract: Any) -> dict[str, Any]:
@@ -346,9 +352,7 @@ class _H(BaseHTTPRequestHandler):
             hit = self.extra_cache.get(path)
             if hit is not None and time.time() - hit[0] < ttl:
                 return hit[1]
-        payload = cast(
-            dict[str, Any], getattr(self, ROUTES_GET[path])()
-        )
+        payload = cast(dict[str, Any], getattr(self, ROUTES_GET[path])())
         with lock:
             self.extra_cache[path] = (time.time(), payload)
         return payload
@@ -699,8 +703,12 @@ class _H(BaseHTTPRequestHandler):
     def _host_stats() -> dict[str, Any]:
         """Host-wide vitals via ps/sysctl — best-effort, nulls on miss."""
         stats: dict[str, Any] = {
-            "mem_total_mb": None, "mem_used_mb": None, "mem_pct": None,
-            "cpu_count": os.cpu_count(), "uptime_s": None, "proc_count": None,
+            "mem_total_mb": None,
+            "mem_used_mb": None,
+            "mem_pct": None,
+            "cpu_count": os.cpu_count(),
+            "uptime_s": None,
+            "proc_count": None,
         }
         stats.update(_proc_count())
         stats["uptime_s"] = _uptime_s()
@@ -889,9 +897,7 @@ class _H(BaseHTTPRequestHandler):
         ]
         out["orders"] = self._ib_order_rows(ib)
         out["executions"] = self._ib_exec_rows(ib)
-        out["errors"] = self._safe(
-            lambda: list(ib.client._logger.errors)[-20:], []
-        )
+        out["errors"] = self._safe(lambda: list(ib.client._logger.errors)[-20:], [])
         out["error"] = None
         return out
 
@@ -900,13 +906,11 @@ class _H(BaseHTTPRequestHandler):
         accounts = self._safe(lambda: list(ib.managedAccounts()), [])
         return {
             "client_id": self._safe(lambda: ib.client.clientId, None),
-            "server_version": self._safe(
-                lambda: ib.client.serverVersion, None
-            ),
+            "server_version": self._safe(lambda: ib.client.serverVersion, None),
             "conn_time": self._safe(
-                lambda: int(ib.client.connTime.timestamp())
-                if ib.client.connTime
-                else None,
+                lambda: (
+                    int(ib.client.connTime.timestamp()) if ib.client.connTime else None
+                ),
                 None,
             ),
             "accounts": accounts,
@@ -972,9 +976,8 @@ class _H(BaseHTTPRequestHandler):
                     "exec_id": getattr(ex, "execId", ""),
                     "order_id": getattr(ex, "orderId", None),
                     "perm_id": getattr(ex, "permId", None),
-                    "symbol": getattr(
-                        getattr(ex, "contract", None), "symbol", ""
-                    ) or "",
+                    "symbol": getattr(getattr(ex, "contract", None), "symbol", "")
+                    or "",
                     "time": _format_exec_time(ex),
                     "side": getattr(ex, "side", "") or "",
                     "shares": self._num(getattr(ex, "shares", None)),
@@ -1118,7 +1121,9 @@ class SseRegistry:
         """Push a snapshot to every connected client. Returns delivered count."""
         if not self._clients:
             return 0
-        frame = f"event: snapshot\ndata: {json.dumps(snapshot, default=str)}\n\n".encode()
+        frame = (
+            f"event: snapshot\ndata: {json.dumps(snapshot, default=str)}\n\n".encode()
+        )
         dead: list[_H] = []
         with self._lock:
             clients = list(self._clients)
@@ -1214,7 +1219,9 @@ class TelemetryAPI:
         self._registry.broadcast(snap)
 
     def _refresh_loop(self) -> None:
-        log.info("Telemetry snapshot refresher started (%.1fs cadence)", SNAPSHOT_INTERVAL)
+        log.info(
+            "Telemetry snapshot refresher started (%.1fs cadence)", SNAPSHOT_INTERVAL
+        )
         while not self._stop.is_set():
             t0 = time.time()
             self._build_and_cache()
