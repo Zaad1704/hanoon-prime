@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
 from pathlib import Path
@@ -948,7 +949,9 @@ class _H(BaseHTTPRequestHandler):
         """Per-account raw summary tag values."""
         summary: dict[str, dict[str, Any]] = {}
         for acct in accounts[:2]:
-            raw = self._safe(lambda a=acct: ib.accountSummary(a), None)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                raw = self._safe(lambda a=acct: ib.accountSummary(a), None)
             items = list(raw) if raw is not None else []
             vals: dict[str, Any] = {}
             for it in items:
