@@ -13,17 +13,15 @@ ROLE 1 — VERIFY (deterministic, HALIM cannot override):
   - learning state must stay hermetically test-free
   Any violation is a FAIL (exit 2) and resets the clean-day streak.
 
-ROLE 2 — CATCH BUGS (anomalies; do NOT reset the streak):
-  - decision-path sanity: finite scores in the last N journal verdicts,
-    valid verdict actions, weighted carriers sane, brain-state fields typed
-    and bounded
-  - operational noise funnel: ERROR lines and pipeline_incidents since start,
-    minus a known-bug allowlist
-  - halt/block markers (SAFETY HALT, LEARN BLOCKED)
-  Anomalies go to HALIM, which emits a bug report (root-cause hypothesis,
-  severity, suggested fix); the user is notified once per signature per day
-  via Telegram (reusing hanoon_prime._telegram). If Telegram is not
-  configured, findings are recorded in the ledger instead.
+ROLE 2 — CATCH (anomalies; do NOT reset the streak):
+  - decision-path sanity and operational noise funnel, unified into the
+    hanoon_prime.inspection manifest: finite verdict scores, valid actions,
+    weighted carriers sane, brain-state fields typed+bounded, error/halt
+    markers since start, oracle reconcile gaps.
+  - FAIL-grade anomalies page once per signature per day via Telegram
+    (reusing hanoon_prime._telegram); WARN-grade ones are recorded in the
+    ledger for the 23:50 EOD digest. If Telegram is not configured, findings
+    are recorded in the ledger instead.
 
 LIFECYCLE: run by scripts/start.command alongside the bot; stop.command tears
 it down. When the bot is unreachable the daemon idles (no FAIL flood, no
@@ -49,7 +47,13 @@ import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
+
+from hanoon_prime.inspection.checks import FAIL, WARN
+from hanoon_prime.inspection.ctx import InspectionContext
+from hanoon_prime.inspection.digest import digest_send
+from hanoon_prime.inspection.joints import Manifest, run_all
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(BASE_DIR, "src")
@@ -82,7 +86,6 @@ NOISE_ERROR = re.compile(
     r"cancelMktData|latency spike|Max retries exceeded|ib_insync|"
     r"TWS error 1101|EClient error|Connection reset|BadMessage"
 )
-DRAWDOWN_LIMIT = 0.01
 CLOSES_TARGET = 200
 DAYS_TARGET = 10
 CYCLE_STALE_SEC = 300  # a live cycle every ~3s; 5 min silence = pipeline stall
@@ -354,114 +357,25 @@ def _collect() -> dict[str, Any]:
     }
 
 
-def _hard_rules(m: dict[str, Any]) -> list[tuple[str, str]]:
-    fails = []
-    if not m["health_ok"]:
-        fails.append(
-            ("health", f"status={m['health_status']} connected={m['connected']}")
-        )
-    if not m["snapshot_ok"]:
-        fails.append(("telemetry_stall", "snapshot empty/unreachable"))
-    if m["heartbeat_age_s"] is not None and m["heartbeat_age_s"] > CYCLE_STALE_SEC:
-        fails.append(
-            ("pipeline_stall", f"last HEARTBEAT {m['heartbeat_age_s']:.0f}s ago")
-        )
-    if m["counters"]["guard"]:
-        fails.append(("netting_guard", f"{m['counters']['guard']} trigger(s)"))
-    if m["counters"]["tracebacks"]:
-        fails.append(("tracebacks", f"{m['counters']['tracebacks']} Traceback(s)"))
-    if m["equity"] > 0 and m["daily_pnl"] <= -DRAWDOWN_LIMIT * m["equity"]:
-        pct = 100 * -m["daily_pnl"] / m["equity"]
-        fails.append(
-            ("drawdown", f"{m['daily_pnl']:.2f} = -{pct:.2f}% of equity (floor -1.0%)")
-        )
-    if m["polluted_episodes"]:
-        fails.append(("learning_purity", f"{m['polluted_episodes']} test episode(s)"))
-    return fails
-
-
-def _anomalies(m: dict[str, Any]) -> list[tuple[str, str]]:
-    """Non-streak-resetting findings; the bug-catcher feed."""
-    out = []
-    if m["field_issues"]:
-        out.append(("brain_state", "; ".join(m["field_issues"])))
-    if m["weights_issue"]:
-        out.append(("weights", m["weights_issue"]))
-    if m["journal"]["nan_scores"]:
-        out.append(
-            ("scores_nan", f"{m['journal']['nan_scores']}/{m['journal']['sample']} NaN")
-        )
-    if m["journal"]["invalid_actions"]:
-        out.append(("verdict_actions", f"{m['journal']['invalid_actions']} invalid"))
-    if m["errors"]["problems"]:
-        out.append(("log_errors", f"{m['errors']['problems']} non-noise ERROR lines"))
-    if m["errors"]["snapshot_fails"]:
-        out.append(
-            (
-                "telemetry_snapshot",
-                f"{m['errors']['snapshot_fails']} failed snapshot rebuild(s)",
-            )
-        )
-    if m["incidents"]:
-        out.append(("journal_incidents", f"{m['incidents']} pipeline_incident(s)"))
-    if m["counters"]["safety_halt"]:
-        out.append(("safety_halt", f"{m['counters']['safety_halt']} trip(s)"))
-    if m["counters"]["learn_blocked"]:
-        out.append(
-            ("learn_blocked", f"{m['counters']['learn_blocked']} blocked close(s)")
-        )
-    return out
-
-
-def _halim_call_prompt(m: dict[str, Any]) -> str:
-    return (
-        "You are HALIM, safety auditor AND bug catcher for the hanoon-prime "
-        "PAPER bot. Using ONLY this real runtime data:\n"
-        f"{json.dumps(m, default=str)}\n\n"
-        "Return EXACTLY this JSON, no prose:\n"
-        '{"verdict": "PASS"|"FAIL", "gates": {"gate1": "GO"|"HOLD"}, '
-        '"issues": [{"gate": "<gate1|health|pipeline|halim|system>", '
-        '"risk": "critical|high|medium|low", '
-        '"detail": "<what the data shows>"}], '
-        '"bug_report": {"found": true|false, "summary": "<what broke>", '
-        '"root_cause": "<hypothesis>", "severity": "critical|high|medium|low", '
-        '"suggested_fix": "<one-line actionable fix>"}}'
+def _ctx() -> InspectionContext:
+    """Probe context for this checkout; the daemon reports, never heals."""
+    return InspectionContext(
+        base_dir=Path(BASE_DIR),
+        telemetry_url=TELEMETRY_URL,
+        halim_url=HALIM_URL,
+        heal_enabled=False,
     )
 
 
-def _halim_call(metrics: dict[str, Any]) -> dict[str, Any]:
-    req = urllib.request.Request(
-        f"{HALIM_URL}/v1/complete",
-        data=json.dumps(
-            {
-                "prompt": _halim_call_prompt(metrics),
-                "purpose": "production_readiness",
-                "priority": "high",
-            }
-        ).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        result: dict[str, Any] = json.loads(resp.read().decode())
-    text = result.get("text", "")
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < 0:
-        return {}
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except (ValueError, TypeError):
-        return {}
-    verdict = str(parsed.get("verdict", "FAIL")).upper()
-    gates = parsed.get("gates") or {}
-    issues = parsed.get("issues") or []
-    bug = parsed.get("bug_report") or {}
-    return {
-        "verdict": verdict if verdict in ("PASS", "FAIL") else "FAIL",
-        "gates": {k: g for k, g in gates.items() if g in ("GO", "HOLD")},
-        "issues": issues if isinstance(issues, list) else [],
-        "bug_report": bug if isinstance(bug, dict) else {},
-    }
+def _decide(manifest: Manifest) -> int:
+    """0 PASS. 2 hard FAIL. 3 HALIM down. 4 FAIL-grade anomalies."""
+    if any(r.joint == "halim" and r.status == FAIL for r in manifest.results):
+        return 3
+    if manifest.hard_fails:
+        return 2
+    if any(r.status == FAIL for r in manifest.anomalies):
+        return 4
+    return 0
 
 
 def _halim_probe() -> str:
@@ -545,24 +459,22 @@ def _roll_streak(wise: dict[str, Any], today: date) -> int:
     return wise["clean_days_streak"]
 
 
+def _record_mild(today_s: str, ledger: dict[str, Any], m: Manifest) -> None:
+    """WARN-grade anomalies: recorded for the digest, never paged."""
+    mild = [r for r in m.anomalies if r.status == WARN]
+    if not mild:
+        return
+    day = ledger.setdefault("findings", {}).setdefault(today_s, {})
+    for r in mild:
+        day[r.name] = {"detail": r.detail, "ts": time.time()}
+
+
 def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    m = _collect()
-    m["health_ok"] = m["health_status"] == "ok" and bool(m["connected"])
-
-    hard = _hard_rules(m)
-    anomalies = _anomalies(m)
-
-    # HALIM adjudicates only when awake; a post-market 'asleep' HALIM is
-    # expected (deterministic verdict stands), 'down' is genuine degradation.
+    """One manifest tick: decide, alert (deduped), roll streak/gate1."""
+    ctx = _ctx()
+    m = run_all(ctx)
+    rc = _decide(m)
     halim_state = _halim_probe()
-    verdict = "FAIL" if hard else ("PASS")
-
-    ha: dict[str, Any] = {}
-    if halim_state == "ok":
-        ha = _halim_call(m)
-        verdict = "FAIL" if (hard or ha.get("verdict") == "FAIL") else verdict
-    elif halim_state == "down":
-        verdict = verdict  # deterministic verdict stands; exit 3 below
 
     wise = ledger.setdefault("roles", {}).setdefault("wise", {})
     gate1 = ledger.setdefault(
@@ -572,85 +484,62 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
         timespec="seconds"
     )
 
-    if hard:
+    if rc == 2:
         wise["clean_days_streak"] = 0
         wise["last_clean_day"] = None
         gate1["status"] = "pending"
     else:
         streak = _roll_streak(wise, date.today())
         gate1["best_days_streak"] = max(gate1.get("best_days_streak", 0), streak)
+        real_closes = int(_read(REALIZED_PATH).get("total", 0) or 0)
         gate1["status"] = (
             "GO"
-            if streak >= DAYS_TARGET and m["real_closes_total"] >= CLOSES_TARGET
+            if streak >= DAYS_TARGET and real_closes >= CLOSES_TARGET
             else ("soaking" if streak < DAYS_TARGET else "clean_but_short_on_closes")
         )
 
-    # ── bug-catcher: HALIM diagnosis + deduped notify per signature/day ──
-    bug = ha.get("bug_report") or {}
-    if anomalies and not bug.get("found"):
-        # HALIM silent/degraded? fall back to a deterministic summary — the
-        # user must still be told, so notify on the raw findings.
-        bug = {
-            "found": True,
-            "summary": "; ".join(f"{r}: {d}" for r, d in anomalies),
-            "root_cause": "deterministic anomaly feed (halim silent)",
-            "severity": "medium",
-            "suggested_fix": "inspect ledger / logs/production_monitor.log",
-        }
-    for rule, detail in anomalies:
-        _alert(
-            today_s,
-            rule,
-            (
-                "HANOON BUG-CATCHER\n"
-                f"finding: {rule} — {detail}\n"
-                f"halim diagnosis: {bug.get('summary', 'n/a')}\n"
-                f"root cause: {bug.get('root_cause', 'n/a')}\n"
-                f"severity: {bug.get('severity', 'medium')}\n"
-                f"suggested fix: {bug.get('suggested_fix', 'n/a')}"
-            ),
-            ledger,
+    # Deduped per-signature/day alerts (ledger["alerted"]).
+    if rc == 3:
+        halim_fails = [r for r in m.results if r.joint == "halim" and r.status == FAIL]
+        detail = halim_fails[0].detail if halim_fails else ""
+        _alert(today_s, "halim_down", "INSIDE-MAN: HALIM down " + detail, ledger)
+    elif rc == 2:
+        fails = " | ".join(f"{r.joint}.{r.name}: {r.detail}" for r in m.hard_fails)
+        _alert(today_s, "hard_fail", "INSIDE-MAN hard: " + fails, ledger)
+    elif rc == 4:
+        anom = " | ".join(
+            f"{r.joint}.{r.name}: {r.detail}" for r in m.anomalies if r.status == FAIL
         )
-        ledger.setdefault("findings", {}).setdefault(today_s, {})[rule] = {
-            "detail": detail,
-            "ts": time.time(),
-            "halim": bool(bug.get("found")),
-        }
+        _alert(today_s, "anomalies", "INSIDE-MAN anomalies: " + anom, ledger)
+    else:
+        _record_mild(today_s, ledger, m)
 
-    ledger["last_verdict_ts"] = m["ts"]
+    ledger["last_verdict_ts"] = m.ts
     ledger["last_summary"] = {
-        "ts": m["ts"],
-        "verdict": verdict,
-        "hard_fail": bool(hard),
-        "anomalies": [f"{r}: {d}" for r, d in anomalies],
+        "ts": m.ts,
+        "verdict": "PASS" if rc == 0 else "FAIL",
+        "max_exit_code": rc,
+        "hard_fail": bool(m.hard_fails),
+        "anomalies": [f"{r.joint}.{r.name}: {r.detail}" for r in m.anomalies],
         "metrics": {
-            "health": m["health_status"],
-            "snapshot_ok": m["snapshot_ok"],
-            "heartbeat_age_s": round(m["heartbeat_age_s"] or 0, 1),
-            "cycle_age_s": round(m["cycle_age_s"] or 0, 1),
-            "guard": m["counters"]["guard"],
-            "tracebacks": m["counters"]["tracebacks"],
-            "daily_pnl": round(m["daily_pnl"], 2),
-            "equity": round(m["equity"], 2),
-            "closes": m["real_closes_total"],
-            "polluted": m["polluted_episodes"],
+            "status": m.status,
+            "n_checks": len(m.results),
+            "hard_fails": [f"{r.joint}.{r.name}" for r in m.hard_fails],
+            "anomalies": [f"{r.joint}.{r.name}" for r in m.anomalies],
             "halim_state": halim_state,
-            "subscriptions": m["subscriptions"],
         },
         "streak": wise.get("clean_days_streak", 0),
         "gate_status": gate1["status"],
-        "bug_report": bug,
     }
     _write(STATE_FILE, ledger)
-    if hard:
-        code = 2
-    elif halim_state == "down":
-        code = 3  # HALIM degraded — deterministic checks above still ran
-    elif anomalies:
-        code = 4  # bugs found and reported to the user
-    else:
-        code = 0
-    return code, ledger
+    return rc, ledger
+
+
+def _eod_digest() -> None:
+    """Send the once-per-day EOD digest; digest_send no-ops when already sent."""
+    ctx = _ctx()
+    ok, msg = digest_send(ctx, run_all(ctx))
+    _note(f"digest: {msg} ({ok})")
 
 
 def main() -> int:
@@ -695,6 +584,8 @@ def main() -> int:
                     _note("bot down too long — monitor exiting")
                     return 0
             now = datetime.now()
+            if (now.hour, now.minute) == (23, 50):  # EOD digest slot
+                _eod_digest()
             minute = now.hour * 60 + now.minute
             slots = sorted(
                 set([h * 60 + m for h in range(24) for m in (0, 30)] + [23 * 60 + 50])
