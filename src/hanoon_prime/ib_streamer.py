@@ -85,6 +85,7 @@ class IBStreamer:
         self.ticker_subs: dict[str, Any] = {}
         self.depth_subs: dict[str, Any] = {}
         self._minutely: dict[str, list[Any]] = {}
+        self.last_data_ts: dict[str, float] = {}  # per-ticker last data arrival
         self.executions: list[dict[str, Any]] = []
         self.commissions: dict[str, float] = {}
         self.last_seen: dict[str, float] = {}  # per-sub freshness (GC input)
@@ -163,6 +164,7 @@ class IBStreamer:
         self.contracts.pop(ticker, None)
         self.buffers.pop(ticker, None)
         self._minutely.pop(ticker, None)
+        self.last_data_ts.pop(ticker, None)
         self.last_seen.pop(ticker, None)
         log.info("Unsubscribed %s (GC)", ticker)
 
@@ -177,6 +179,28 @@ class IBStreamer:
         # Skip silently to avoid IB error 10092 flooding logs.
         self.depth_subs[ticker] = None
         log.info("Subscribed to %s (mkt data)", ticker)
+
+    def resubscribe(self, ticker: str) -> None:
+        """Cancel + re-request market data for a silent ticker (keeps buffers).
+
+        The gateway can silently stop streaming for an already-subscribed
+        ticker without dropping the connection or logging an error; the
+        cancelMktData + reqMktData dance forces a fresh quote stream. The
+        contract and accumulated bar buffer are preserved so the brain keeps
+        its history. No-ops into a fresh subscribe when nothing is tracked.
+        """
+        old = self.ticker_subs.pop(ticker, None)
+        if old is None or self.contracts.get(ticker) is None:
+            self.subscribe(ticker)
+            return
+        try:
+            self.ib.cancelMktData(old)
+        except Exception as exc:
+            log.debug("cancelMktData %s failed: %s", ticker, exc)
+        self.ticker_subs[ticker] = self.ib.reqMktData(
+            self.contracts[ticker], "", False, False
+        )
+        log.info("Resubscribed to %s (mkt data)", ticker)
 
     def seed_history(self, ticker: str) -> None:
         """Fetch 1-min historical bars for lookback seeding."""
@@ -243,6 +267,7 @@ class IBStreamer:
         if r is None:
             return False
         close, high, low, vol, bv, bid, ask, ts = r
+        self.last_data_ts[ticker] = ts  # feed liveness: data arrived NOW
         m = int(ts // 60)
         a = self._minutely.get(ticker)
         if a and a[0] == m:

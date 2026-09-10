@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from hanoon_prime.monitor.pipeline import (  # noqa: E402
     BAR_STALE_SECS,
     BRAIN_STALL_CYCLES,
+    RESUB_MIN_SECS,
     PipelineMonitor,
 )
 
@@ -110,6 +111,53 @@ def test_brain_stall_sets_heal_flag(tmp_path):
         mon._check_once()
     assert mon.pop_heal() is True
     assert mon.pop_heal() is False  # consumed exactly once
+
+
+def test_stale_bars_sets_heal_when_market_open(tmp_path):
+    """A stale bar feed triggers the re-subscribe heal."""
+    bot = make_bot(tmp_path)
+    mon = PipelineMonitor(bot, bot.journal)
+    mon.record_cycle(market_open=True)
+    mon._last_bar_growth = time.time() - BAR_STALE_SECS - 10
+    mon._check_once()
+    assert "bars_fresh" in mon.snapshot()["failing"]
+    assert mon.pop_heal() is True
+
+
+def test_heal_for_bars_fresh_is_throttled(tmp_path):
+    """Re-subscribe heal requests are rate-limited, not looped per tick."""
+    bot = make_bot(tmp_path)
+    mon = PipelineMonitor(bot, bot.journal)
+    mon.record_cycle(market_open=True)
+    mon._last_bar_growth = time.time() - BAR_STALE_SECS - 10
+    mon._check_once()
+    assert mon.pop_heal() is True  # first request honoured
+    mon._check_once()  # still failing, but inside the throttle window
+    assert mon.pop_heal() is False  # no re-set yet
+    mon._last_resub_set -= RESUB_MIN_SECS + 1
+    mon._check_once()  # window elapsed and still failing
+    assert mon.pop_heal() is True
+
+
+def test_bars_fresh_survives_buffer_saturation(tmp_path):
+    """Data arrival keeps the feed fresh even when buffer length plateaus.
+
+    Buffers trim to LOOKBACK_BARS, so len stops growing once every buffer
+    fills; bars_fresh must track data-arrival recency or it would fail
+    forever on a perfectly healthy, continuously-updating feed.
+    """
+    bot = make_bot(tmp_path)
+    bot.streamer.last_data_ts = {"AAPL": 0.0}
+    mon = PipelineMonitor(bot, bot.journal)
+    mon.record_cycle(market_open=True)
+    assert mon.bar_feed_fresh() is True  # init grace window
+    bot.streamer.buffers["AAPL"].close = [1.0] * 70  # saturated
+    bot.streamer.last_data_ts = {"AAPL": time.time()}  # data still flowing
+    mon.record_cycle(market_open=True)
+    assert mon.bar_feed_fresh() is True  # len plateau ≠ dead feed
+    bot.streamer.last_data_ts = {"AAPL": time.time() - BAR_STALE_SECS - 5}
+    mon.record_cycle(market_open=True)
+    assert mon.bar_feed_fresh() is False  # feed genuinely silent now
 
 
 def test_incidents_capped_and_shape(tmp_path):

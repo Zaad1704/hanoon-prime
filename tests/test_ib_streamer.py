@@ -239,3 +239,45 @@ class TestEdgeCases:
     def test_buffer_atr_returns_default_when_empty(self):
         s = IBStreamer(MagicMock())
         assert s.buffer_atr("NOPE") == 1.0
+
+    def test_update_bar_stamps_data_arrival(self, streamer):
+        """Successful extracts record per-ticker arrival time (feed liveness)."""
+        streamer.ticker_subs["TSLA"] = FakeTicker(100.0, 101.0, 99.0, ts=60_060.0)
+        streamer.update_bar("TSLA")
+        assert streamer.last_data_ts["TSLA"] == 60_060.0
+
+    def test_unsubscribe_drops_data_freshness(self, streamer):
+        """GC'd tickers stop contributing to feed-liveness recency."""
+        streamer.last_data_ts["TSLA"] = 60_060.0
+        streamer.unsubscribe("TSLA")
+        assert "TSLA" not in streamer.last_data_ts
+
+
+class TestResubscribe:
+    """resubscribe cancels + re-requests market data on a silent ticker."""
+
+    def test_resubscribe_cancels_and_recreates(self):
+        """Existing sub is cancelled and replaced; buffers are preserved."""
+        s = IBStreamer(MagicMock())
+        s.contracts["TSLA"] = MagicMock()
+        s.buffers["TSLA"] = StreamBuffer("TSLA")
+        s.buffers["TSLA"].close.append(100.0)
+        old = MagicMock()
+        s.ticker_subs["TSLA"] = old
+        s.depth_subs["TSLA"] = None
+        new = MagicMock()
+        s.ib.reqMktData.return_value = new
+        s.resubscribe("TSLA")
+        s.ib.cancelMktData.assert_called_once_with(old)
+        s.ib.reqMktData.assert_called_once()
+        assert s.ticker_subs["TSLA"] is new
+        assert s.buffers["TSLA"].close == [100.0]  # history kept
+
+    def test_resubscribe_noop_cancel_never_blocks(self):
+        """A dropped/unknown sub falls back to a fresh subscribe."""
+        with patch("hanoon_prime.ib_streamer.ib") as ibmod:
+            ibmod.Stock.return_value = MagicMock()
+            s = IBStreamer(MagicMock())
+            s.resubscribe("AAPL")
+            assert "AAPL" in s.ticker_subs
+            assert s.ib.cancelMktData.call_count == 0

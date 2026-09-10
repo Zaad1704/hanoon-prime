@@ -1,11 +1,4 @@
-"""monitor.pipeline — continuous pipeline health daemon for the live bot.
-
-A daemon thread that evaluates read-only health probes every interval.
-The cycle thread (the only thread allowed to touch ib_insync) publishes
-vitals via record_cycle(); this thread only reads plain attributes,
-evaluates probes, journals incidents, and sets heal flags that the
-cycle consumes on its next iteration. Never places orders; alerts only.
-"""
+"""monitor.pipeline — continuous pipeline health daemon (alert-only)."""
 
 from __future__ import annotations
 
@@ -14,14 +7,13 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
-Probe = Callable[[], tuple[bool, str]]
-
 BAR_STALE_SECS: float = 180.0
 BRAIN_STALL_CYCLES: int = 10
+RESUB_MIN_SECS: float = 60.0  # minimum gap between auto re-subscribe heals
 
 
 class PipelineMonitor:
@@ -44,6 +36,8 @@ class PipelineMonitor:
         self._last_decisions: int = 0
         self._stall_cycles: int = 0
         self._last_bar_growth: float = time.time()
+        self._last_data_ts: float = 0.0  # max per-ticker data arrival (feed liveness)
+        self._last_resub_set: float = 0.0  # heal throttle clock
 
     # ── cycle-thread side ────────────────────────────────────────────
     def record_cycle(self, market_open: bool, session: str = "rth") -> None:
@@ -53,9 +47,13 @@ class PipelineMonitor:
             t: len(getattr(buf, "close", []) or [])
             for t, buf in list(getattr(streamer, "buffers", {}).items())
         }
-        grew = any(sizes.get(t, 0) > self._last_sizes.get(t, 0) for t in sizes)
-        if grew:
+        if any(sizes.get(t, 0) > self._last_sizes.get(t, 0) for t in sizes):
             self._last_bar_growth = time.time()
+        # Buffer length plateaus at LOOKBACK_BARS; data arrival survives it.
+        if getattr(streamer, "last_data_ts", None):
+            recency = max([v for v in streamer.last_data_ts.values() if v] or [0.0])
+            if recency:
+                self._last_data_ts = recency
         self._last_sizes = sizes
         try:
             connected = bool(self._bot.ib.isConnected())
@@ -71,6 +69,7 @@ class PipelineMonitor:
                 "ib_connected": connected,
                 "bar_sizes": sizes,
                 "decision_count": decisions,
+                "feed_age": time.time() - (self._last_data_ts or self._last_bar_growth),
                 "journal_bytes": self._journal_path_size(),
             }
             if market_open and decisions == self._last_decisions:
@@ -87,7 +86,12 @@ class PipelineMonitor:
                 return True
         return False
 
-    # ── monitor-thread side ──────────────────────────────────────────
+    def bar_feed_fresh(self) -> bool:
+        """True if data arrived within BAR_STALE_SECS (no market-open relax)."""
+        return (
+            self._last_data_ts or self._last_bar_growth
+        ) + BAR_STALE_SECS > time.time()
+
     def start(self) -> None:
         """Start the daemon loop."""
         self._thread = threading.Thread(target=self._loop, daemon=True, name="pipeline")
@@ -106,18 +110,17 @@ class PipelineMonitor:
                 log.error("PipelineMonitor check error: %s", e)
 
     def _collect_checks(self, v: dict[str, Any]) -> list[tuple[str, bool, str]]:
-        """Build probe results (pure reads; eval-fail counter updated)."""
         open_mkt = bool(v.get("market_open"))
         ef = int(getattr(self._bot.juli, "_eval_fail_count", 0) or 0)
         eval_burst = open_mkt and ef - self._last_eval_fail >= 3
         self._last_eval_fail = ef
+        feed_age = time.time() - (self._last_data_ts or self._last_bar_growth)
         return [
             ("ib_connected", bool(v.get("ib_connected")), "Gateway link"),
             (
                 "bars_fresh",
-                (not open_mkt)
-                or (time.time() - self._last_bar_growth < BAR_STALE_SECS),
-                f"last bar growth {time.time() - self._last_bar_growth:.0f}s ago",
+                (not open_mkt) or (feed_age < BAR_STALE_SECS),
+                f"last market data {feed_age:.0f}s ago",
             ),
             (
                 "brain_advancing",
@@ -137,13 +140,11 @@ class PipelineMonitor:
         ]
 
     def _check_once(self) -> None:
-        """Run all probes; alert on new failures, note recoveries."""
         v = dict(self._vitals)
         if not v.get("ts"):
             return
         open_mkt = bool(v.get("market_open"))
-        checks = self._collect_checks(v)
-        for name, ok, detail in checks:
+        for name, ok, detail in self._collect_checks(v):
             prev = self._failures.get(name)
             if not ok:
                 self._failures[name] = (ok, detail)
@@ -154,12 +155,16 @@ class PipelineMonitor:
                 log.info("PIPELINE RECOVERED: %s", name)
         if open_mkt and not v.get("ib_connected"):
             log.critical("PIPELINE: IB disconnected while market open")
-        if open_mkt and self._stall_cycles >= BRAIN_STALL_CYCLES:
+        # Silent bar feed or stalled brain requests a throttled MD reset.
+        if open_mkt and (
+            self._failures.get("bars_fresh") or self._stall_cycles >= BRAIN_STALL_CYCLES
+        ):
             with self._lock:
-                self._heal["resub"] = True
+                if time.time() - self._last_resub_set >= RESUB_MIN_SECS:
+                    self._last_resub_set = time.time()
+                    self._heal["resub"] = True
 
     def _incident(self, name: str, detail: str, v: dict[str, Any]) -> None:
-        """Log, journal, and remember one failure transition."""
         log.critical("PIPELINE FAIL: %s (%s)", name, detail)
         inc = {
             "ts": time.time(),

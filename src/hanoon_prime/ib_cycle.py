@@ -364,8 +364,8 @@ class BotCycleMixin:
             self._sweep_stale_orders()
             self._sync_subs()
             if self.monitor.pop_heal():
-                log.warning("PIPELINE HEAL: forcing re-subscribe")
-                self._sync_subs()
+                log.warning("PIPELINE HEAL: forcing market-data reset")
+                self._heal_resubscribe()
             # Manual flatten request, then EOD flatten (both skip brain).
             if self._check_manual_flatten() or self._check_eod_flatten():
                 self._finish_cycle([], [], pnl, CycleMeta(poll, started, False))
@@ -446,11 +446,7 @@ class BotCycleMixin:
         session: str = "rth",
     ) -> None:
         """Execute exits, journal/execute verdicts, reflect, wait."""
-        self._last_bars = sum(
-            1
-            for tk in self.ib.pendingTickers()
-            if self.streamer.update_bar(tk.contract.symbol if tk.contract else "")
-        )
+        self._last_bars = self._count_new_bars()
         if not self._last_bars or session == "pre_market":
             exit_s = [es for es in exit_s if _is_hard_stop(es)]  # protective only
         self._drain_event_exits()
@@ -465,18 +461,39 @@ class BotCycleMixin:
             daily = float(pnl.dailyPnL)
             self.hippocampus._daily_pnl = daily if math.isfinite(daily) else 0.0
         self._publish_account_feed(pnl)
-        market_open = bool(meta and meta.market_open)
-        for v in verdicts:
-            self.journal.append({"event": "verdict", "ts": time.time(), **v.to_dict()})
-            if meta and meta.market_open and v.action == ENTER:
-                self._execute_verdict(v)
+        self._execute_entries(bool(meta and meta.market_open), verdicts)
         self._reflect_closed()
-        self.monitor.record_cycle(market_open, session=session)
+        self.monitor.record_cycle(bool(meta and meta.market_open), session=session)
         elapsed = time.monotonic() - meta.started
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)
         self._heartbeat()
         log.info("CYCLE bars=%d open=%d d=%d x=%d", self._last_bars, len(self.hippocampus._open_positions), len(verdicts), len(exit_s))
+
+    def _count_new_bars(self) -> int:
+        """Append pending ticks to buffers; count completed minute bars."""
+        return sum(
+            1
+            for tk in self.ib.pendingTickers()
+            if self.streamer.update_bar(getattr(getattr(tk, "contract", None), "symbol", ""))
+        )
+
+    def _execute_entries(self, market_open: bool, verdicts: list[Verdict]) -> None:
+        """Journal verdicts; execute ENTERs only on a fresh bar feed.
+
+        Without the freshness gate the brain could open a position from a
+        silent feed — exits already degrade to hard stops, entries had no
+        equivalent guard.
+        """
+        feed_ok = self.monitor.bar_feed_fresh()
+        for v in verdicts:
+            self.journal.append({"event": "verdict", "ts": time.time(), **v.to_dict()})
+            if not (market_open and v.action == ENTER):
+                continue
+            if feed_ok:
+                self._execute_verdict(v)
+            else:
+                log.warning("ENTRY SUPPRESSED %s: bar feed stale", v.ticker)
 
     def _publish_account_feed(self, pnl: Any) -> None:
         """Forward IB account facts to the slow cortex on BrainState."""
@@ -542,6 +559,31 @@ class BotCycleMixin:
         )
         self.executor.last_thoughts[ticker] = verdict.thought
         self.juli.brain.note_entry(ticker)
+
+    def _heal_resubscribe(self) -> None:
+        """Force a full market-data reset for every tracked ticker.
+
+        A live connection with zero streaming ticks (silent feed) needs the
+        cancelMktData + re-request dance that _sync_subs cannot do — it only
+        subscribes MISSING tickers and leaves silent subscriptions alone.
+        Position watchers must be re-attached after the reset because
+        resubscribe swaps the underlying ib_insync Ticker objects.
+        """
+        targets = set(self.executor.tracked_tickers) | set(self.streamer.ticker_subs)
+        for t in sorted(targets):
+            try:
+                self.streamer.resubscribe(t)
+            except Exception as exc:
+                log.debug("HEAL resubscribe %s failed: %s", t, exc)
+        self.streamer._minutely.clear()
+        watched = list(getattr(self, "_watched", None) or set())
+        for t in watched:
+            self._watched.discard(t)
+            try:
+                self._attach_position_watchers(t)
+            except Exception as exc:
+                self._watched.add(t)
+                log.warning("HEAL rewatch %s failed: %s", t, exc)
 
     def _sync_subs(self) -> None:
         """Sync subscriptions: async mkt data for all, one seed per cycle.

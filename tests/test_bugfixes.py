@@ -281,6 +281,76 @@ class TestBug3OffMarketGuard:
         )
         mixin.executor.place_bracket.assert_not_called()
 
+    def _finish_cycle_mixin(self):
+        """Full mixin needed by the entry-gate tests (open-market path)."""
+        from hanoon_prime.ib_cycle import BotCycleMixin
+
+        mixin = BotCycleMixin.__new__(BotCycleMixin)
+        tk = MagicMock()
+        tk.hasBidAsk = True
+        tk.bid, tk.ask = 100.0, 101.0
+        mixin.streamer = MagicMock()
+        mixin.streamer.ticker_subs = {"TSLA": tk}
+        mixin.hippocampus = MagicMock()
+        mixin.hippocampus._open_positions = {}
+        mixin.hippocampus._daily_pnl = 0.0
+        mixin.executor = MagicMock()
+        mixin.executor.get_newly_closed_trades.return_value = []
+        mixin.executor._horizons = {}
+        mixin.juli = MagicMock()
+        mixin.monitor = MagicMock()
+        mixin.monitor.bar_feed_fresh.return_value = True
+        mixin._closing = set()
+        mixin._last_beat = 0.0
+        mixin._exit_reasons = {}
+        mixin.ib = MagicMock()
+        mixin.ib.pendingTickers.return_value = []
+        mixin.journal = MagicMock()
+        return mixin
+
+    def _enter_verdict(self):
+        return Verdict(
+            ticker="TSLA",
+            action=ENTER,
+            sizing=SizingResult(shares=3, risk_pass=True),
+            thought=SimpleNamespace(direction=1, score=0.65),
+        )
+
+    def test_finish_cycle_suppresses_entries_on_stale_feed(self):
+        """A dead bar feed must block ENTER verdicts (no stale-data trades)."""
+        mixin = self._finish_cycle_mixin()
+        mixin.monitor.bar_feed_fresh.return_value = False
+        mixin._finish_cycle(
+            [],
+            [self._enter_verdict()],
+            None,
+            CycleMeta(poll=1.0, started=0.0, market_open=True),
+        )
+        mixin.executor.place_bracket.assert_not_called()
+
+    def test_finish_cycle_enters_on_fresh_feed(self):
+        """A live feed keeps ENTER verdicts executable (no over-blocking)."""
+        mixin = self._finish_cycle_mixin()
+        mixin._finish_cycle(
+            [],
+            [self._enter_verdict()],
+            None,
+            CycleMeta(poll=1.0, started=0.0, market_open=True),
+        )
+        mixin.executor.place_bracket.assert_called_once()
+
+    def test_finish_cycle_still_executes_exits_on_stale_feed(self):
+        """Protective exits must survive a stale feed (hard stops only)."""
+        mixin = self._finish_cycle_mixin()
+        mixin.monitor.bar_feed_fresh.return_value = False
+        mixin._finish_cycle(
+            [{"ticker": "NVD", "reason": "hard_stop_breach", "type": "hard_stop"}],
+            [],
+            None,
+            CycleMeta(poll=1.0, started=0.0, market_open=True),
+        )
+        mixin.executor.close_position.assert_called_once_with("NVD", mixin.streamer)
+
     def test_snapshot_shaped_feed_no_array_truthiness(self):
         """Regression: FIX-2026-09-07-05.
 
