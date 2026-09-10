@@ -56,6 +56,12 @@ from .system import (
     monitor_alive,
     single_bot,
 )
+from .trade_quality import (
+    halim_postmortem,
+    pnl_sign_consistency,
+    profit_factor,
+    win_rate,
+)
 from .weight_purity import cortex_score_degenerate, regime_weights_bounded
 
 JOINT_ORDER = [
@@ -70,6 +76,7 @@ JOINT_ORDER = [
     "purity",
     "execution_oracle",
     "halim",
+    "trade_quality",
     "notify",
 ]
 
@@ -133,6 +140,12 @@ SPECS: tuple[CheckSpec, ...] = (
     ),
     CheckSpec("notify", "telegram_configured", telegram_configured, report=True),
     CheckSpec("notify", "send_healthy", send_healthy, report=True),
+    CheckSpec("trade_quality", "win_rate", win_rate, report=True),
+    CheckSpec("trade_quality", "profit_factor", profit_factor, report=True),
+    CheckSpec("trade_quality", "halim_postmortem", halim_postmortem, report=True),
+    CheckSpec(
+        "trade_quality", "pnl_sign_consistency", pnl_sign_consistency, report=True
+    ),
 )
 
 HARD_KEYS: frozenset[tuple[str, str]] = frozenset(
