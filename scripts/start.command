@@ -29,6 +29,11 @@ echo "== HANOON PRIME stack — starting =="
 # 1) HALIM serve (idempotent; already-running detected internally)
 "$ROOT/scripts/halim_start.sh"
 
+# 1.5) Re-anchor the journal chain if broken — only valid between stop and start,
+#      while the bot is down (never while live). Failure is non-fatal.
+echo "== re-anchoring journal chain =="
+"$PYTHON_BIN" -m hanoon_prime.inspection reanchor >>"$LOG_DIR/reanchor.log" 2>&1 || echo "warn: re-anchor step failed (rc $?)"
+
 # 2) Trading bot — only if not already serving telemetry
 if curl -sf --max-time 2 "$TELEMETRY/health" >/dev/null 2>&1; then
   echo "Bot already online (telemetry $TELEMETRY healthy) — skipping start"

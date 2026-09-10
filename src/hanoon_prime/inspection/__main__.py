@@ -63,6 +63,14 @@ def _print_heal(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_reanchor(args: argparse.Namespace) -> int:
+    from .reanchor import reanchor_if_broken
+
+    _, outcome = reanchor_if_broken(_ctx())
+    sys.stdout.write(outcome + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv and dispatch to the requested inspection subcommand."""
     ap = argparse.ArgumentParser(description="Inside Man facility inspection")
@@ -75,6 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="show candidate actions, take none"
     )
     ph.set_defaults(func=_print_heal)
+    pr = sub.add_parser(
+        "reanchor", help="re-anchor journal chain if broken (boot step)"
+    )
+    pr.set_defaults(func=_print_reanchor)
     args = ap.parse_args(argv)
     return int(args.func(args))
 
