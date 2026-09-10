@@ -26,7 +26,8 @@ def enters_minted(ctx: InspectionContext) -> CheckResult:
             UNVERIFIABLE,
             detail=str(h["_unreachable"]),
         )
-    positions = set(h.get("positions") or [])
+    raw_positions = h.get("positions")
+    positions = set(raw_positions if isinstance(raw_positions, list) else [])
     enters = [r for r in _events(ctx, "verdict") if r.get("action") in ENTER_ACTIONS]
     closed = {r.get("ticker") for r in _events(ctx, "position_closed")}
     unmatched = [

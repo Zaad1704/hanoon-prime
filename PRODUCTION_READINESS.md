@@ -126,15 +126,18 @@ The monitor executes `scripts/production_monitor.py --daemon` — checks at
    scores and valid actions; non-noise `ERROR` lines since restart →
    flagged problems; `pipeline_incident` rows; `SAFETY HALT` /
    `LEARN BLOCKED` markers. These do NOT reset the streak but DO escalate.
-3. **HALIM** independently re-derives a verdict from the SAME real runtime
-   data and, when anomalies exist, emits a **`bug_report`** (summary, root-cause
-   hypothesis, severity, one-line suggested fix). A gate passes only when both
-   agree; an anomaly whose report is silent is still escalated on the
-   deterministic findings.
-4. **User notification (bug-catcher output):** each anomaly is sent to the
-   Telegram chat via the bot's own `_telegram.send()` (token/chat from
-   `.env`) — deduped to one message per rule per calendar day. If Telegram is
-   not configured it is recorded in the ledger instead, never crashed on.
+3. **HALIM** is itself inspected: `halim_state_matches_clock` verifies HALIM
+   is awake during market hours and `asleep` post-market (a `down` HALIM maps
+   to monitor exit 3 and dominates). HALIM does **not** steer the verdict —
+   the manifest is fully deterministic.
+4. **User notification:** every hard FAIL, HALIM-down, and FAIL-grade anomaly
+   is sent to the Telegram chat via the bot's own `_telegram.send()` (token/
+   chat from `.env`) — deduped to one message per signature per calendar day
+   in `ledger["alerted"]`. WARN-grade anomalies are recorded in the ledger
+   `findings` and surface in the 23:50 EOD digest, never paged. If Telegram
+   is not configured it is recorded in the ledger instead, never crashed on.
+   See the Inside Man section under Gate 3 for the full manifest contract
+   (exit codes, heal cabinet, digest, re-anchor).
 
 **State & reads:**
 - Ledger (daemon-owned, gitignored): `scripts/production_state.json`
@@ -177,6 +180,76 @@ streak resumes only after 10 consecutive clean trading days (Mon-Fri counting).
       (status != ok, or safety tripped) that pages the operator, not just a log.
 - [ ] Verify telemetry survives a bot restart (no `starting` refresh stall)
       at least 3×.
+
+#### Inside Man — facility inspection (live, evidence-based)
+
+One command runs every joint check against the running stack and returns the
+whole picture; the guardian daemon already uses it as its single probe source.
+This supersedes the bespoke per-check block described under Gate 1.
+
+    # full picture, every joint, one command:
+    .venv/bin/python -m hanoon_prime.inspection manifest        # human text
+    .venv/bin/python -m hanoon_prime.inspection manifest --json # machine JSON
+
+**Joints (12):** processes, identity, telemetry, pipeline, session, safety,
+memory, purity, execution_oracle, halim, notify — each check is one of the
+decision roles below.
+
+**Severity semantics:** `OK` (green) · `WARN` (baseline/idle deviations that
+do **not** stop anything) · `FAIL` · `UNVERIFIABLE` (probe could not run — the
+manifest never raises). **Manifest FAILs with urgency: any hard FAIL → `FAIL`;
+only `WARN`/`UNVERIFIABLE` → `WARN`; all `OK` → `OK`.** Known benign baselines
+read WARN until the day's first event: `equity_synced` (before the first IB
+equity sync after restart), `enters_minted` (unminted ENTERs), `send_healthy`
+(before the first probe send of the day), `sleep_is_expected`/`asleep` HALIM
+matches the post-market clock.
+
+**Monitor exit codes (daemon and single pass):**
+
+| Code | Meaning | Effect |
+|------|---------|--------|
+| 0 | PASS | streak continues |
+| 2 | hard FAIL | **streak reset**, gate paused |
+| 3 | HALIM down | paged; deterministic checks still ran (down dominates) |
+| 4 | FAIL-grade anomalies | paged once per signature/day; streak-neutral |
+
+WARN-grade anomalies never page (they are folded into the ledger `findings`
+and appear in the EOD digest), preserving the old "no alert on pre-sync/idle"
+behavior. Manifest source of truth: `src/hanoon_prime/inspection/joints.py`.
+
+**Heal cabinet (gated auto-heal, default `HANOON_HEAL` = on, set `0` to
+disable):**
+
+| Trigger (report check) | Action |
+|------------------------|--------|
+| `halim_alive` FAIL | `scripts/halim_start.sh` (launch_detached) |
+| `cloudflared_alive` FAIL | `cloudflared tunnel --config ~/.cloudflared/config.yml run` (launch_detached) |
+| `gateway_watchdog_alive` FAIL | `scripts/ib_gateway_watchdog.py` (launch_detached) |
+
+Gated to **2 heal actions/day** (`MAX_PER_DAY`); every heal is recorded in the
+ledger (`heals.{today,count,events}`). Dry-run first:
+
+    .venv/bin/python -m hanoon_prime.inspection heal --dry-run
+    .venv/bin/python -m hanoon_prime.inspection heal            # apply (gated)
+
+**Alerting & daily digest:** hard FAILs, HALIM-down, and FAIL-grade anomalies
+page via Telegram (the bot's own `_telegram.send`, deduped one message per
+signature per calendar day in `ledger["alerted"]`; unconfigured → ledger only,
+never crashed on). Once per day the daemon sends the **EOD digest** at the
+23:50 slot (`digest_send`), a single Telegram message with the day's findings;
+a freshness-gated `send_healthy` probe (one lightweight reference send/day)
+keeps the notify path itself checked.
+
+**Boot re-anchor:** `scripts/start.command` runs `reanchor` between stopping
+and starting the bot (logs to `logs/reanchor.log`), re-seeding the journal
+chain anchor when it is broken. Chain history before an intentional purge is
+**expected** to show breaks; `chain_intact_from_anchor` verifies 0 gaps after
+the last `chain_reseed`/purge anchor (currently anchored at the purge break,
+seq 94214). Manual fix: `.venv/bin/python -m hanoon_prime.inspection reanchor`.
+
+**Runtime artifacts (gitignored):** `runtime/inspection_ledger.json` is the
+daemon/CLI ledger (`scripts/production_state.json` for the monitor ledger);
+`logs/reanchor.log` is the re-anchor audit trail.
 
 ### Gate 4 — Incident runbook
 - [ ] Documented, rehearsed steps (not just this §3 note) for: unexpected

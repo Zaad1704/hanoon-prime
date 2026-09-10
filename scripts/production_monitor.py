@@ -50,7 +50,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from hanoon_prime.inspection.checks import FAIL, WARN
+from hanoon_prime.inspection.checks import FAIL
 from hanoon_prime.inspection.ctx import InspectionContext
 from hanoon_prime.inspection.digest import digest_send
 from hanoon_prime.inspection.joints import Manifest, run_all
@@ -459,14 +459,15 @@ def _roll_streak(wise: dict[str, Any], today: date) -> int:
     return wise["clean_days_streak"]
 
 
-def _record_mild(today_s: str, ledger: dict[str, Any], m: Manifest) -> None:
-    """WARN-grade anomalies: recorded for the digest, never paged."""
-    mild = [r for r in m.anomalies if r.status == WARN]
-    if not mild:
+def _record_findings(today_s: str, ledger: dict[str, Any], m: Manifest) -> None:
+    """Report-check anomalies (WARN and FAIL) recorded for the EOD digest."""
+    if not m.anomalies:
         return
     day = ledger.setdefault("findings", {}).setdefault(today_s, {})
-    for r in mild:
-        day[r.name] = {"detail": r.detail, "ts": time.time()}
+    for r in m.anomalies:
+        day.setdefault(r.name, {}).update(
+            {"status": r.status, "detail": r.detail, "ts": time.time()}
+        )
 
 
 def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -498,7 +499,8 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
             else ("soaking" if streak < DAYS_TARGET else "clean_but_short_on_closes")
         )
 
-    # Deduped per-signature/day alerts (ledger["alerted"]).
+    _record_findings(today_s, ledger, m)
+
     if rc == 3:
         halim_fails = [r for r in m.results if r.joint == "halim" and r.status == FAIL]
         detail = halim_fails[0].detail if halim_fails else ""
@@ -511,8 +513,6 @@ def run_once(today_s: str, ledger: dict[str, Any]) -> tuple[int, dict[str, Any]]
             f"{r.joint}.{r.name}: {r.detail}" for r in m.anomalies if r.status == FAIL
         )
         _alert(today_s, "anomalies", "INSIDE-MAN anomalies: " + anom, ledger)
-    else:
-        _record_mild(today_s, ledger, m)
 
     ledger["last_verdict_ts"] = m.ts
     ledger["last_summary"] = {

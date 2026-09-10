@@ -12,7 +12,7 @@ POLLUTED = {"T", "TEST"}
 def no_test_episodes(ctx: InspectionContext) -> CheckResult:
     """No T/TEST tickers in juli episodes or journal rows."""
     js = juli_state(ctx)
-    eps = [ep for ep in (js.get("episodes") or []) if isinstance(ep, dict)]
+    eps = [ep for ep in js.get("episodes", []) if isinstance(ep, dict)]
     bad = [ep.get("ticker") for ep in eps if ep.get("ticker") in POLLUTED]
     if bad:
         return CheckResult(
