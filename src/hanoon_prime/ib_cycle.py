@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ._ib_marks import feed_positions
+from ._ib_marks import mark_positions
 from ._ib_sync import read_account_summary
 from ._telegram import postmortem, shutdown, trade_hold
 from .account_equity import resolve_account_equity
@@ -545,7 +545,7 @@ class BotCycleMixin:
             self._last_policy_sync = time.monotonic()
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
-                self._positions = feed_positions(self.ib)
+                self._positions = mark_positions(self.ib, getattr(self, "_snapshot", None))
                 self._account_summary = _float_account_summary(
                     read_account_summary(self.ib)
                 )

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
 
-MAX_TBT: int = 10
+MAX_TBT: int = 15
 MAX_DOM: int = 20
 MAX_L1: int = 100
 

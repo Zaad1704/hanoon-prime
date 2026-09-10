@@ -98,15 +98,17 @@ _BOT_PID_FILE="$PID_DIR/hanoon_prime.pid"
 if _check_running "$_BOT_PID_FILE" "HANOON Prime bot"; then
   :
 else
-  # Start bot with nohup to survive terminal close
-  nohup "$PYTHON_BIN" -m hanoon_prime.cli \
+  # Launch bot via supervisor (auto-restart OFF by default).
+  # Enable with:  BOT_AUTO_RESTART=1 bash start.command
+  # Or manually:  python3 scripts/bot_supervisor.py --restart
+  PYTHONUNBUFFERED=1 nohup "$PYTHON_BIN" "$BOT_ROOT/scripts/bot_supervisor.py" \
     >> "$BOT_LOG" 2>&1 &
-  BOT_PID=$!
-  echo "$BOT_PID" > "$_BOT_PID_FILE"
+  SUPV_PID=$!
+  echo "$SUPV_PID" > "$PID_DIR/bot_supervisor.pid"
   
   sleep 3
-  if kill -0 "$BOT_PID" 2>/dev/null; then
-    ok "HANOON Prime bot started (PID $BOT_PID)"
+  if kill -0 "$SUPV_PID" 2>/dev/null; then
+    ok "HANOON Prime bot started via supervisor (Supervisor PID $SUPV_PID)"
   else
     err "Bot failed to start — check $BOT_LOG"
     tail -20 "$BOT_LOG" 2>/dev/null | sed 's/^/  [bot] /'

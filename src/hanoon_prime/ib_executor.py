@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Callable, Optional
 
@@ -80,6 +81,15 @@ class IBExecutor:
             shares = int(sizing.shares)
             stop = float(sizing.stop_price)
             target = float(sizing.target_price)
+            # Defense-in-depth: the risk engine guards inputs, but a NaN
+            # stop/target would send "Limit Price=nan" to IB (Error 320).
+            # Reject rather than paper-trade bad risk parameters.
+            if not math.isfinite(stop) or not math.isfinite(target):
+                log.warning(
+                    "ABORT %s: NaN stop/target from sizing (stop=%.4f target=%.4f)",
+                    ticker, stop, target,
+                )
+                return
         else:
             raw = self.brain.size_position(score_to_win_prob(thought.score), price, atr)
             shares = max(1, int(raw))

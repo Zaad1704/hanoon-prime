@@ -42,6 +42,7 @@ _STOP_PIDFILE "guardian monitor" "$MONITOR_PID" "scripts/production_monitor.py -
 
 # Bot may be pidfile-less (legacy nohup start) → pgrep fallback.
 _STOP_PIDFILE "trading bot" "$BOT_PID" "hanoon_prime.cli"
+_STOP_PIDFILE "bot supervisor" "$ROOT/runtime/pids/bot_supervisor.pid" "bot_supervisor.py"
 
 "$ROOT/scripts/halim_stop.sh"
 

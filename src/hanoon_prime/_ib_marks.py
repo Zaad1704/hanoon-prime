@@ -82,8 +82,33 @@ def _live_tickers(ib_client: Any) -> dict[str, Any]:
     return result
 
 
+def _snapshot_mark(symbol: str, entry: float, get_snapshot: Any) -> tuple[float, bool]:
+    """4th-tier mark: streamer bar-close price for penny stocks.
+
+    Returns ``(price, ok)`` where ``ok`` is False when no usable close
+    price could be obtained.  Never raises.
+    """
+    try:
+        snap = get_snapshot(symbol)
+    except Exception as exc:
+        log.debug("snapshot mark failed for %s: %s", symbol, exc)
+        return 0.0, False
+    if not snap:
+        return 0.0, False
+    prices = snap.get("prices")
+    if not prices:
+        return 0.0, False
+    close_price = _number(prices[-1])
+    if close_price <= 0:
+        return 0.0, False
+    return close_price, True
+
+
 def _mark_position(
-    pos: Any, port: dict[str, Any], live: dict[str, Any]
+    pos: Any,
+    port: dict[str, Any],
+    live: dict[str, Any],
+    get_snapshot: Any = None,
 ) -> dict[str, Any] | None:
     """One live-marked position row, or None for a zero-quantity stub."""
     symbol = pos.contract.symbol
@@ -99,6 +124,11 @@ def _mark_position(
     else:
         market = _tick_price(live.get(symbol)) or entry
         unrealized = (market - entry) * shares * direction
+        if market == entry and get_snapshot is not None:
+            bar_price, ok = _snapshot_mark(symbol, entry, get_snapshot)
+            if ok:
+                market = bar_price
+                unrealized = (market - entry) * shares * direction
     return {
         "ticker": symbol,
         "entry_price": round(entry, 2),
@@ -110,12 +140,19 @@ def _mark_position(
     }
 
 
-def mark_positions(ib_client: Any) -> dict[str, Any]:
+def mark_positions(
+    ib_client: Any,
+    get_snapshot: Any = None,
+) -> dict[str, Any]:
     """Live positions surface: portfolio marks with live-ticker fallback.
 
     ib_insync Position has no marketPrice/unrealizedPNL; PortfolioItem does.
     When the portfolio feed lags, the live Ticker supplies the mark so
     per-position PnL stays truthful instead of reading as entry=$0.
+
+    ``get_snapshot`` is an optional callable returning the latest snapshot
+    dict for a symbol.  Used as a 4th-tier mark fallback for penny stocks
+    whose IB portfolio item *and* live ticker both carry stale/zero prices.
     """
     port = _portfolio_marks(ib_client)
     live = _live_tickers(ib_client)
@@ -123,7 +160,11 @@ def mark_positions(ib_client: Any) -> dict[str, Any]:
         raw_positions = ib_client.positions()
     except Exception:
         return dict(ZERO_PNL)
-    out = [row for row in (_mark_position(p, port, live) for p in raw_positions) if row]
+    out = [
+        row
+        for row in (_mark_position(p, port, live, get_snapshot) for p in raw_positions)
+        if row
+    ]
     return {
         "positions": out,
         "total_pnl": round(sum(x["unrealized_pnl"] for x in out), 2),
