@@ -57,6 +57,7 @@ ROUTES_GET = {
     "/resources": "_resources",
     "/inspection": "_inspection",
     "/logs": "_log_tail",
+    "/ib": "_ib_raw",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -80,6 +81,10 @@ POST_HANDLERS = {
     "/flatten": "_handle_flatten",
 }
 
+# /ib is served on demand with a short TTL: it walks live IB objects
+# (tickers, accounts, orders) — cheap, but not needed at 1s cadence.
+EXTRA_TTL["/ib"] = 1.0
+
 # Route → key inside the snapshot payload
 _ROUTE_KEY = {
     "/health": "health",
@@ -101,6 +106,38 @@ _ROUTE_KEY = {
 _MISSING = object()
 
 
+def psutil_boot_time() -> float:
+    """Boot time (epoch seconds) without psutil — sysctl/proc, 0 on miss."""
+    try:
+        if sys.platform == "darwin":
+            return _sysctl_boot_time()
+        return _proc_boot_time()
+    except Exception as exc:
+        log.debug("psutil_boot_time failed: %s", exc)
+    return 0.0
+
+
+def _sysctl_boot_time() -> float:
+    """macOS boot time via ``sysctl kern.boottime``."""
+    out = subprocess.run(
+        ["sysctl", "-n", "kern.boottime"],
+        capture_output=True, text=True, timeout=2,
+    )
+    for part in out.stdout.replace(",", " ").split():
+        if part.startswith("sec="):
+            return float(part.split("=")[1])
+    return 0.0
+
+
+def _proc_boot_time() -> float:
+    """Linux boot time from ``/proc/stat`` btime field."""
+    with open("/proc/stat") as fh:
+        for line in fh:
+            if line.startswith("btime"):
+                return float(line.split()[1])
+    return 0.0
+
+
 def _tail_log(log_file: Path) -> list[str]:
     """Read the last 64KB of a log as up-to-200 tail lines."""
     with open(log_file, "rb") as fh:
@@ -120,6 +157,121 @@ def _log_tail_lines(candidates: list[Path]) -> list[str]:
         except (OSError, ValueError):
             continue
     return []
+
+
+def _proc_count() -> dict[str, Any]:
+    """Process count via ``ps -A`` (macOS/Linux fallback)."""
+    try:
+        out = subprocess.run(
+            ["ps", "-A", "-o", "pid="], capture_output=True, text=True, timeout=3
+        )
+        if out.returncode == 0:
+            return {"proc_count": len(out.stdout.split())}
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("proc count failed: %s", exc)
+    return {"proc_count": None}
+
+
+def _uptime_s() -> int | None:
+    """System uptime in seconds (epoch boot time → now)."""
+    boot_s = psutil_boot_time()
+    if boot_s <= 0:
+        return None
+    return int(time.time() - boot_s)
+
+
+def _mem_stats() -> dict[str, Any]:
+    """Host memory usage via ``sysctl`` (macOS) or ``/proc/meminfo``."""
+    try:
+        if sys.platform == "darwin":
+            return _macos_mem_stats()
+        return _linux_mem_stats()
+    except Exception as exc:
+        log.debug("memory stats failed: %s", exc)
+    return {"mem_total_mb": None, "mem_used_mb": None, "mem_pct": None}
+
+
+def _macos_mem_stats() -> dict[str, Any]:
+    """macOS memory via ``sysctl hw.memsize`` + ``vm_stat``."""
+    out = subprocess.run(
+        ["sysctl", "-n", "hw.memsize"],
+        capture_output=True, text=True, timeout=2,
+    )
+    total_b = int(out.stdout.strip())
+    total_mb = round(total_b / 1048576, 1)
+    vm = subprocess.run(
+        ["vm_stat"], capture_output=True, text=True, timeout=2
+    )
+    page = 16384
+    used_pages = 0
+    for line in vm.stdout.splitlines():
+        if line.startswith(
+            ("Pages active", "Pages wired down", "Pages compressed")
+        ):
+            used_pages += int(line.split(":")[1].strip().rstrip("."))
+    used_mb = round(used_pages * page / 1048576, 1)
+    return {"mem_total_mb": total_mb, "mem_used_mb": used_mb,
+            "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None}
+
+
+def _linux_mem_stats() -> dict[str, Any]:
+    """Linux memory from ``/proc/meminfo`` (kB fields)."""
+    mem: dict[str, int] = {}
+    with open("/proc/meminfo") as fh:
+        for line in fh:
+            k, _, rest = line.partition(":")
+            mem[k.strip()] = int(rest.strip().split()[0])
+    total_kb = mem.get("MemTotal", 0)
+    avail_kb = mem.get("MemAvailable", 0)
+    total_mb = round(total_kb / 1024, 1)
+    used_mb = round((total_kb - avail_kb) / 1024, 1)
+    return {"mem_total_mb": total_mb, "mem_used_mb": used_mb,
+            "mem_pct": round(100.0 * used_mb / total_mb, 1) if total_mb else None}
+
+
+def _ib_order_meta(order: Any, contract: Any) -> dict[str, Any]:
+    """Static order/contract fields (symbol, qty, prices)."""
+    return {
+        "symbol": getattr(contract, "symbol", "") or "",
+        "sec_type": getattr(contract, "secType", "") or "",
+        "exchange": getattr(contract, "exchange", "") or "",
+        "order_id": getattr(order, "orderId", None),
+        "perm_id": getattr(order, "permId", None),
+        "action": getattr(order, "action", "") or "",
+        "total_qty": _H._num(getattr(order, "totalQuantity", None)),
+        "order_type": getattr(order, "orderType", "") or "",
+        "lmt_price": _H._num(getattr(order, "lmtPrice", None)),
+        "aux_price": _H._num(getattr(order, "auxPrice", None)),
+    }
+
+
+def _format_exec_time(ex: Any) -> str:
+    """Safely format an execution's time as ISO or string fallback."""
+    raw = getattr(ex, "time", None)
+    iso_fn = getattr(raw, "isoformat", None)
+    if callable(iso_fn):
+        return str(iso_fn())
+    return str(raw or "")
+
+
+def _ib_fill_rows(trade: Any) -> list[dict[str, Any]]:
+    """Fill executions for one IB Trade."""
+    rows: list[dict[str, Any]] = []
+    for f in getattr(trade, "fills", []) or []:
+        ex = getattr(f, "execution", None)
+        rows.append(
+            {
+                "exec_id": getattr(ex, "execId", ""),
+                "time": _format_exec_time(ex),
+                "side": getattr(ex, "side", "") or "",
+                "shares": _H._num(getattr(ex, "shares", None)),
+                "price": _H._num(getattr(ex, "price", None)),
+                "commission": _H._num(
+                    getattr(getattr(f, "commissionReport", None), "commission", None)
+                ),
+            }
+        )
+    return rows
 
 
 class _H(BaseHTTPRequestHandler):
@@ -503,7 +655,12 @@ class _H(BaseHTTPRequestHandler):
         return dict(feed) if isinstance(feed, dict) else {}
 
     def _resources(self) -> dict[str, Any]:
-        """Per-process CPU/RAM plus host loadavg (cached, ps-based, no deps)."""
+        """Full host + process telemetry (ps-based, no deps).
+
+        Every daemon gets cpu/rss/threads/etime; the host surfaces total
+        mem, uptime, load, cpu count, and process count so the webapp can
+        render complete system-load panels without guessing.
+        """
         pids_dir = (
             self.journal_path.resolve().parent.parent / "runtime" / "pids"
             if self.journal_path
@@ -531,7 +688,24 @@ class _H(BaseHTTPRequestHandler):
             loadavg = [round(load1, 2), round(load5, 2), round(load15, 2)]
         except (OSError, AttributeError):
             loadavg = []
-        return {"procs": procs, "loadavg": loadavg, "ts": time.time()}
+        return {
+            "procs": procs,
+            "loadavg": loadavg,
+            **self._host_stats(),
+            "ts": time.time(),
+        }
+
+    @staticmethod
+    def _host_stats() -> dict[str, Any]:
+        """Host-wide vitals via ps/sysctl — best-effort, nulls on miss."""
+        stats: dict[str, Any] = {
+            "mem_total_mb": None, "mem_used_mb": None, "mem_pct": None,
+            "cpu_count": os.cpu_count(), "uptime_s": None, "proc_count": None,
+        }
+        stats.update(_proc_count())
+        stats["uptime_s"] = _uptime_s()
+        stats.update(_mem_stats())
+        return stats
 
     @staticmethod
     def _pidfile_pid(pids_dir: Path | None, fname: str) -> int | None:
@@ -615,6 +789,200 @@ class _H(BaseHTTPRequestHandler):
                 if (p / "src" / "hanoon_prime").is_dir():
                     return str(p)
         return str(Path.cwd())
+
+    # ── Raw IB Gateway surface ─────────────────────────────────────────
+
+    @staticmethod
+    def _safe(fn: Any, default: Any) -> Any:
+        """Call an ib_insync accessor; return *default* on any failure."""
+        try:
+            return fn()
+        except Exception:
+            return default
+
+    @staticmethod
+    def _num(v: Any) -> float | None:
+        """Finite float or None (never NaN/inf into JSON)."""
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if f == f and abs(f) != float("inf") else None
+
+    @classmethod
+    def _ib_ticker_row(cls, tk: Any) -> dict[str, Any]:
+        """One live Ticker as a plain JSON-able dict (raw quote surface)."""
+        bid = cls._num(tk.bid)
+        ask = cls._num(tk.ask)
+        last = cls._num(tk.last)
+        close = cls._num(tk.close)
+        spread = (
+            round(ask - bid, 4)
+            if bid is not None and ask is not None and ask >= bid >= 0
+            else None
+        )
+        return {
+            "symbol": getattr(getattr(tk, "contract", None), "symbol", "") or "",
+            "bid": bid,
+            "ask": ask,
+            "last": last,
+            "close": close,
+            "open": cls._num(tk.open),
+            "high": cls._num(tk.high),
+            "low": cls._num(tk.low),
+            "volume": cls._num(tk.volume),
+            "bid_size": cls._num(tk.bidSize),
+            "ask_size": cls._num(tk.askSize),
+            "last_size": cls._num(tk.lastSize),
+            "halted": bool(getattr(tk, "halted", 0)),
+            "spread": spread,
+            "market_price": cls._num(getattr(tk, "marketPrice", lambda: None)()),
+            "time": int(getattr(tk, "time", 0) or 0),
+        }
+
+    @classmethod
+    def _ib_order_row(cls, t: Any) -> dict[str, Any]:
+        """One live IB Trade (order + fills) as a plain dict."""
+        order = getattr(t, "order", None)
+        contract = getattr(t, "contract", None)
+        status = getattr(t, "orderStatus", None)
+        return {
+            **_ib_order_meta(order, contract),
+            "tif": getattr(order, "tif", "") or "",
+            "status": getattr(status, "status", "") or "",
+            "filled": cls._num(getattr(status, "filled", None)),
+            "remaining": cls._num(getattr(status, "remaining", None)),
+            "avg_fill_price": cls._num(getattr(status, "avgFillPrice", None)),
+            "filled_fills": len(getattr(t, "fills", []) or []),
+            "fills": _ib_fill_rows(t),
+        }
+
+    def _ib_raw(self) -> dict[str, Any]:
+        """Everything IB Gateway currently exposes, raw.
+
+        One dict per connection attribute: status, accounts, account
+        summary values, positions, live tickers (quotes), open/managed
+        orders with fills, executions, and recent error codes. Every
+        accessor is guarded — a half-open socket degrades to nulls, not
+        a broken /ib route.
+        """
+        ib = self._ib()
+        out: dict[str, Any] = {
+            "connected": False,
+            "ts": round(time.time(), 3),
+        }
+        if ib is None:
+            out["error"] = "no ib client (adapter not wired)"
+            return out
+        try:
+            out["connected"] = bool(ib.isConnected())
+        except Exception as exc:
+            log.debug("ib connectivity check failed: %s", exc)
+        if not out["connected"]:
+            out["error"] = "disconnected"
+            return out
+
+        out.update(self._ib_conn_facts(ib))
+        out["tickers"] = [
+            type(self)._ib_ticker_row(tk)
+            for tk in self._safe(lambda: list(ib.tickers()), [])
+        ]
+        out["orders"] = self._ib_order_rows(ib)
+        out["executions"] = self._ib_exec_rows(ib)
+        out["errors"] = self._safe(
+            lambda: list(ib.client._logger.errors)[-20:], []
+        )
+        out["error"] = None
+        return out
+
+    def _ib_conn_facts(self, ib: Any) -> dict[str, Any]:
+        """Connection-level facts: client id, version, accounts, summary."""
+        accounts = self._safe(lambda: list(ib.managedAccounts()), [])
+        return {
+            "client_id": self._safe(lambda: ib.client.clientId, None),
+            "server_version": self._safe(
+                lambda: ib.client.serverVersion, None
+            ),
+            "conn_time": self._safe(
+                lambda: int(ib.client.connTime.timestamp())
+                if ib.client.connTime
+                else None,
+                None,
+            ),
+            "accounts": accounts,
+            "account_summary": self._ib_account_summary(ib, accounts),
+            "positions": self._ib_position_rows(ib),
+        }
+
+    def _ib_account_summary(self, ib: Any, accounts: list[str]) -> dict[str, Any]:
+        """Per-account raw summary tag values."""
+        summary: dict[str, dict[str, Any]] = {}
+        for acct in accounts[:2]:
+            items = self._safe(lambda a=acct: list(ib.accountSummary(a)), [])
+            vals: dict[str, Any] = {}
+            for it in items:
+                v = self._num(getattr(it, "value", None))
+                vals[getattr(it, "tag", "")] = {
+                    "value": v if v is not None else str(getattr(it, "value", "")),
+                    "currency": getattr(it, "currency", "") or "",
+                }
+            summary[acct] = vals
+        return summary
+
+    def _ib_position_rows(self, ib: Any) -> list[dict[str, Any]]:
+        """Raw IB positions as JSON-able dicts."""
+        rows: list[dict[str, Any]] = []
+        positions = self._safe(lambda: list(ib.positions()), [])
+        for p in positions:
+            contract = getattr(p, "contract", None)
+            rows.append(
+                {
+                    "account": getattr(p, "account", "") or "",
+                    "symbol": getattr(contract, "symbol", "") or "",
+                    "sec_type": getattr(contract, "secType", "") or "",
+                    "position": self._num(p.position),
+                    "avg_cost": self._num(p.avgCost),
+                }
+            )
+        return rows
+
+    def _ib_order_rows(self, ib: Any) -> list[dict[str, Any]]:
+        """Open + managed trades, deduplicated by (orderId, permId)."""
+        seen: set[tuple[Any, ...]] = set()
+        rows: list[dict[str, Any]] = []
+        trades = self._safe(lambda: list(ib.openTrades()), []) + self._safe(
+            lambda: list(ib.trades()), []
+        )
+        for t in trades:
+            order = getattr(t, "order", None)
+            perm = getattr(order, "permId", None)
+            key = (getattr(order, "orderId", None), perm)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(type(self)._ib_order_row(t))
+        return rows
+
+    def _ib_exec_rows(self, ib: Any) -> list[dict[str, Any]]:
+        """Recent executions (capped to 100)."""
+        rows: list[dict[str, Any]] = []
+        for ex in self._safe(lambda: list(ib.executions()), []):
+            rows.append(
+                {
+                    "exec_id": getattr(ex, "execId", ""),
+                    "order_id": getattr(ex, "orderId", None),
+                    "perm_id": getattr(ex, "permId", None),
+                    "symbol": getattr(
+                        getattr(ex, "contract", None), "symbol", ""
+                    ) or "",
+                    "time": _format_exec_time(ex),
+                    "side": getattr(ex, "side", "") or "",
+                    "shares": self._num(getattr(ex, "shares", None)),
+                    "price": self._num(getattr(ex, "price", None)),
+                    "exchange": getattr(ex, "exchange", "") or "",
+                }
+            )
+        return rows[-100:]
 
     def _safety_net_status(self) -> dict[str, Any]:
         policy = self._policy_state()

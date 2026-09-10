@@ -15,6 +15,14 @@ from .journals import (
     seq_forward,
     verdicts_valid,
 )
+from .lifecycle import (
+    lifecycle_execution,
+    lifecycle_learning,
+    lifecycle_scan,
+    lifecycle_seed,
+    lifecycle_stream,
+    lifecycle_verdict,
+)
 from .live import bars_advance_when_active, positions_marked_live
 from .oracle import closes_reconciled, enters_minted, equity_synced
 from .purity import brain_fields_bounded, no_test_episodes, weights_finite_in_band
@@ -56,6 +64,7 @@ JOINT_ORDER = [
     "telemetry",
     "pipeline",
     "session",
+    "lifecycle",
     "safety",
     "memory",
     "purity",
@@ -90,6 +99,12 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("pipeline", "sleep_is_expected", sleep_is_expected, report=True),
     CheckSpec("session", "state_matches_clock", state_matches_clock, report=True),
     CheckSpec("session", "positions_reconciled", positions_reconciled, hard=True),
+    CheckSpec("lifecycle", "stage_seed", lifecycle_seed, report=True),
+    CheckSpec("lifecycle", "stage_stream", lifecycle_stream, report=True),
+    CheckSpec("lifecycle", "stage_scan", lifecycle_scan, report=True),
+    CheckSpec("lifecycle", "stage_verdict", lifecycle_verdict, report=True),
+    CheckSpec("lifecycle", "stage_execution", lifecycle_execution, report=True),
+    CheckSpec("lifecycle", "stage_learning", lifecycle_learning, report=True),
     CheckSpec("safety", "no_netting_guard", no_netting_guard, hard=True),
     CheckSpec("safety", "no_traceback", no_traceback, hard=True),
     CheckSpec("safety", "no_safety_halt", no_safety_halt, hard=True),
