@@ -42,7 +42,7 @@ def test_full_manifest_healthy_mock_stack(tmp_path, monkeypatch) -> None:
         "position_count": 0,
         "positions": [],
     }
-    ctx.memo["snapshot"] = {"health": {}}
+    ctx.memo["snapshot"] = {"health": {}, "halim_modifier": 0.05}
     ctx.memo["positions"] = {"positions": [], "total_pnl": 0.0, "count": 0}
     ctx.memo["account"] = {"account_summary": {}, "positions_open": 0}
     ctx.memo["runtime_state"] = {

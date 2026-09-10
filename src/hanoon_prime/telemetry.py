@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, cast
 
 from ._ib_marks import mark_positions
+from .inspection.notify import manifest_notify
 from .config import TRADING_CONFIG
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
 from .memory import Journal
@@ -59,6 +60,8 @@ ROUTES_GET = {
     "/inspection": "_inspection",
     "/logs": "_log_tail",
     "/ib": "_ib_raw",
+    "/decisions": "_decisions",
+    "/trade-quality": "_trade_quality",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -617,6 +620,62 @@ class _H(BaseHTTPRequestHandler):
             ]
         }
 
+    def _decisions(self) -> dict[str, Any]:
+        """Full decision chain: verdicts → entries → exits → fills → P&L."""
+        if not self.journal_path or not self.journal_path.exists():
+            return {"chain": [], "total_events": 0}
+        entries = [
+            r
+            for r in Journal(self.journal_path).tail(500)
+            if r.get("event")
+            in ("verdict", "position_closed", "exit", "entry", "fill", "position_open")
+        ]
+        by_ticker: dict[str, list[dict[str, Any]]] = {}
+        for e in sorted(entries, key=lambda r: r.get("ts", 0)):
+            t = e.get("ticker", e.get("symbol", ""))
+            if t:
+                by_ticker.setdefault(t, []).append(e)
+        chain = [{"ticker": t, "events": evs[-12:]} for t, evs in by_ticker.items()]
+        return {"chain": chain, "total_events": len(entries)}
+
+    def _trade_quality(self) -> dict[str, Any]:
+        """Live trade-quality metrics: win rate, profit factor, P&L breakdown."""
+        if not self.journal_path or not self.journal_path.exists():
+            return {
+                "trades": 0,
+                "win_rate": 0,
+                "pf": 0,
+                "net_pnl": 0.0,
+                "breakdown": [],
+            }
+        trades = [
+            e
+            for e in Journal(self.journal_path).tail(500)
+            if e.get("event") in ("position_closed", "exit")
+        ]
+        if not trades:
+            return {
+                "trades": 0,
+                "win_rate": 0,
+                "pf": 0,
+                "net_pnl": 0.0,
+                "breakdown": [],
+            }
+        wins = [t for t in trades if (t.get("pnl") or 0) > 0]
+        losses = [t for t in trades if (t.get("pnl") or 0) < 0]
+        gw = sum(t.get("pnl") or 0 for t in wins)
+        gl = abs(sum(t.get("pnl") or 0 for t in losses))
+        pf = (gw / gl) if gl else float("inf")
+        return {
+            "trades": len(trades),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / len(trades), 3),
+            "pf": round(pf, 3) if pf != float("inf") else "inf",
+            "net_pnl": round(sum(t.get("pnl") or 0 for t in trades), 2),
+            "breakdown": trades[-20:],
+        }
+
     def _pipeline_state(self) -> dict[str, Any]:
         """Continuous pipeline health (monitor daemon view)."""
         mon = getattr(self.bot, "monitor", None) if self.bot else None
@@ -648,14 +707,25 @@ class _H(BaseHTTPRequestHandler):
         if brain is None:
             return {}
         s = brain.snapshot()
-        m = s.get("memory", {})
+        mem = s.get("memory", {})
         return {
             "threshold": round(s.get("threshold", 0.58), 4),
             "decision_count": s.get("decision_count", 0),
             "episodic_size": s.get("episodic_size", 0),
-            "weights": m.get("weights", {}),
-            "pred_error": m.get("pred_error", 0.0),
+            "weights": mem.get("weights", {}),
+            "pred_error": mem.get("pred_error", 0.0),
             "brain_state": s.get("brain_state", {}),
+            "neuromorphic": s.get("neuromorphic", {}),
+            "realized": s.get("realized", {}),
+            "nash": s.get("nash", {}),
+            "advisor": s.get("advisor", {}),
+            "exits_adaptive": s.get("exits_adaptive", {}),
+            "meta_label": s.get("meta_label", {}),
+            "horizon_bandit": s.get("horizon_bandit", {}),
+            "regime_weights": s.get("regime_weights", {}),
+            "learned_exit": s.get("learned_exit", {}),
+            "genome": s.get("genome", {}),
+            "sleep_engine": s.get("sleep_engine", {}),
         }
 
     def _system2_state(self) -> dict[str, Any]:
@@ -783,9 +853,14 @@ class _H(BaseHTTPRequestHandler):
         # type() lookup keeps the overridable class attr an unbound callable.
         fn = type(self).inspection_builder or self._run_inspection
         try:
-            return fn()
+            result = fn()
         except Exception as exc:
             return {"status": "UNVERIFIABLE", "error": str(exc)[:200]}
+        try:
+            manifest_notify(result)
+        except Exception as exc:
+            log.debug("manifest_notify failed: %s", exc)
+        return result
 
     def _run_inspection(self) -> dict[str, Any]:
         exe = sys.executable or "python3"
@@ -871,7 +946,9 @@ class _H(BaseHTTPRequestHandler):
             "last_size": cls._num(tk.lastSize),
             "halted": bool(getattr(tk, "halted", 0)),
             "spread": spread,
-            "market_price": cls._num(cls._safe(getattr(tk, "marketPrice", lambda: None), None)),
+            "market_price": cls._num(
+                cls._safe(getattr(tk, "marketPrice", lambda: None), None)
+            ),
             "time": _epoch_seconds(getattr(tk, "time", None)),
         }
 

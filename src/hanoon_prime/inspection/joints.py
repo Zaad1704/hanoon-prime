@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from .checks import FAIL, MANIFEST_STATUS, OK, WARN, CheckResult, CheckSpec, run_check
 from .ctx import InspectionContext
-from .halim import halim_state_matches_clock
+from .halim import halim_engaged_in_decisions, halim_state_matches_clock
 from .journals import (
     chain_intact_from_anchor,
     journal_grows,
@@ -145,6 +145,9 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("trade_quality", "halim_postmortem", halim_postmortem, report=True),
     CheckSpec(
         "trade_quality", "pnl_sign_consistency", pnl_sign_consistency, report=True
+    ),
+    CheckSpec(
+        "halim", "halim_engaged_in_decisions", halim_engaged_in_decisions, report=True
     ),
 )
 
