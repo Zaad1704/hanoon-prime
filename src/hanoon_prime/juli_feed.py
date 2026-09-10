@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from .brain.indicators import compute_all_alpha
+from .brain.policy.verdict import Verdict
 from .brain.regime import RegimeDetector
 from .brain.shared_state import BrainState
 from .cerebellum import compute_alpha
@@ -34,6 +35,13 @@ _SRC = (
     " bid_sizes_arr ask_sizes_arr"
 )
 ATTRS = tuple(zip(_KEYS.split(), _SRC.split()))
+
+
+def _fmt_verdict(v: Verdict) -> str:
+    """Compact greppable verdict token (ticker, action, score, side, reason)."""
+    where = f"{v.stage}:{v.reason}" if v.stage else (v.reason or v.action)
+    side = "SHORT" if v.direction < 0 else "LONG" if v.direction > 0 else "-"
+    return f"{v.ticker}:{v.action}({v.score:.3f},{side})[{where}]"
 
 
 def compute_alpha_from_snap(snap: dict[str, Any]) -> dict[str, float]:

@@ -322,6 +322,7 @@ class NeuromorphicBrain:
                 action=VETOED,
                 reason="direction_rejected",
                 stage="trading_policy",
+                direction=thought.direction,
             )
         price = float(snap.get("last") or 0.0)
         cleared, penalty = self.trading_policy.is_penny_bar_cleared(

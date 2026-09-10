@@ -235,8 +235,13 @@ class IBStreamer:
         for bar in reversed(bars):
             bv = self._est_buy_vol(bar.close, bar.high, bar.low, bar.volume)
             buf.append(
-                BarSeries(bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume)
+                BarSeries(
+                    bar.close, bar.high, bar.low, bar.volume, bv, bar.close, bar.volume
+                )
             )
+        log.info(
+            "SEED %s: %d historical bars (buffer=%d)", ticker, len(bars), len(buf.close)
+        )
 
     @staticmethod
     def _est_buy_vol(close: float, high: float, low: float, vol: float) -> float:

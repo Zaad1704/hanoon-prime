@@ -499,14 +499,23 @@ class BotCycleMixin:
         gap = max(CYCLE_FLOOR, meta.poll - elapsed)
         time.sleep(gap)
         self._heartbeat()
-        log.info(_cycle_line(self._last_bars, len(self.hippocampus._open_positions), verdicts, len(exit_s)))
+        log.info(
+            _cycle_line(
+                self._last_bars,
+                len(self.hippocampus._open_positions),
+                verdicts,
+                len(exit_s),
+            )
+        )
 
     def _count_new_bars(self) -> int:
         """Append pending ticks to buffers; count completed minute bars."""
         return sum(
             1
             for tk in self.ib.pendingTickers()
-            if self.streamer.update_bar(getattr(getattr(tk, "contract", None), "symbol", ""))
+            if self.streamer.update_bar(
+                getattr(getattr(tk, "contract", None), "symbol", "")
+            )
         )
 
     def _execute_entries(self, market_open: bool, verdicts: list[Verdict]) -> None:
@@ -645,25 +654,33 @@ class BotCycleMixin:
         stranding the ticker on live-bars-only data.
         """
         seeded = self.__dict__.setdefault("_seeded_subs", set())
+        ever = self.__dict__.setdefault("_ever_seeded", set())
         retries = self.__dict__.setdefault("_seed_retries", {})
-        ordered = list(
-            dict.fromkeys(
-                sorted(set(self.hippocampus._open_positions)) + sorted(needed)
+        orderly = sorted(set(self.hippocampus._open_positions)) + sorted(needed)
+        ordered = list(dict.fromkeys(orderly))
+        buf = self.streamer.buffers
+        pending = [
+            s
+            for s in ordered
+            if s in self.streamer.ticker_subs
+            and (
+                s not in seeded
+                or (s in ever and not len(getattr(buf.get(s), "close", []) or []))
             )
-        )
-        pending = [s for s in ordered if s in self.streamer.ticker_subs and s not in seeded]
+        ]
         if not pending:
             return
         s = pending[0]
         try:
             self.streamer.seed_history(s)
             seeded.add(s)
+            ever.add(s)
             retries.pop(s, None)
         except Exception as e:
             retries[s] = retries.get(s, 0) + 1
             if retries[s] >= SEED_RETRY_MAX:
                 seeded.add(s)  # give up; live bars still accumulate
-            log.debug("Seed %s fail (%d/%d): %s", s, retries[s], SEED_RETRY_MAX, e)
+            log.warning("Seed %s fail (%d/%d): %s", s, retries[s], SEED_RETRY_MAX, e)
 
     def _gc_stale_subs(self) -> None:
         """Unsubscribe tickers not seen in STALE_SUB_SECS (frees MD lines)."""
@@ -751,7 +768,9 @@ class BotCycleMixin:
         """
         try:
             self.juli.brain.register_position(
-                ticker, entry_price, horizon=self.executor._horizons.get(ticker, "scalp")
+                ticker,
+                entry_price,
+                horizon=self.executor._horizons.get(ticker, "scalp"),
             )
             log.info("FILL CONFIRMED %s @ %.4f (bracket live)", ticker, entry_price)
         except Exception as exc:
@@ -835,11 +854,14 @@ class BotCycleMixin:
         rate-limited so it never spams the main chat.
         """
         try:
-            insight = self.juli.brain.state.get("halim_last_insight") or {}  # array-safe
+            insight = self.juli.brain.state.get("halim_last_insight")
             if not insight:
                 return
             now = time.monotonic()
-            if now - getattr(self, "_last_postmortem_ts", 0.0) < POSTMORTEM_MIN_INTERVAL:
+            if (
+                now - getattr(self, "_last_postmortem_ts", 0.0)
+                < POSTMORTEM_MIN_INTERVAL
+            ):
                 return
             body = json.dumps(insight, sort_keys=True)
             if body == getattr(self, "_last_postmortem_body", ""):

@@ -1,9 +1,6 @@
 """hanoon_prime.juli — Thin scanner router for the Neuromorphic Brain.
 
-Brain-first: every evaluated ticker yields a Verdict from
-``NeuromorphicBrain.decide_entry`` — never a silent omission. Tickers not
-in the rotating eval window are scheduling, not decisions: they produce no
-Verdict this cycle and age out of ``/verdicts`` naturally.
+Every evaluated ticker yields a Verdict; off-window ticks are scheduling.
 """
 
 from __future__ import annotations
@@ -18,18 +15,12 @@ from .brain.policy.verdict import Verdict
 from .brain.shared_state import BrainState
 from .data.budget import DataBudget
 from .data.scanner import IBScanner, ScanResult
-from .juli_feed import JuliFeed
+from .juli_feed import JuliFeed, _fmt_verdict
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES: int = 20
 # Rotating EVAL_WINDOW keeps flow continuous (no THINK burst, then silence).
 EVAL_WINDOW: int = 4
-
-
-def _fmt_verdict(v: Verdict) -> str:
-    """One verdict as a compact, greppable log token."""
-    where = f"{v.stage}:{v.reason}" if v.stage else (v.reason or v.action)
-    return f"{v.ticker}:{v.action}({v.score:.3f})[{where}]"
 
 
 class JuliBrain:
@@ -197,9 +188,7 @@ class JuliBrain:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})
                 log.info("EXIT SIGNAL %s: %s", t, sig.reason)
             else:
-                watched.append(
-                    f"{t}@{snap['last']:.2f} {'LONG' if direction > 0 else 'SHORT'}"
-                )
+                watched.append(f"{t}@{snap['last']:.2f}{'L' if direction > 0 else 'S'}")
         if watched:
             log.info("WATCH %s", " ".join(watched))
         return exits
