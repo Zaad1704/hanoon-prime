@@ -102,11 +102,16 @@ def bars_advance_when_active(ctx: InspectionContext) -> CheckResult:
             "pipeline", "bars_advance_when_active", FAIL, detail="no CYCLE lines"
         )
     closed = sum(1 for n in counts if n > 0)
-    ok = closed > 0
+    if closed < 0.10 * len(counts):
+        status = FAIL
+    elif closed < 0.30 * len(counts):
+        status = WARN
+    else:
+        status = OK
     return CheckResult(
         "pipeline",
         "bars_advance_when_active",
-        OK if ok else FAIL,
+        status,
         detail=f"{closed}/{len(counts)} cycles closed a bar",
         evidence={"bars": counts[-10:], "window": len(counts)},
     )

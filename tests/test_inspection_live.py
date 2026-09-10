@@ -124,6 +124,20 @@ def test_bars_advance_ok_when_closing(tmp_path) -> None:
     assert live.bars_advance_when_active(ctx).status == OK
 
 
+def test_bars_advance_warns_intermittent(tmp_path) -> None:
+    ctx = _health(InspectionContext(base_dir=tmp_path), active=True, count=14)
+    lines = [
+        (
+            f"{_now_t()}.000 INFO ib_cycle CYCLE bars={3 if i % 10 == 0 else 0} "
+            f"open=14 d=0 x=0"
+        )
+        for i in range(20)
+    ]
+    ctx.log_path.parent.mkdir(parents=True)
+    ctx.log_path.write_text("\n".join(lines) + "\n")
+    assert live.bars_advance_when_active(ctx).status == WARN
+
+
 def test_bars_advance_no_cycle_fails_when_active(tmp_path) -> None:
     ctx = _health(InspectionContext(base_dir=tmp_path), active=True, count=0)
     ctx.log_path.parent.mkdir(parents=True)
