@@ -128,7 +128,9 @@ class NeuromorphicBrain:
             memory=self._neuromorphic._memory,
         )
         self._consolidation = ConsolidationEngine(
-            brain_state=self.state, sleep_engine=self._sleep_engine
+            brain_state=self.state,
+            sleep_engine=self._sleep_engine,
+            realized=self._realized,
         )
 
     def _init_strategy_organs(self) -> None:

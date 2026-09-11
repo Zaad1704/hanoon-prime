@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from .checks import FAIL, MANIFEST_STATUS, OK, WARN, CheckResult, CheckSpec, run_check
 from .ctx import InspectionContext
 from .halim import halim_engaged_in_decisions, halim_state_matches_clock
-from .inside_man import brain_halim_bounded, conf_bin_loss_streak, exits_ib_pnl_fed
+from .inside_man import (
+    brain_halim_bounded,
+    conf_bin_loss_streak,
+    exits_ib_pnl_fed,
+    veto_conviction_integrity,
+)
 from .journals import (
     chain_intact_from_anchor,
     journal_grows,
@@ -65,22 +70,12 @@ from .trade_quality import (
 )
 from .weight_purity import cortex_score_degenerate, regime_weights_bounded
 
-JOINT_ORDER = [
-    "processes",
-    "identity",
-    "telemetry",
-    "pipeline",
-    "session",
-    "lifecycle",
-    "safety",
-    "memory",
-    "purity",
-    "execution_oracle",
-    "halim",
-    "inside_man",
-    "trade_quality",
-    "notify",
-]
+# Grouped to respect the R3b 200-line file cap (one-per-line would breach it).
+# fmt: off
+JOINT_ORDER = ["processes", "identity", "telemetry", "pipeline", "session",
+               "lifecycle", "safety", "memory", "purity", "execution_oracle",
+               "halim", "inside_man", "trade_quality", "notify"]
+# fmt: on
 
 SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("processes", "bot_alive", bot_alive, report=True),
@@ -154,6 +149,9 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("inside_man", "brain_halim_bounded", brain_halim_bounded, hard=True),
     CheckSpec("inside_man", "exits_ib_pnl_fed", exits_ib_pnl_fed, report=True),
     CheckSpec("inside_man", "conf_bin_loss_streak", conf_bin_loss_streak, report=True),
+    CheckSpec(
+        "inside_man", "veto_conviction_integrity", veto_conviction_integrity, hard=True
+    ),
 )
 
 # fmt: off

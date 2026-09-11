@@ -123,6 +123,42 @@ def test_on_trade_close_ironyclade_filter() -> None:
     )
 
 
+# ── losing_conf_bins / aggressive conf-bin learning ──────────────────
+
+
+def test_losing_conf_bins_empty_when_no_losses() -> None:
+    r = RealizedStats(persist=False)
+    assert r.losing_conf_bins() == []
+
+
+def test_losing_conf_bins_detects_zero_win_streak() -> None:
+    """0 wins + >= CONF_LOSS_STREAK_WARN losses => active money-burner."""
+    from hanoon_prime.brain.realized_ev import CONF_LOSS_STREAK_WARN
+
+    r = RealizedStats(persist=False)
+    for _ in range(CONF_LOSS_STREAK_WARN):
+        r.add_confidence_outcome(0.62, won=False)  # bin 2
+    bins = r.losing_conf_bins()
+    assert bins == [(2, CONF_LOSS_STREAK_WARN, 0)]
+
+
+def test_losing_conf_bins_below_warn_is_not_losing() -> None:
+    """9 losses (< WARN=10) with 0 wins is not yet an aggressive-learning trigger."""
+    r = RealizedStats(persist=False)
+    for _ in range(9):
+        r.add_confidence_outcome(0.62, won=False)
+    assert r.losing_conf_bins() == []
+
+
+def test_losing_conf_bins_any_win_disqualifies_bin() -> None:
+    """A single win in the bin breaks the 0-wins streak."""
+    r = RealizedStats(persist=False)
+    for _ in range(10):
+        r.add_confidence_outcome(0.62, won=False)
+    r.add_confidence_outcome(0.62, won=True)
+    assert r.losing_conf_bins() == []
+
+
 def test_on_trade_close_ib_fill_updates_realized() -> None:
     """An ib_fill source (IRONYCLADE member) feeds the realized gate."""
     from hanoon_prime.brain.orchestrator import NeuromorphicBrain

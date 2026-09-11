@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
@@ -27,6 +27,9 @@ from .policy.safety import SafetyProducer
 from .regime import RegimeDetector
 from .shared_state import BrainState
 from .thinker import Signal, Thinker
+
+if TYPE_CHECKING:
+    from .realized_ev import RealizedStats
 
 log = logging.getLogger(__name__)
 HALIM_URL: str = "http://127.0.0.1:8765"
@@ -42,10 +45,12 @@ class ConsolidationEngine:
         halim_url: str = HALIM_URL,
         interval: float = CYCLE_INTERVAL,
         sleep_engine: Optional[SleepReplayEngine] = None,
+        realized: Optional["RealizedStats"] = None,
     ) -> None:
         self.state = brain_state
         self.interval = interval
         self.memory = JuliMemory()
+        self._realized = realized
         self.halim = HalimAdapter(base_url=halim_url)
         self.thinker = Thinker()
 
@@ -284,7 +289,7 @@ class ConsolidationEngine:
     def _persist_data(self) -> dict[str, Any]:
         """Build state data for persistence."""
         ep = getattr(getattr(self.thinker, "episodic", None), "size", 0)
-        return {
+        data: dict[str, Any] = {
             "weights": self.memory.get_weights(),
             "threshold": self.memory.threshold,
             "pred_error": self.memory.pred_error,
@@ -292,6 +297,12 @@ class ConsolidationEngine:
             "brain_state": self.state.snapshot(),
             "timestamp": time.time(),
         }
+        # Surface realized conf-bin stats at top level so the Inside Man
+        # `conf_bin_loss_streak` check can observe losing confidence bins
+        # (the orchestrator adapts the entry threshold in response).
+        if self._realized is not None:
+            data["realized"] = self._realized.snapshot()
+        return data
 
     def _get_latest_alpha(self) -> dict[str, float] | None:
         """Read latest alpha from System 1 via shared state."""

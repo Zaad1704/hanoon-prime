@@ -7,6 +7,7 @@ reflection, the reflection buffer, and the learning supervisor.
 
 from __future__ import annotations
 
+import json
 import time
 
 import numpy as np
@@ -28,6 +29,10 @@ from hanoon_prime.brain.dynamics import (
 from hanoon_prime.brain.episodic import EpisodicMemory
 from hanoon_prime.brain.exits import ExitPolicy
 from hanoon_prime.brain.memory import JuliMemory
+from hanoon_prime.brain.realized_ev import (
+    CONF_LOSS_AGGRESSIVE_MAX,
+    CONF_LOSS_AGGRESSIVE_STEP,
+)
 from hanoon_prime.brain.reflection import Reflector, TradeClose
 from hanoon_prime.brain.weight_enforcer import MAX_WEIGHT, WeightEnforcer, get_enforcer
 from hanoon_prime.reflection.buffer import BUY, SELL, Fill, Trade, TradeBuffer
@@ -225,6 +230,40 @@ class TestDynamics:
         dyn.adapt_threshold(0.47)  # between 0.45 and 0.50 — no change
         assert dyn.threshold == 0.58
 
+    def test_adapt_threshold_aggressive_loss_bins_raises(self):
+        """A losing conf bin (0 wins, >=10 losses) accelerates the gate.
+
+        0.1 < 0.45 lowers 0.005; 3 losing bins add min(0.15, 3*0.025=0.075)
+        => 0.58 - 0.005 + 0.075 = 0.65 (within band).
+        """
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.1, losing_bins=3)
+        assert abs(dyn.threshold - 0.65) < 1e-9
+
+    def test_adapt_threshold_aggressive_is_per_bin_capped(self):
+        """Per-bin step caps at CONF_LOSS_AGGRESSIVE_MAX per trade-close."""
+        dyn = Dynamics(base_threshold=0.58)
+        # 0.5 >= 0.50 raises 0.01; 10 bins would be 0.25, capped to 0.15.
+        dyn.adapt_threshold(0.5, losing_bins=10)
+        assert dyn.threshold == THRESHOLD_MAX  # 0.58 + 0.01 + 0.15 -> 0.74 -> 0.70
+
+    def test_adapt_threshold_no_loss_bins_ignores_aggressive_branch(self):
+        """losing_bins=0 must not move the aggressive branch (pure legacy path)."""
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.5, losing_bins=0)
+        assert abs(dyn.threshold - 0.59) < 1e-9
+
+    def test_adapt_threshold_one_bin_one_step(self):
+        dyn = Dynamics(base_threshold=0.58)
+        dyn.adapt_threshold(0.47, losing_bins=1)  # dead-band + 0.025
+        assert abs(dyn.threshold - 0.605) < 1e-9
+
+    def test_adapt_threshold_aggressive_respects_floor(self):
+        """Aggressive raise can never push below THRESHOLD_MIN or above MAX."""
+        dyn = Dynamics(base_threshold=0.70)  # already at ceiling
+        dyn.adapt_threshold(0.5, losing_bins=8)
+        assert dyn.threshold == THRESHOLD_MAX
+
     def test_refractory_then_expires(self):
         dyn = Dynamics()
         dyn.set_refractory(2.0)
@@ -238,6 +277,34 @@ class TestDynamics:
         for _ in range(130):
             dyn.process(float(rng.uniform(-1, 1)), direction=1)
         assert THRESHOLD_MIN <= dyn.threshold <= THRESHOLD_MAX
+
+
+# ── Consolidator realized-state wiring ──────────────────────────────
+def test_persist_data_surfaces_realized_for_inside_man() -> None:
+    """state.json must expose `realized.conf_wins/conf_losses` so the
+    Inside Man `conf_bin_loss_streak` guard can observe losing bins live.
+
+    Regression lock: a prior version omitted `realized` from _persist_data,
+    which made the guard silently report OK ("no active loss streaks") even
+    when aggressive conf-bin learning was actively suppressed.
+    """
+    from hanoon_prime.brain.consolidation import ConsolidationEngine
+    from hanoon_prime.brain.realized_ev import RealizedStats
+    from hanoon_prime.brain.shared_state import BrainState
+
+    rs = RealizedStats(persist=False)
+    for _ in range(12):
+        rs.add_confidence_outcome(0.62, won=False)  # bin 2, 0 wins
+    ce = ConsolidationEngine(brain_state=BrainState(), realized=rs)
+    data = ce._persist_data()
+    assert "realized" in data
+    # Round-trip through JSON: that's how state.json reaches the Inside Man
+    # check (int conf-bin keys become strings on disk).
+    on_disk = json.loads(json.dumps(data))
+    realized = on_disk["realized"]
+    assert realized["conf_losses"].get("2") == 12
+    assert realized["conf_wins"].get("2", 0) == 0
+    assert realized["conf_wins"] == {}  # no wins anywhere in this scenario
 
 
 # ── Episodic ────────────────────────────────────────────────────────────

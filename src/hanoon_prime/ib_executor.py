@@ -178,11 +178,9 @@ class IBExecutor:
                 continue
             cancel_sell_legs(self.ib, sym)
             try:
-                from ib_insync import MarketOrder
-
                 self.ib.placeOrder(
                     contract,
-                    MarketOrder(
+                    _ib.MarketOrder(
                         "BUY", qty, tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS
                     ),
                 )
@@ -432,11 +430,9 @@ class IBExecutor:
             return
         action = "SELL" if pos.direction > 0 else "BUY"
         try:
-            from ib_insync import MarketOrder
-
             self.ib.placeOrder(
                 contract,
-                MarketOrder(
+                _ib.MarketOrder(
                     action, abs(pos.shares), tif="DAY", outsideRth=ALLOW_EXTENDED_HOURS
                 ),
             )

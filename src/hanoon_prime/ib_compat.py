@@ -14,6 +14,7 @@ False.
 from __future__ import annotations
 
 import asyncio
+import warnings
 from typing import Any
 
 _ib_available: bool = False
@@ -21,6 +22,20 @@ ib: Any = None
 
 _loop = asyncio.new_event_loop()
 asyncio.set_event_loop(_loop)
+
+# Python 3.14 deprecated asyncio.get_event_loop_policy(); ib_insync's eventkit
+# dependency calls it at import time. Under the project's strict
+# `filterwarnings = error::DeprecationWarning` (pytest.ini) that raises,
+# which breaks ib_insync import and every downstream
+# `from ib_insync import …` site (netting-guard order placement, scanner
+# subscriptions, etc.). Downgrade _this one_ third-party deprecation to a
+# normal, non-fatal warning so the import succeeds and ib_insync is cached in
+# sys.modules for all later `from ib_insync import …` calls.
+warnings.filterwarnings(
+    "default",
+    message=r".*get_event_loop_policy.*",
+    category=DeprecationWarning,
+)
 
 try:
     import ib_insync as ib

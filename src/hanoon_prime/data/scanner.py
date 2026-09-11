@@ -12,8 +12,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from importlib.util import find_spec
 from typing import Any
+
+from ..ib_compat import _ib_available
+from ..ib_compat import ib as _ib
 
 log = logging.getLogger(__name__)
 SCAN_CONFIGS: dict[str, dict[str, Any]] = {
@@ -67,10 +69,7 @@ class IBScanner:
 
     def scan(self, config_name: str = "all") -> int:
         """Start scanner subscriptions. 'all' subscribes to all 4 codes."""
-        try:
-            if find_spec("ib_insync") is None:
-                return 0
-        except (ImportError, ValueError):
+        if not _ib_available:
             return 0
         self._cancel_scan()
         configs = (
@@ -90,9 +89,7 @@ class IBScanner:
     def _start_sub(self, name: str, config: dict[str, Any]) -> None:
         """Start a single scanner subscription."""
         try:
-            from ib_insync import ScannerSubscription
-
-            sub = ScannerSubscription(
+            sub = _ib.ScannerSubscription(
                 numberOfRows=50,
                 instrument=config["instrument"],
                 locationCode=config["locationCode"],

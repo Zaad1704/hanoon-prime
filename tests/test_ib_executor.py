@@ -458,10 +458,11 @@ class TestOutsideRth:
         }
         streamer = MagicMock()
         streamer.contracts = {"TSLA": MagicMock()}
-        # ib_insync can't be imported on py3.14 (eventkit issue);
-        # inject a mock so close_position's local import resolves.
+        # close_position routes orders through the ib_compat `_ib` shim
+        # (not a deferred `from ib_insync import …` lookup), so patch _ib
+        # directly — same idiom as TestPlaceOca patching _protect._ib.
         mock_ib_mod = MagicMock()
-        with patch.dict("sys.modules", {"ib_insync": mock_ib_mod}):
+        with patch("hanoon_prime.ib_executor._ib", mock_ib_mod):
             exc.close_position("TSLA", streamer)
         mock_ib_mod.MarketOrder.assert_called_once()
         kwargs = mock_ib_mod.MarketOrder.call_args.kwargs

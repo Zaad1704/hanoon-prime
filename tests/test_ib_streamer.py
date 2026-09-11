@@ -1,7 +1,10 @@
 """tests/test_ib_streamer.py — tests for 1-minute bar aggregation.
 
-Since ib_insync is not importable in this environment, we use fake/mock
-IB client objects. Tests verify:
+Uses fake/mock IB client objects (no live IB Gateway connection).
+The ib_compat shim makes ib_insync importable on Python 3.14+ by
+neutralizing the eventkit get_event_loop_policy deprecation, so tests
+patch `hanoon_prime.ib_streamer.ib` directly rather than faking
+sys.modules. Tests verify:
 
 1. StreamBuffer append + trimming to LOOKBACK_BARS
 2. update_bar aggregates sub-second ticks into 1-minute OHLCV bars

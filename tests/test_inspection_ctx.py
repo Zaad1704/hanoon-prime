@@ -91,10 +91,16 @@ def test_halim_probe_down_on_bad_url(tmp_path: Path) -> None:
 
 
 def test_last_line_age_present(tmp_path: Path) -> None:
+    import datetime
+
     log = tmp_path / "logs" / "hanoon_prime.log"
     log.parent.mkdir(parents=True)
-    log.write_text("12:00:00.000 INFO ib_cycle HEARTBEAT open=0\n")
+    # Use the live wall-clock time (HH:MM:SS.today) — line_ts() assumes the
+    # timestamp is today, so a hardcoded 12:00:00 is read as ~40min in the
+    # future under any non-12:00 wall clock and yields a negative age.
+    now = datetime.datetime.now().strftime("%H:%M:%S") + ".000"
+    log.write_text(f"{now} INFO ib_cycle HEARTBEAT open=0\n")
     ctx = InspectionContext(base_dir=tmp_path)
     age = probe.last_line_age(ctx, probe.HEARTBEAT_MARKER)
     assert age is not None
-    assert 0 <= age < 86400
+    assert -5 <= age < 86400  # small negative tolerable (sub-second FS clock skew)
