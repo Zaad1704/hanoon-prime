@@ -341,6 +341,19 @@ class NeuromorphicBrain:
             return self._veto(ticker, thought, "session_disabled")
         side = "BUY" if thought.direction > 0 else "SELL"
         if not self.trading_policy.is_direction_allowed(side):
+            # Enforce the no-signal floor at the emitter: a direction veto
+            # carrying |score| < DIRECTION_MIN_SCORE has no conviction and must
+            # surface as HOLD, never as a directional VETOED. Closes the
+            # zero-conviction direction_rejected leak (inside_man contract).
+            if abs(float(thought.score)) < DIRECTION_MIN_SCORE:
+                return Verdict(
+                    ticker=ticker,
+                    action=HOLD,
+                    reason="no_signal",
+                    stage="veto_gate",
+                    score=float(thought.score),
+                    direction=thought.direction,
+                )
             return self._veto(
                 ticker, thought, "direction_rejected", direction=thought.direction
             )

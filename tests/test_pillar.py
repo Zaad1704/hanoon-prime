@@ -10,9 +10,22 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
+import pytest
+
+import hanoon_prime.inspection.pillar as pillar
 from hanoon_prime.inspection.checks import FAIL, OK, WARN, CheckResult
 from hanoon_prime.inspection.ctx import InspectionContext
 from hanoon_prime.inspection.pillar import pillar_balance
+
+
+@pytest.fixture(autouse=True)
+def _direction_mode_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default direction_mode to 'both' so short-skew FAIL tests stay honest.
+
+    The policy-aware downgrade only fires for policy-blocked sides
+    (direction_mode != "both"); the existing FAIL tests must still FAIL.
+    """
+    monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "both")
 
 
 def _ctx(tmp_path: Path) -> InspectionContext:
@@ -131,3 +144,19 @@ def test_pillar_joint_is_inside_man() -> None:
     spec = next(s for s in SPECS if s.name == "pillar_balance")
     assert spec.joint == "inside_man"
     assert spec.report is True
+
+
+def test_pillar_long_only_short_skew_is_policy_warn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """shorts blocked (long_only): SHORT veto skew is configured, not a defect."""
+    monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "long_only")
+    ctx = _ctx(tmp_path)
+    lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
+    for _ in range(5):
+        lines.append(_eval("TSLA:VETOED(-0.700,S)[trading_policy:direction_rejected]"))
+    _write_log(ctx, *lines)
+    r = pillar_balance(ctx)
+    assert r.status == WARN  # NOT FAIL — shorts intentionally disabled
+    assert "long_only" in r.detail
+    assert r.evidence["direction_mode"] == "long_only"

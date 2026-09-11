@@ -202,3 +202,20 @@ def test_sizing_result_type_used_when_fake_tick_omits_it():
     b = _brain()
     v = b.decide_entry("NVD", _snap(), {}, "rth")
     assert isinstance(v.sizing, SizingResult)
+
+
+def test_weak_conviction_direction_is_no_signal_not_a_veto():
+    """The no-signal floor is also enforced at the direction-rejection gate.
+
+    A sub-DIRECTION_MIN_SCORE direction that would be direction_rejected must
+    HOLD instead, so zero/near-zero-conviction vetoes can never be logged —
+    direct _apply_fast_gates call bypasses _extract_thought's floor to prove
+    the emitter guard itself (defense-in-depth against regression 22b60b1).
+    """
+    b = _brain()
+    policy = b.state.get("policy_state", DEFAULT_POLICY_STATE)
+    thought = SimpleNamespace(direction=-1, score=0.001, confidence=0.5)
+    r = b._apply_fast_gates("TSLA", _snap(), thought, policy, "rth")
+    assert r.action == HOLD
+    assert r.reason == "no_signal"
+    assert r.stage == "veto_gate"

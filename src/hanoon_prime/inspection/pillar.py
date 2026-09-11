@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..brain.policy.trading_policy import TRADING_CONFIG
 from ..immune import (
     HALIM_EVIDENCE_LEARNING,
     PILLAR_IMBALANCE_OK,
@@ -145,6 +146,23 @@ def _status(
     return OK, f"pillar upright (ratio={ratio:.3f}, skew={skew:.2f})"
 
 
+def _policy_adjust(
+    status: str, detail: str, mode: str, v_long: int, v_short: int, skew: float
+) -> tuple[str, str]:
+    """Policy-blocked-side veto skew is configured, not a defect -> WARN."""
+    if mode == "long_only" and v_short > v_long and status == FAIL:
+        return WARN, (
+            f"SHORT vetoes policy-driven (direction_mode=long_only blocks SHORT "
+            f"entries); skew {skew:.2f} configured — {detail}"
+        )
+    if mode == "short_only" and v_long > v_short and status == FAIL:
+        return WARN, (
+            f"LONG vetoes policy-driven (direction_mode=short_only blocks LONG "
+            f"entries); skew {skew:.2f} configured — {detail}"
+        )
+    return status, detail
+
+
 def pillar_balance(ctx: InspectionContext) -> CheckResult:
     """Directional conviction balance — the no-win signature's pillar axis."""
     long_c, short_c, v_long, v_short, eval_lines = _parse_eval_lines(ctx)
@@ -164,10 +182,15 @@ def pillar_balance(ctx: InspectionContext) -> CheckResult:
         )
     ratio, skew, _total = _geometry(long_c, short_c, v_long, v_short)
     hm = _halim_modifier(ctx)
+    direction_mode = TRADING_CONFIG.direction_mode
+    status, detail = _status(ratio, skew, v_long, v_short, long_c, short_c)
+    status, detail = _policy_adjust(
+        status, detail, direction_mode, v_long, v_short, skew
+    )
     ev = _full_evidence(
         long_c, short_c, v_long, v_short, ratio, skew, hm, eval_lines, _BAND
     )
-    status, detail = _status(ratio, skew, v_long, v_short, long_c, short_c)
+    ev["direction_mode"] = direction_mode
     return _cr("pillar_balance", status, detail, **ev)
 
 
