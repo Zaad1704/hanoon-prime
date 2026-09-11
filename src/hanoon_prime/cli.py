@@ -14,7 +14,17 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
+import warnings
 from pathlib import Path
+
+# Suppress the noisy ib_insync/eventkit asyncio deprecation warning (Python 3.12+).
+# These third-party libraries call asyncio.get_event_loop_policy().get_event_loop()
+# internally; the standard library deprecated this in 3.12 and will remove it in 3.16.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*'asyncio\.get_event_loop_policy' is deprecated.*",
+    category=DeprecationWarning,
+)
 
 from .ib_adapter import IBStreamingBot
 from .immune import LIQUID_US_SEED
@@ -40,6 +50,21 @@ class _CleanFormatter(logging.Formatter):
         return super().format(record)
 
 
+class _IbNoiseFilter(logging.Filter):
+    """Drop non-fatal ib_insync ERROR spam that would trip no_error_burst.
+
+    These messages are harmless race conditions during ticker re-seeding:
+      - ``cancelMktData: No reqId found`` — stale reqId from a previous conn
+      - ``Error 502 : 'NoneType' object`` — transient disconnect during seed
+    """
+
+    _NOISE = ("cancelMktData: No reqId found",)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Suppress known ib_insync noise messages during re-seeding."""
+        return not any(noise in record.getMessage() for noise in self._NOISE)
+
+
 def _setup_logging() -> None:
     """Configure logging with clean formatting and noise suppression."""
     fmt = _CleanFormatter(
@@ -48,6 +73,7 @@ def _setup_logging() -> None:
     )
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(fmt)
+    handler.addFilter(_IbNoiseFilter())
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)

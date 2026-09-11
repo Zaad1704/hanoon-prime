@@ -30,6 +30,10 @@ class TradingConfig:
     eod_flatten_enabled: bool = True
     eod_flatten_minutes: float = 5.0
 
+    # Manual flatten order type: "market" for guaranteed fills,
+    # "limit" for price protection (user picks via /flatten API).
+    flatten_order_type: str = "market"
+
     # Horizons — scalp-only by default.
     horizons: set[str] = field(default_factory=lambda: {"scalp"})
 
@@ -69,6 +73,7 @@ class TradingConfig:
             "direction_mode": self.direction_mode,
             "eod_flatten_enabled": self.eod_flatten_enabled,
             "eod_flatten_minutes": self.eod_flatten_minutes,
+            "flatten_order_type": self.flatten_order_type,
             "horizons": sorted(self.horizons),
         }
 

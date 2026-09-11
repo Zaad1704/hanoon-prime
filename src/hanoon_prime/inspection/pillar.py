@@ -1,24 +1,15 @@
 """hanoon_prime.inspection.pillar — directional conviction balance.
 
-The 'why not winning' signature is a tipped pillar: one direction's vetoes
-dominate (today: SHORT direction_rejected @ mean conviction 0.675).
-pillar_balance measures the LONG vs SHORT verdict-conviction geometry from EVAL
-lines and confirms (via the inside_man joint) when the pillar is upright vs
-fallen. Its evidence is the see-saw the juli webapp renders, and the learning
-loop is healthy when imbalance_ratio trends toward 0 under HALIM recs.
-
-Split into narrow helpers so every function stays under R3's 40-line / depth-3
-limits while keeping the full decision chain readable.
+LONG vs SHORT verdict-conviction geometry from EVAL lines; evidence feeds the
+juli webapp see-saw. Healthy learning = imbalance_ratio trending to 0.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from ..brain.policy.trading_policy import TRADING_CONFIG
 from ..immune import (
-    HALIM_EVIDENCE_LEARNING,
     PILLAR_IMBALANCE_OK,
     PILLAR_IMBALANCE_WARN,
     PILLAR_VETO_SKEW_FAIL,
@@ -26,106 +17,13 @@ from ..immune import (
 )
 from .checks import FAIL, OK, WARN, CheckResult
 from .ctx import InspectionContext
-from .probe import EVAL_MARKER, _log_lines, runtime_state
-
-# Captures every verdict token: ticker:ACTION(score,side)[stage:reason]
-_VERDICT_RE = re.compile(
-    r":([A-Z]+)\((?P<score>-?\d+\.\d+),(?P<side>[^)]*)\)\[(?P<stage>[^:\]]*):(?P<reason>[^\]]*)\]"
-)
-
-# Conviction + veto thresholds (see immune.py) — kept local as a value object.
-_BAND: list[float] = [PILLAR_IMBALANCE_OK, PILLAR_IMBALANCE_WARN]
+from .pillar_evidence import _BAND, _full_evidence, _parse_eval_lines, _warm_evidence
+from .probe import runtime_state, snapshot
 
 
 def _cr(name: str, status: str, detail: str, **ev: Any) -> CheckResult:
-    """Build an inside_man CheckResult (DRY within this module)."""
+    """Build an inside_man CheckResult."""
     return CheckResult("inside_man", name, status, detail, dict(ev) if ev else {})
-
-
-def _classify(
-    m: re.Match[str], score: float, conv: dict[str, float], vetoes: dict[str, int]
-) -> None:
-    """Bucket one verdict into directional conviction + veto counters."""
-    if score > 0:
-        conv["long"] += score
-    elif score < 0:
-        conv["short"] += -score
-    if m.group(1) == "VETOED":
-        if score > 0:
-            vetoes["long"] += 1
-        elif score < 0:
-            vetoes["short"] += 1
-
-
-def _parse_eval_lines(ctx: InspectionContext) -> tuple[float, float, int, int, int]:
-    """Accumulate long/short conviction + veto counts from EVAL log lines."""
-    conv = {"long": 0.0, "short": 0.0}
-    vetoes = {"long": 0, "short": 0}
-    eval_lines = 0
-    for line in _log_lines(ctx):
-        if not EVAL_MARKER.search(line):
-            continue
-        eval_lines += 1
-        for m in _VERDICT_RE.finditer(line):
-            _classify(m, float(m.group("score")), conv, vetoes)
-    return conv["long"], conv["short"], vetoes["long"], vetoes["short"], eval_lines
-
-
-def _geometry(
-    long_c: float, short_c: float, v_long: int, v_short: int
-) -> tuple[float, float, float]:
-    """Return (imbalance_ratio, veto_skew, total_conviction)."""
-    total = long_c + short_c
-    ratio = abs(long_c - short_c) / total if total > 0 else 0.0
-    mx, mn = (v_long, v_short) if v_long >= v_short else (v_short, v_long)
-    # max/min veto ratio; one-sided (mn==0) -> raw majority count = inf skew.
-    skew = mx / mn if mn > 0 else float(mx)
-    return ratio, skew, total
-
-
-def _halim_modifier(ctx: InspectionContext) -> Any:
-    """Current HALIM regime modifier (0.0 when the slow cortex hasn't spoken)."""
-    bs = runtime_state(ctx).get("brain_state", {})
-    if isinstance(bs, dict):
-        return bs.get("halim_modifier", 0.0)
-    return 0.0
-
-
-def _warm_evidence(eval_lines: int, band: list[float]) -> dict[str, Any]:
-    """Evidence shape for the no-signal / no-lines early exits."""
-    return {
-        "eval_lines": eval_lines,
-        "imbalance_ratio": 0.0,
-        "veto_skew": 0.0,
-        "band": list(band),
-    }
-
-
-def _full_evidence(
-    long_c: float,
-    short_c: float,
-    v_long: int,
-    v_short: int,
-    ratio: float,
-    skew: float,
-    hm: Any,
-    eval_lines: int,
-    band: list[float],
-) -> dict[str, Any]:
-    """Evidence shape for a scored, evaluated window."""
-    return {
-        "long_conviction": round(long_c, 4),
-        "short_conviction": round(short_c, 4),
-        "net": round(long_c - short_c, 4),
-        "imbalance_ratio": round(ratio, 4),
-        "vetoes_long": v_long,
-        "vetoes_short": v_short,
-        "veto_skew": round(skew, 3),
-        "halim_modifier": hm,
-        "learning_active": HALIM_EVIDENCE_LEARNING,
-        "eval_lines": eval_lines,
-        "band": list(band),
-    }
 
 
 def _status(
@@ -133,10 +31,7 @@ def _status(
 ) -> tuple[str, str]:
     """Map geometry -> (status, detail) using immune thresholds."""
     if ratio > PILLAR_IMBALANCE_WARN or skew >= PILLAR_VETO_SKEW_FAIL:
-        if skew >= PILLAR_VETO_SKEW_FAIL:
-            side = "SHORT" if v_short >= v_long else "LONG"
-        else:
-            side = "SHORT" if short_c > long_c else "LONG"
+        side = "SHORT" if (v_short >= v_long or short_c > long_c) else "LONG"
         return (
             FAIL,
             f"pillar fallen — {side}-dominated (ratio={ratio:.3f}, skew={skew:.2f})",
@@ -147,50 +42,67 @@ def _status(
 
 
 def _policy_adjust(
-    status: str, detail: str, mode: str, v_long: int, v_short: int, skew: float
+    status: str,
+    detail: str,
+    mode: str,
+    v_long: int,
+    v_short: int,
+    pv_long: int,
+    pv_short: int,
+    skew: float,
 ) -> tuple[str, str]:
-    """Policy-blocked-side veto skew is configured, not a defect -> WARN."""
-    if mode == "long_only" and v_short > v_long and status == FAIL:
+    """Downgrade FAIL→WARN when vetoes are policy-driven, not a cortex defect.
+
+    Two checks: (1) reason-aware — gate vetoes (low_penny_score, etc.) block
+    both directions equally; (2) direction_mode — direction_rejected only
+    counts as policy when the mode actually blocks that side.
+    """
+    if status == FAIL and pv_short > 0 and pv_short >= v_short * 0.5:
         return WARN, (
-            f"SHORT vetoes policy-driven (direction_mode=long_only blocks SHORT "
-            f"entries); skew {skew:.2f} configured — {detail}"
+            f"SHORT vetoes policy-gated ({pv_short}/{v_short} are "
+            f"low_penny_score/daily_loss_limit/etc); skew {skew:.2f} — {detail}"
+        )
+    if status == FAIL and pv_long > 0 and pv_long >= v_long * 0.5:
+        return WARN, (
+            f"LONG vetoes policy-gated ({pv_long}/{v_long} are "
+            f"low_penny_score/daily_loss_limit/etc); skew {skew:.2f} — {detail}"
+        )
+    if mode == "long_only" and v_short > v_long and status == FAIL:
+        return (
+            WARN,
+            f"SHORT vetoes policy-driven (long_only blocks SHORT); skew {skew:.2f} — {detail}",
         )
     if mode == "short_only" and v_long > v_short and status == FAIL:
-        return WARN, (
-            f"LONG vetoes policy-driven (direction_mode=short_only blocks LONG "
-            f"entries); skew {skew:.2f} configured — {detail}"
+        return (
+            WARN,
+            f"LONG vetoes policy-driven (short_only blocks LONG); skew {skew:.2f} — {detail}",
         )
     return status, detail
 
 
 def pillar_balance(ctx: InspectionContext) -> CheckResult:
     """Directional conviction balance — the no-win signature's pillar axis."""
-    long_c, short_c, v_long, v_short, eval_lines = _parse_eval_lines(ctx)
-    if eval_lines == 0:
+    lc, sc, vl, vs, el, pvl, pvs = _parse_eval_lines(ctx)
+    if el == 0:
         return _cr(
-            "pillar_balance",
-            OK,
-            "warming up (no EVAL lines yet)",
-            **_warm_evidence(eval_lines, _BAND),
+            "pillar_balance", OK, "warming up (no EVAL lines yet)", **_warm_evidence(el)
         )
-    if long_c + short_c == 0:
+    if lc + sc == 0:
         return _cr(
-            "pillar_balance",
-            WARN,
-            "no scored verdicts in window",
-            **_warm_evidence(eval_lines, _BAND),
+            "pillar_balance", WARN, "no scored verdicts in window", **_warm_evidence(el)
         )
-    ratio, skew, _total = _geometry(long_c, short_c, v_long, v_short)
-    hm = _halim_modifier(ctx)
-    direction_mode = TRADING_CONFIG.direction_mode
-    status, detail = _status(ratio, skew, v_long, v_short, long_c, short_c)
-    status, detail = _policy_adjust(
-        status, detail, direction_mode, v_long, v_short, skew
-    )
-    ev = _full_evidence(
-        long_c, short_c, v_long, v_short, ratio, skew, hm, eval_lines, _BAND
-    )
-    ev["direction_mode"] = direction_mode
+    total = lc + sc
+    ratio = abs(lc - sc) / total if total > 0 else 0.0
+    mx, mn = (vl, vs) if vl >= vs else (vs, vl)
+    skew = mx / mn if mn > 0 else float(mx)
+    bs = runtime_state(ctx).get("brain_state", {})
+    hm = bs.get("halim_modifier", 0.0) if isinstance(bs, dict) else 0.0
+    cfg = snapshot(ctx).get("config", {})
+    mode = cfg.get("direction_mode", TRADING_CONFIG.direction_mode)
+    status, detail = _status(ratio, skew, vl, vs, lc, sc)
+    status, detail = _policy_adjust(status, detail, mode, vl, vs, pvl, pvs, skew)
+    ev = _full_evidence(lc, sc, vl, vs, pvl, pvs, ratio, skew, hm, el)
+    ev["direction_mode"] = mode
     return _cr("pillar_balance", status, detail, **ev)
 
 

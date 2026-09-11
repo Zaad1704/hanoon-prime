@@ -26,6 +26,10 @@ def _direction_mode_default(monkeypatch: pytest.MonkeyPatch) -> None:
     (direction_mode != "both"); the existing FAIL tests must still FAIL.
     """
     monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "both")
+    # Mock snapshot() so tests don't depend on a running bot's telemetry.
+    monkeypatch.setattr(
+        pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "both"}}
+    )
 
 
 def _ctx(tmp_path: Path) -> InspectionContext:
@@ -151,6 +155,9 @@ def test_pillar_long_only_short_skew_is_policy_warn(
 ) -> None:
     """shorts blocked (long_only): SHORT veto skew is configured, not a defect."""
     monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "long_only")
+    monkeypatch.setattr(
+        pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "long_only"}}
+    )
     ctx = _ctx(tmp_path)
     lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
     for _ in range(5):
@@ -160,3 +167,26 @@ def test_pillar_long_only_short_skew_is_policy_warn(
     assert r.status == WARN  # NOT FAIL — shorts intentionally disabled
     assert "long_only" in r.detail
     assert r.evidence["direction_mode"] == "long_only"
+
+
+def test_pillar_both_mode_low_penny_score_short_is_policy_warn(
+    tmp_path: Path,
+) -> None:
+    """low_penny_score SHORT vetoes under direction_mode='both' -> WARN.
+
+    The reason-aware check recognises that low_penny_score is a trading-policy
+    gate that blocks both directions equally (penny-bar confidence floor),
+    so the SHORT veto skew is configured policy, not a cortex defect — even
+    when direction_mode='both' would have allowed shorts.
+    """
+    ctx = _ctx(tmp_path)
+    lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
+    for _ in range(5):
+        lines.append(_eval("TSLA:VETOED(-0.700,S)[trading_policy:low_penny_score]"))
+    _write_log(ctx, *lines)
+    r = pillar_balance(ctx)
+    assert r.status == WARN  # policy-gated, not a brain defect
+    assert "policy-gated" in r.detail
+    assert r.evidence["policy_vetoes_short"] == 5
+    assert r.evidence["vetoes_short"] == 5
+    assert r.evidence["direction_mode"] == "both"

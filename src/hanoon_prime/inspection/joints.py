@@ -82,7 +82,7 @@ JOINT_ORDER = ["processes", "identity", "telemetry", "pipeline", "session",
 SPECS: tuple[CheckSpec, ...] = (
     CheckSpec("processes", "bot_alive", bot_alive, report=True),
     CheckSpec("processes", "halim_alive", halim_alive, report=True),
-    CheckSpec("processes", "monitor_alive", monitor_alive, report=True),
+    CheckSpec("processes", "overnight_monitor_alive", monitor_alive, report=True),
     CheckSpec("processes", "cloudflared_alive", cloudflared_alive, report=True),
     CheckSpec(
         "processes", "gateway_watchdog_alive", gateway_watchdog_alive, report=True

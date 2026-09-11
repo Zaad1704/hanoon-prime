@@ -25,6 +25,7 @@ from .config import TRADING_CONFIG
 from .monitor.sleep_manager import SleepManager, SleepState
 
 RISK_SYNC_SECS: float = 30.0  # portfolio-risk equity refresh cadence
+CLOSE_RETRY_FLOOR: float = 15.0  # min gap between dead-close-order retries
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
@@ -298,18 +299,17 @@ class BotCycleMixin:
             break
 
     def _reconcile_closing(self) -> None:
-        """Release _closing symbols whose close order died without a fill.
+        """Retry dead close-orders; only release _closing when position is flat.
 
         A symbol lands in ``_closing`` when a flatten/exit order is placed.
-        If IB cancels that order (timer sweep, server reject, disconnect)
-        with filled=0, the position stays OPEN while every acting path
-        skips it forever. Detect the dead state and release it.
+        If IB cancels the order with zero fills, every acting path skips the
+        symbol forever.  Instead of releasing it (which lets the brain re-fire
+        the same exit signal and flip the position on overfill), retry the
+        close with a backoff and keep the symbol in ``_closing``.
 
-        Safety: NEVER release a symbol that IB shows flat but ``_open_positions``
-        still holds (sync read it open earlier the same cycle, then the fill
-        landed). Dropping the flag there makes the exit evaluator re-fire a
-        duplicate order that flips the position. Let sync_from_ib drop the
-        stale position first.
+        Release happens only when IB confirms the position is flat AND the
+        in-memory state agrees — never while ``_open_positions`` still holds
+        it, or the exit evaluator re-fires a duplicate order that flips it.
         """
         if not self._closing:
             return
@@ -323,17 +323,34 @@ class BotCycleMixin:
         except Exception as exc:
             log.debug("RECONCILE closing scan unavailable: %s", exc)
             return
+        now = time.time()
         for sym in list(self._closing):
             if sym in ib_positions and sym in active:
                 continue  # live close order still in flight
             if sym in ib_positions:
-                self._closing.discard(sym)
-                log.warning("RECONCILE: orphan released %s (close died)", sym)
-                continue
-            if sym in self.hippocampus._open_positions:
-                continue  # stale in-memory position; sync_from_ib removes it
-            self._closing.discard(sym)
-            log.warning("RECONCILE: released %s from closing (pos flat)", sym)
+                self._retry_dead_close(sym, now)
+                continue  # stay in _closing until position is actually flat
+            self._release_closed(sym)
+
+    def _retry_dead_close(self, sym: str, now: float) -> None:
+        """Re-issue a close order whose previous attempt died without a fill."""
+        last_retry = self._closing_retries.get(sym, 0.0)
+        if now - last_retry < CLOSE_RETRY_FLOOR:
+            return  # still backing off — give IB time to settle
+        self._closing_retries[sym] = now
+        log.warning("RECONCILE: close order died for %s — retrying (pos still open)", sym)
+        try:
+            self.executor.close_position(sym, self.streamer)
+        except Exception as exc:
+            log.warning("RECONCILE: retry close %s failed: %s", sym, exc)
+
+    def _release_closed(self, sym: str) -> None:
+        """Drop the closing flag only when in-memory state also shows flat."""
+        if sym in self.hippocampus._open_positions:
+            return  # stale in-memory position; sync_from_ib removes it
+        self._closing.discard(sym)
+        self._closing_retries.pop(sym, None)
+        log.warning("RECONCILE: released %s from closing (pos flat)", sym)
 
     def _sweep_one(self, order: Any, sym: str, now: float) -> None:
         """Cancel one stale pending parent (tracked ≥ 60s)."""
@@ -488,6 +505,7 @@ class BotCycleMixin:
                 self._closing.add(t)
                 self.executor.close_position(t, self.streamer)
                 self._exit_reasons[t] = es.get("type", "brain_exit")
+                self.juli.brain.note_exit(t)  # post-exit reuse cooldown
                 log.info("EXIT %s: %s", t, es.get("reason", ""))
         if pnl is not None:
             daily = float(pnl.dailyPnL)
@@ -705,7 +723,10 @@ class BotCycleMixin:
 
         if not _FLATTEN_REQUESTED:
             return False
+        flatten_spec: dict[str, Any] = dict(_FLATTEN_REQUESTED)
         _FLATTEN_REQUESTED.clear()
+        order_type = flatten_spec.get("order_type", "market")
+        limit_price = flatten_spec.get("limit_price")
         # Count actual IB positions, not just Juli-tracked ones
         try:
             ib_count = len([p for p in self.ib.positions() if abs(int(p.position)) > 0])
@@ -722,9 +743,15 @@ class BotCycleMixin:
                     self._closing.add(p.contract.symbol)
         except Exception as e:
             log.debug("flatten closing-mark failed: %s", e)
-        log.warning("MANUAL FLATTEN: closing %d IB positions", ib_count)
-        closed = self.executor.close_all_positions(self.streamer)
-        log.warning("MANUAL FLATTEN: sent market orders for %d positions", closed)
+        log.warning(
+            "MANUAL FLATTEN: closing %d IB positions (order_type=%s)", ib_count, order_type
+        )
+        closed = self.executor.close_all_positions(
+            self.streamer, order_type=order_type, limit_price=limit_price
+        )
+        log.warning(
+            "MANUAL FLATTEN: sent %s orders for %d positions", order_type.upper(), closed
+        )
         return True
 
     def _check_eod_flatten(self) -> bool:
@@ -817,6 +844,7 @@ class BotCycleMixin:
             self._closing.add(t)
             self.executor.close_position(t, self.streamer)
             self._exit_reasons[t] = sig.get("reason", "event_exit")
+            self.juli.brain.note_exit(t)  # post-exit reuse cooldown
             log.info("EXIT %s (event): %s", t, sig.get("reason", ""))
 
     def _reflect_closed(self) -> None:
@@ -839,6 +867,7 @@ class BotCycleMixin:
             self._watched.discard(trade["ticker"])
             self._hold_notified.pop(trade["ticker"], None)
             self.streamer.unwatch_pnl_single(trade["ticker"])
+            self.juli.brain.note_exit(trade["ticker"])  # reinforce cooldown on confirmed close
             log.info(
                 "REFLECT %s %s pnl=%.4f src=%s",
                 trade["ticker"],

@@ -235,9 +235,12 @@ class NeuromorphicBrain:
             return Verdict(
                 ticker=ticker, action=VETOED, reason=reason, stage="governor"
             )
-        return self._admit_verdict(
+        verdict = self._admit_verdict(
             ticker, snap, result, bars, thought, policy, len(open_positions)
         )
+        if verdict.action == ENTER:
+            self.governor.claim_entry()
+        return verdict
 
     def _check_snapshot_valid(self, snap: dict[str, Any] | None) -> str:
         """Return a veto reason when the snapshot is unusable, else ''."""
@@ -504,6 +507,16 @@ class NeuromorphicBrain:
     def note_entry(self, ticker: str) -> None:
         """Register an executed entry with the governor (post-fill)."""
         self.governor.note_entry(ticker)
+
+    def note_exit(self, ticker: str) -> None:
+        """Register a closed or close-attempted position with the governor.
+
+        Stamps the same reuse cooldown as ``note_entry`` so the ticker
+        cannot be re-entered immediately after a stop-out or a dead
+        close-order retry.  This is the whipsaw guard for volatile tickers
+        like BITO.
+        """
+        self.governor.note_exit(ticker)
 
     def resume(self) -> None:
         """Clear the brain-side halt state (webapp resume command)."""

@@ -63,6 +63,7 @@ class IBStreamingBot(BotCycleMixin):
         self._watched: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
         self._hold_notified: dict[str, float] = {}
+        self._closing_retries: dict[str, float] = {}  # backoff for dead close-order retry
         self._last_bars: int = 0
         # Gateway supervision state (rebuild runner_gateway port)
         self._gw_was_connected: bool = True

@@ -38,7 +38,9 @@ from .memory import Journal
 log = __import__("logging").getLogger(__name__)
 
 # Shared flag: main cycle checks this and flattens when non-empty
-_FLATTEN_REQUESTED: list[int] = []  # [position_count] when pending
+# Carries order type ("market" or "limit") + optional limit_price
+# so the flatten executor can place the right order kind.
+_FLATTEN_REQUESTED: dict[str, Any] = {}  # {"positions": N, "order_type": "market", "limit_price": None}
 
 # Snapshot cadence. 1s = real-time feel without hammering IB; the refresher
 # thread runs at this rate forever, independent of any browser.
@@ -1241,7 +1243,7 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _handle_flatten(self) -> None:
-        """Request flatten — set flag for main cycle to execute."""
+        """Request flatten with optional order_type (\"market\"|\"limit\") + limit_price."""
         bot = self.bot
         if bot is None:
             self._r(503, {"error": "bot not running"})
@@ -1250,11 +1252,23 @@ class _H(BaseHTTPRequestHandler):
         if ib is None or not ib.isConnected():
             self._r(503, {"error": "IB not connected"})
             return
+        body = self._body()
+        order_type = body.get("order_type") or TRADING_CONFIG.flatten_order_type
+        if order_type not in ("market", "limit"):
+            self._r(400, {"error": 'order_type must be "market" or "limit"'})
+            return
+        limit_price = float(body["limit_price"]) if body.get("limit_price") else None
         pos_count = len(self._ib_positions())
         # Set flag — main cycle thread will execute flatten
         _FLATTEN_REQUESTED.clear()
-        _FLATTEN_REQUESTED.append(pos_count)
-        log.warning("FLATTEN requested: %d positions", pos_count)
+        _FLATTEN_REQUESTED.update(
+            {
+                "positions": pos_count,
+                "order_type": order_type,
+                "limit_price": limit_price,
+            }
+        )
+        log.warning("FLATTEN requested: %d positions, order_type=%s", pos_count, order_type)
         self._r(
             200,
             {
@@ -1262,6 +1276,8 @@ class _H(BaseHTTPRequestHandler):
                 "pending": True,
                 "action": "flatten_all",
                 "positions": pos_count,
+                "order_type": order_type,
+                "limit_price": limit_price,
             },
         )
 

@@ -15,6 +15,18 @@ Neuro-morphic architecture:
   types       → shared dataclasses (Position, Trade)
 """
 
+import warnings as _warnings
+
+# Suppress ib_insync/eventkit asyncio deprecation warnings (Python 3.12+).
+# Must be set BEFORE any import that transitively loads ib_insync/eventkit,
+# since those libraries call asyncio.get_event_loop_policy().get_event_loop()
+# at import time in util.py.
+_warnings.filterwarnings(
+    "ignore",
+    message=r".*'asyncio\.get_event_loop_policy' is deprecated.*",
+    category=DeprecationWarning,
+)
+
 from .calibrate import Calibration, calibrate
 from .cerebellum import (
     INDICATOR_NAMES,

@@ -19,6 +19,7 @@ from ..immune import HALIM_EVIDENCE_LEARNING
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
 from ..types import BarSeries, FillInfo
+from .config import HALIM_MOD_BOUND
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
@@ -234,12 +235,20 @@ class ConsolidationEngine:
         )
 
     def _update_halim(self) -> None:
-        """Poll HALIM external AI advisor (network I/O)."""
+        """Poll HALIM external AI advisor (network I/O).
+
+        The modifier is bounded to ``±HALIM_MOD_BOUND`` *before* it enters
+        shared state so the fast-path scorer and inspection evidence both see
+        a sane, bounded value.  The old code stored the raw HALIM output
+        (observed 0.8 — 26× the ±0.03 bound), which leaked into pillar_balance
+        evidence as a misleading signal even though the scorer re-bounded it.
+        """
         alpha = self._get_latest_alpha()
         if not alpha:
             return
         ticker = max(alpha, key=lambda k: abs(alpha.get(k, 0)))
         mod = self.halim.get_modifier(ticker, alpha, 0.0, "SCAN")
+        mod = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(mod or 0.0)))
         self.state.update(halim_modifier=mod)
 
     def _apply_halim_recommendations(self) -> None:

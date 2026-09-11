@@ -16,6 +16,7 @@ def test_budget_cap_rejects_after_limit():
     for i in range(MAX_ENTRIES_PER_CYCLE):
         ok, reason = g.may_enter(f"T{i}")
         assert ok, f"T{i} should be admitted; reason={reason}"
+        g.claim_entry()
     ok, reason = g.may_enter("T_EXTRA")
     assert ok is False
     assert reason == "cycle_budget"

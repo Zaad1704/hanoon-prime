@@ -7,6 +7,7 @@ Bug #3: Off-market entries must be blocked (US/Eastern market hours).
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -405,8 +406,11 @@ class TestReconcileClosing:
         mixin = BotCycleMixin.__new__(BotCycleMixin)
         mixin.ib = MagicMock()
         mixin._closing = {"NVD", "WHLR"}
+        mixin._closing_retries: dict[str, float] = {}
         mixin.hippocampus = MagicMock()
         mixin.hippocampus._open_positions = {}
+        mixin.executor = MagicMock()
+        mixin.streamer = MagicMock()
         mixin.log = MagicMock()
         return mixin
 
@@ -455,8 +459,8 @@ class TestReconcileClosing:
         mixin._reconcile_closing()
         assert mixin._closing == {"NVD"}
 
-    def test_releases_orphan_open_position_without_live_order(self):
-        """Position open but close order died (no active trade) → released."""
+    def test_retries_orphan_open_position_without_live_order(self):
+        """Position open but close order died → retry close, stay in _closing."""
         mixin = self._mixin()
         mixin._closing = {"NVD"}
         mixin.hippocampus._open_positions = {"NVD": object()}
@@ -465,7 +469,24 @@ class TestReconcileClosing:
         ]
         mixin.ib.openTrades.return_value = []
         mixin._reconcile_closing()
-        assert mixin._closing == set()
+        assert mixin._closing == {"NVD"}
+        mixin.executor.close_position.assert_called_once_with("NVD", mixin.streamer)
+
+    def test_backoff_prevents_immediate_retry_storm(self):
+        """Dead close-order retries respect CLOSE_RETRY_FLOOR backoff."""
+        from hanoon_prime.ib_cycle import CLOSE_RETRY_FLOOR
+
+        mixin = self._mixin()
+        mixin._closing = {"NVD"}
+        mixin._closing_retries = {"NVD": time.time() - CLOSE_RETRY_FLOOR + 1.0}
+        mixin.hippocampus._open_positions = {"NVD": object()}
+        mixin.ib.positions.return_value = [
+            SimpleNamespace(contract=SimpleNamespace(symbol="NVD"), position=5)
+        ]
+        mixin.ib.openTrades.return_value = []
+        mixin._reconcile_closing()
+        mixin.executor.close_position.assert_not_called()
+        assert mixin._closing == {"NVD"}
 
 
 class TestSweepStaleOrders:

@@ -84,7 +84,7 @@ def halim_alive(ctx: InspectionContext) -> CheckResult:
 
 def monitor_alive(ctx: InspectionContext) -> CheckResult:
     """Guardian monitor process is alive."""
-    return _service(ctx, "production_monitor", r"production_monitor\.py --daemon")
+    return _service(ctx, "overnight_monitor", r"overnight_monitor\.py")
 
 
 def cloudflared_alive(ctx: InspectionContext) -> CheckResult:

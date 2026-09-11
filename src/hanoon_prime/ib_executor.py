@@ -440,15 +440,24 @@ class IBExecutor:
         except Exception as e:
             log.warning("close_position failed %s: %s", ticker, e)
 
-    def close_all_positions(self, _streamer: Any, only: set[str] | None = None) -> int:
-        """Flatten open positions via market orders.
+    def close_all_positions(
+        self,
+        _streamer: Any,
+        only: set[str] | None = None,
+        order_type: str = "market",
+        limit_price: float | None = None,
+    ) -> int:
+        """Flatten open positions.
 
         ``only`` restricts the flatten to specific tickers (horizon-aware
-        EOD: intraday rungs close, overnight rungs hold). Market orders are
-        used so low-liquidity positions actually fill instead of sitting
-        as unfilled limit orders. The just-placed orders are NEVER
-        cancelled — doing so (cancelAllOrders) retracted flatten orders
-        mid-flight and stranded positions open.
+        EOD: intraday rungs close, overnight rungs hold).
+
+        ``order_type`` controls whether IB receives a market or limit order.
+        Market orders guarantee fills but may walk the book on illiquid
+        names; limit orders protect price but may not fill.
+
+        ``limit_price`` is used when ``order_type="limit"``.  When omitted
+        for a limit flatten, the current market price is used as the limit.
         """
         count = 0
         try:
@@ -464,15 +473,29 @@ class IBExecutor:
                 continue
             action = "SELL" if pos.position > 0 else "BUY"
             try:
-                order = _ib.Order(
-                    orderType="MKT",
-                    action=action,
-                    totalQuantity=qty,
-                    tif="DAY",
-                    outsideRth=True,
-                )
+                if order_type == "limit":
+                    if limit_price is not None:
+                        lp = float(limit_price)
+                    else:
+                        lp = _streamer.get_last_price(sym) or 0.0
+                    order = _ib.Order(
+                        orderType="LMT",
+                        action=action,
+                        totalQuantity=qty,
+                        lmtPrice=lp,
+                        tif="DAY",
+                        outsideRth=True,
+                    )
+                else:
+                    order = _ib.Order(
+                        orderType="MKT",
+                        action=action,
+                        totalQuantity=qty,
+                        tif="DAY",
+                        outsideRth=True,
+                    )
                 self.ib.placeOrder(pos.contract, order)
-                log.info("FLATTEN %s %s %d", action, sym, qty)
+                log.info("FLATTEN %s %s %d (%s)", action, sym, qty, order_type)
                 count += 1
             except Exception as e:
                 log.warning("FLATTEN failed %s: %s", sym, e)
