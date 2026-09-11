@@ -31,6 +31,7 @@ from .lifecycle import (
 )
 from .live import bars_advance_when_active, positions_marked_live
 from .oracle import closes_reconciled, enters_minted, equity_synced
+from .pillar import pillar_balance
 from .purity import brain_fields_bounded, no_test_episodes, weights_finite_in_band
 from .runtime import (
     cycle_flows_when_active,
@@ -154,6 +155,7 @@ SPECS: tuple[CheckSpec, ...] = (
         "inside_man", "veto_conviction_integrity", veto_conviction_integrity, hard=True
     ),
     CheckSpec("inside_man", "side_policy_conviction", _spc, report=True),
+    CheckSpec("inside_man", "pillar_balance", pillar_balance, report=True),
 )
 
 # fmt: off

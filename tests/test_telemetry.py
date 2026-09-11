@@ -359,3 +359,19 @@ class TestIbTickerRowDatetime:
         row = _H._ib_ticker_row(tk)
         assert row["symbol"] == "SPY"
         assert isinstance(row["time"], int)
+
+
+class TestSnapshot:
+    """Part B: raw decision chain + trade-quality surfaces (live, ungated reads)."""
+
+    def test_decisions_and_trade_quality_render(self, tmp_path: Path) -> None:
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        h = _H.__new__(_H)
+        h.journal_path = jp
+        decisions = h._decisions()
+        assert "chain" in decisions
+        assert decisions["total_events"] == 0
+        trade_quality = h._trade_quality()
+        assert "win_rate" in trade_quality
+        assert trade_quality["trades"] == 0

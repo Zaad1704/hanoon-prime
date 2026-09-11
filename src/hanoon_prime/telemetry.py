@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import os
+import hmac
+import secrets
 import subprocess
 import sys
 import threading
@@ -25,11 +27,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable, cast
+from urllib.parse import urlparse
 
 from ._ib_marks import mark_positions
 from .inspection.notify import manifest_notify
 from .config import TRADING_CONFIG
-from .immune import DAILY_LOSS_LIMIT, TELEMETRY_PORT
+from .immune import DAILY_LOSS_LIMIT, TELEMETRY_AUTH_ENABLED, TELEMETRY_PORT
 from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
@@ -321,6 +324,10 @@ class _H(BaseHTTPRequestHandler):
     # Called after a successful POST so the cache reflects the mutation
     # immediately (no 1s staleness on user-initiated changes).
     on_mutation: Callable[[], None] | None = None
+    # Bearer auth for mutations + CORS posture (wired by TelemetryAPI.start()).
+    auth_enabled: bool = False
+    telemetry_token: str = ""
+    cors_origin: str | None = None
 
     protocol_version = "HTTP/1.1"  # keep-alive; required for smooth SSE
 
@@ -383,15 +390,18 @@ class _H(BaseHTTPRequestHandler):
         return payload
 
     def do_OPTIONS(self) -> None:
-        """Handle CORS preflight."""
+        """Handle CORS preflight (browser asks before sending the bearer)."""
         self.send_response(HTTPStatus.OK)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.end_headers()
 
     def do_POST(self) -> None:
         """Handle POST requests, then refresh the snapshot cache at once."""
+        if not self._authorized():
+            self._unauthorized()
+            return
         handler = POST_HANDLERS.get(self.path)
         if handler is None:
             self._r(404, {"error": "not found", "path": self.path})
@@ -430,7 +440,7 @@ class _H(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._send_cors_headers()
             self.send_header("Connection", "keep-alive")
             self.end_headers()
             # Immediate first frame so the UI goes live instantly.
@@ -540,12 +550,47 @@ class _H(BaseHTTPRequestHandler):
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError) as exc:
             log.debug("Client disconnected: %s", exc.__class__.__name__)
+
+    def _send_cors_headers(self) -> None:
+        """Reflect the allowed origin (env/tunnel) — never the '*' wildcard."""
+        origin = self._cors_origin()
+        if origin is not None:
+            self.send_header("Access-Control-Allow-Origin", origin)
+
+    def _cors_origin(self) -> str | None:
+        """Allowed browser origin: TELEMETRY_CORS_ORIGIN env or the cloudflared
+        tunnel URL in runtime/tunnel_url.txt. None => deny cross-origin."""
+        if self.cors_origin:
+            return self.cors_origin
+        env = os.environ.get("TELEMETRY_CORS_ORIGIN")
+        if env:
+            return env
+        try:
+            tun = Path(self._repo_root()) / "runtime" / "tunnel_url.txt"
+            if tun.is_file():
+                p = urlparse(tun.read_text().strip())
+                if p.scheme and p.netloc:
+                    return f"{p.scheme}://{p.netloc}"
+        except Exception:
+            log.debug("cors origin probe failed", exc_info=True)
+        return None
+
+    def _authorized(self) -> bool:
+        """Bearer gate for mutations. Open when auth disabled or token unset."""
+        if not self.auth_enabled or not self.telemetry_token:
+            return True
+        auth = self.headers.get("Authorization", "")
+        return hmac.compare_digest(auth, f"Bearer {self.telemetry_token}")
+
+    def _unauthorized(self) -> None:
+        """401 for unauthenticated mutations."""
+        self._r(401, {"error": "unauthorized"})
 
     def _ib(self) -> Any:
         return getattr(self.bot, "ib", None) if self.bot else None
@@ -1264,6 +1309,8 @@ def build_snapshot(handler: _H) -> dict[str, Any]:
         "config": handler._config(),
         "halim": handler._halim_state(),
         "verdicts": handler._verdicts(),
+        "decisions": handler._decisions(),
+        "trade_quality": handler._trade_quality(),
         "trades": handler._recent_trades(),
         "journal": handler._journal(),
         "session": handler._session(),
@@ -1338,6 +1385,41 @@ class TelemetryAPI:
             if self._stop.wait(remaining):
                 break
 
+    # ── security: bearer auth for mutations + CORS origin ──────────────
+
+    def _token_path(self) -> Path:
+        """Where the runtime bearer token lives (0600, gitignored)."""
+        return self._jp.resolve().parent / "telemetry.token"
+
+    def _apply_security_posture(self) -> None:
+        """Bind bearer-token auth + CORS origin onto the request handler."""
+        if TELEMETRY_AUTH_ENABLED:
+            self._ensure_token_file()
+            _H.auth_enabled = True
+            _H.telemetry_token = self._load_token()
+        else:
+            _H.auth_enabled = False
+            _H.telemetry_token = ""
+        _H.cors_origin = os.environ.get("TELEMETRY_CORS_ORIGIN") or None
+
+    def _ensure_token_file(self) -> Path:
+        tp = self._token_path()
+        tp.parent.mkdir(parents=True, exist_ok=True)
+        if not tp.exists():
+            tp.write_text(secrets.token_urlsafe(32))
+            try:
+                os.chmod(tp, 0o600)
+            except OSError as exc:
+                log.debug("chmod token file 0600 failed: %s", exc)
+            log.warning("telemetry bearer token generated at %s (keep SECRET)", tp)
+        return tp
+
+    def _load_token(self) -> str:
+        try:
+            return self._token_path().read_text().strip()
+        except OSError:
+            return ""
+
     # ── lifecycle ───────────────────────────────────────────────────────
 
     def start(self, port: int | None = None) -> None:
@@ -1347,6 +1429,7 @@ class TelemetryAPI:
         ephemeral bind); production callers keep the default.
         """
         handler = self._make_handler()
+        self._apply_security_posture()
         bind_port = TELEMETRY_PORT if port is None else port
         self._server = ThreadingHTTPServer(("127.0.0.1", bind_port), handler)
         self._server.daemon_threads = True
@@ -1358,6 +1441,13 @@ class TelemetryAPI:
             target=self._refresh_loop, daemon=True, name="telemetry-refresher"
         )
         self._refresh_thread.start()
+        if TELEMETRY_AUTH_ENABLED:
+            log.warning(
+                "telemetry bearer auth ON; POST mutations require token at %s",
+                self._token_path(),
+            )
+        else:
+            log.warning("telemetry bearer auth OFF — POST mutations ungated")
         log.info(
             "TelemetryAPI live on http://127.0.0.1:%s (SSE /stream, /snapshot)",
             TELEMETRY_PORT,

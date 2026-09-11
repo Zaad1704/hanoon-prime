@@ -122,6 +122,13 @@ HYSTERESIS_BARS: int = 3  # consecutive bars a soft exit trigger must persist
 DELIBERATION_TRACE_ENABLED: bool = False  # Deliberator CoT trace (diagnostic)
 HALIM_EVIDENCE_LEARNING: bool = False  # evidence-grounded HALIM CoT -> recs
 
+# Pillar (directional conviction balance) + telemetry posture.
+PILLAR_IMBALANCE_OK: float = 0.35  # |long-short|/(long+short) within band -> OK
+PILLAR_IMBALANCE_WARN: float = 0.60  # above this -> WARN, above FAIL
+PILLAR_VETO_SKEW_WARN: float = 2.0  # one side vetoed 2x the other -> WARN
+PILLAR_VETO_SKEW_FAIL: float = 3.0  # one side vetoed 3x the other -> FAIL
+TELEMETRY_AUTH_ENABLED: bool = True  # bearer gate on POST mutations
+
 # ── R:R and fees ──────────────────────────────────────────────────────
 TARGET_R_R: float = 3.0  # 2.0×ATR stop : 6.0×ATR target = 3:1
 FEE_RATE: float = 0.0001  # 0.01% per leg (institutional ECN)
