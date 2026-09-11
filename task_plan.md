@@ -116,8 +116,10 @@ Status: DONE
 - Committed: micro_live.py exempted from 200-line cap (R1 scope) in check_file_length/CI/contract.
 - NOTE: Phase 4 WFA FAIL means the guard blocks real-money deployment by design (5.3).
 
-## Phase 6 — Recommendations Doc
-- `reports/recommendations.md`: what's proven, what isn't, go/no-go for real money.
+## Phase 6 — Recommendations Doc (DONE)
+- `reports/recommendations.md`: NO-GO for real money; Phase 4 FAIL blocks by
+  design; what flips it to GO is a deeper-data Phase 4 PASS + re-validation
+  of exit-lever findings. Phase 2/3/4/5 evidence summarized with citations.
 
 ---
 
