@@ -16,7 +16,7 @@ from typing import Any, Optional
 from ..cortex import Cortex
 from ..edge import score_to_win_prob
 from ..hippocampus import Hippocampus
-from ..immune import DIRECTION_MIN_SCORE
+from ..immune import DELIBERATION_TRACE_ENABLED, DIRECTION_MIN_SCORE
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from ..types import FillInfo
 from . import horizons
@@ -34,6 +34,7 @@ from .config import (
 )
 from .consolidation import ConsolidationEngine
 from .cross_asset import CrossAssetEngine
+from .deliberation_driver import DeliberationDriver
 from .dynamics import Dynamics
 from .episodic import EpisodicMemory
 from .exit_checks import ExitSignal
@@ -639,6 +640,7 @@ class NeuromorphicBrain:
         ctx["horizon"] = horizon
         ctx["horizon_reason"] = hz_reason
         ctx["regime_canon"] = canon
+        self._deliberation_coherence(ctx, _r, hm, eb, ticker)
         sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
         self._scale_admitted_size(ctx, sizing, canon, horizon, bars)
         self._store_decision(ticker, alpha, ctx["stabilized"], ctx["confidence"])
@@ -828,6 +830,38 @@ class NeuromorphicBrain:
             "thinker_mod": thinker_mod,
             "thinker_conf": thinker_conf,
         }
+
+    def _deliberation_coherence(
+        self,
+        ctx: dict[str, Any],
+        regime_mul: float,
+        halim: float,
+        episodic: float,
+        ticker: str,
+    ) -> None:
+        """Diagnostic Deliberator CoT over this cycle's bounded signals.
+
+        Publishes ``deliberation_trace`` (chain of thought) + a candidate
+        score to ctx and shared state. The candidate is NOT blended into raw
+        — the cortex verdict (R1) is unchanged. Flag-gated; byte-identical
+        while ``DELIBERATION_TRACE_ENABLED`` is off.
+        """
+        if not DELIBERATION_TRACE_ENABLED:
+            return
+        base = ctx.get("base")
+        if base is None:
+            return
+        result = DeliberationDriver().compose(
+            base,
+            regime_mul,
+            halim,
+            episodic,
+            ctx["thinker_mod"],
+            self._news_bias(ticker),
+        )
+        ctx["deliberation_trace"] = result.trace
+        ctx["deliberation_candidate_score"] = result.score
+        self.state.update(deliberation_trace=result.trace)
 
     def _calibration_nudge(self, score: float) -> float:
         """Prediction-error nudge (rebuild ``prediction_error_adjustment``).

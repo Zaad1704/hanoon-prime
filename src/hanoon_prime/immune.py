@@ -118,6 +118,10 @@ CALIB_BOUND: float = 0.10  # rebuild CALIB_BOUND / SCORE_CALIB_BOUND
 HYSTERESIS_EXIT_ENABLED: bool = False
 HYSTERESIS_BARS: int = 3  # consecutive bars a soft exit trigger must persist
 
+# Opt-in learning surfaces (default OFF -> byte-identical live path).
+DELIBERATION_TRACE_ENABLED: bool = False  # Deliberator CoT trace (diagnostic)
+HALIM_EVIDENCE_LEARNING: bool = False  # evidence-grounded HALIM CoT -> recs
+
 # ── R:R and fees ──────────────────────────────────────────────────────
 TARGET_R_R: float = 3.0  # 2.0×ATR stop : 6.0×ATR target = 3:1
 FEE_RATE: float = 0.0001  # 0.01% per leg (institutional ECN)

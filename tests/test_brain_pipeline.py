@@ -91,6 +91,40 @@ def test_low_penny_veto_preserves_score():
     assert v.score == 0.5
 
 
+def test_deliberation_coherence_populates_trace(monkeypatch):
+    """The bounded Deliberator runs in-path and publishes its CoT trace.
+
+    Diagnostic only: the candidate score is published, not blended into raw,
+    so the verdict is byte-identical. Flag-gated via the orchestrator module
+    binding so the default-off path is a true no-op.
+    """
+    import hanoon_prime.brain.orchestrator as orch
+    from hanoon_prime.cortex import Thought
+
+    monkeypatch.setattr(orch, "DELIBERATION_TRACE_ENABLED", True)
+    b = _brain()
+    thought = Thought(verdict="BUY", score=0.62, direction=1, confidence=0.8)
+    ctx = {"base": thought, "thinker_mod": 0.04}
+    b._deliberation_coherence(ctx, 1.1, 0.01, 0.06, "TIC")
+    assert "deliberation_trace" in ctx
+    assert "deliberation_candidate_score" in ctx
+    trace = ctx["deliberation_trace"]
+    assert "halim_mod" in trace and "episodic_mod" in trace
+    assert b.state.get("deliberation_trace") is not None
+
+
+def test_deliberation_coherence_disabled_is_noop():
+    """With the flag off (default), the diagnostic path is a no-op."""
+    from hanoon_prime.cortex import Thought
+
+    b = _brain()
+    thought = Thought(verdict="BUY", score=0.62, direction=1, confidence=0.8)
+    ctx = {"base": thought, "thinker_mod": 0.04}
+    b._deliberation_coherence(ctx, 1.1, 0.01, 0.06, "TIC")
+    assert "deliberation_trace" not in ctx
+    assert "deliberation_candidate_score" not in ctx
+
+
 def test_valid_edge_admitted_with_size():
     b = _brain()
     v = b.decide_entry("NVD", _snap(), {}, "rth")

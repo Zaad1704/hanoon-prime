@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..immune import HALIM_EVIDENCE_LEARNING
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
 from ..types import BarSeries, FillInfo
@@ -163,6 +164,8 @@ class ConsolidationEngine:
         self._update_regime()
         self._update_halim()
         self._run_thinker()
+        if HALIM_EVIDENCE_LEARNING:
+            self._evidence_learning_cycle()
         self._apply_halim_recommendations()
         self._update_policy()
         self.news.maybe_refresh()
@@ -274,6 +277,35 @@ class ConsolidationEngine:
             thinker_confidence_mod=r.confidence_mod,
             thinker_risk_scalar=r.risk_scalar,
         )
+
+    def _evidence_learning_cycle(self) -> None:
+        """Evidence-grounded HALIM chain-of-thought → learning recs.
+
+        Assembles the 'why not winning' evidence from the EVAL verdict tail +
+        realized conf-bin stats, asks HALIM's CoT (/v1/complete) to recommend
+        bounded parameter adjustments, and publishes recs into shared state.
+        The orchestrator's ``_apply_halim_recommendations`` then applies them
+        (validate_recommendation bounds + 300s cooldown + max 3). Byte-
+        identical until ``HALIM_EVIDENCE_LEARNING`` is enabled.
+        """
+        try:
+            from .halim_evidence import (
+                EVAL_LOG_PATH,
+                collect_evidence,
+                fetch_evidence_recs,
+                read_eval_tail,
+            )
+
+            reg = self.state.get("regime_label", "unknown")
+            snapshot = self._realized.snapshot() if self._realized else None
+            lines = read_eval_tail(str(EVAL_LOG_PATH), n=1000)
+            evidence = collect_evidence(lines, realized_snapshot=snapshot, regime=reg)
+            recs = fetch_evidence_recs(self.halim._base_url, evidence)
+            if recs:
+                self.state.update(halim_recommendations=recs)
+                log.info("HALIM evidence-CoT: %d recs queued for learning", len(recs))
+        except Exception as e:
+            log.debug("HALIM evidence cycle failed: %s", e)
 
     def _persist_state(self) -> None:
         """Atomic write to state.json (disk I/O)."""

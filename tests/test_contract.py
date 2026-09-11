@@ -92,6 +92,7 @@ def test_R3_no_file_exceeds_200_lines():
         "orchestrator.py",
         "consolidation.py",
         "exits.py",
+        "immune.py",
         "realized_ev.py",
         # Enhanced learning components (entry quality, ev gate, risk, STDP)
         "config.py",
