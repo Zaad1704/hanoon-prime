@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,16 +30,28 @@ class Journal:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Serializes appends AND reads: writers run on 3 threads (main cycle,
+        # pipeline, safety) and a torn read of a mid-write line would raise.
+        # RLock so verify_chain (which holds the lock) can call entries().
+        self._lock = threading.RLock()
         self._count, self._last_hash_val = self._seed()
+
+    def _read_tail_bytes(self) -> bytes:
+        """Read up to _TAIL_BYTES from the end of the file (1MB cap)."""
+        with open(self.path, "rb") as f:
+            size = f.seek(0, 2)
+            f.seek(max(0, size - _TAIL_BYTES))
+            return f.read()
 
     def _seed(self) -> tuple[int, str | None]:
         """Recover entry count + last hash from the file tail (O(1))."""
         if not self.path.exists() or self.path.stat().st_size == 0:
             return 0, None
-        with open(self.path, "rb") as f:
-            size = f.seek(0, 2)
-            f.seek(max(0, size - _TAIL_BYTES))
-            data = f.read().decode("utf-8", "replace").rstrip("\n")
+        with self._lock:
+            try:
+                data = self._read_tail_bytes().decode("utf-8", "replace").rstrip("\n")
+            except OSError:
+                return 0, None
         try:
             entry = json.loads(data.split("\n")[-1])
         except (json.JSONDecodeError, KeyError, ValueError):
@@ -46,18 +60,26 @@ class Journal:
         return seq + 1, str(entry.get("hash")) if entry.get("hash") else None
 
     def append(self, entry: dict[str, Any]) -> None:
-        """Append a single entry. Never deletes or updates existing entries."""
-        stamped = {
-            "ts": time.time(),
-            "seq": self._count,
-            "prev_hash": self._last_hash_val,
-            **entry,
-        }
-        stamped["hash"] = self._hash_entry(stamped)
-        with open(self.path, "a") as f:
-            f.write(json.dumps(stamped, sort_keys=True) + "\n")
-        self._count += 1
-        self._last_hash_val = stamped["hash"]
+        """Append a single entry. Never deletes or updates existing entries.
+
+        Thread-safe and crash-durable: the writer lock serializes the 3 writer
+        threads and fsync flushes the OS buffer so a kill/crash never loses
+        acknowledged entries or desyncs the in-memory hash chain.
+        """
+        with self._lock:
+            stamped = {
+                "ts": time.time(),
+                "seq": self._count,
+                "prev_hash": self._last_hash_val,
+                **entry,
+            }
+            stamped["hash"] = self._hash_entry(stamped)
+            with open(self.path, "a") as f:
+                f.write(json.dumps(stamped, sort_keys=True) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            self._count += 1
+            self._last_hash_val = stamped["hash"]
 
     @staticmethod
     def _hash_entry(entry: dict[str, Any]) -> str:
@@ -74,6 +96,11 @@ class Journal:
         """Read all entries. Returns empty list if file doesn't exist."""
         if not self.path.exists():
             return []
+        with self._lock:
+            return self._read_all_lines()
+
+    def _read_all_lines(self) -> list[dict[str, Any]]:
+        """Parse every journal line into a list of entry dicts."""
         result: list[dict[str, Any]] = []
         with open(self.path) as f:
             for line in f:
@@ -93,13 +120,11 @@ class Journal:
         """
         if not self.path.exists() or self.path.stat().st_size == 0:
             return []
-        with open(self.path, "rb") as f:
-            size = f.seek(0, 2)
-            offset = max(0, size - _TAIL_BYTES)
-            f.seek(offset)
-            data = f.read().decode("utf-8", "replace")
+        size = self.path.stat().st_size
+        with self._lock:
+            data = self._read_tail_bytes().decode("utf-8", "replace")
         lines = [ln for ln in data.split("\n") if ln.strip()]
-        if offset > 0:
+        if size > _TAIL_BYTES:
             lines = lines[1:]  # first line of an interior window is torn
         parsed = []
         for ln in lines[-n:]:
@@ -111,7 +136,8 @@ class Journal:
 
     def verify_chain(self) -> bool:
         """Verify hash chain integrity. Returns True if intact."""
-        entries = self.entries()
+        with self._lock:
+            entries = self.entries()
         prev_hash: str | None = None
         for entry in entries:
             if entry.get("prev_hash") != prev_hash:

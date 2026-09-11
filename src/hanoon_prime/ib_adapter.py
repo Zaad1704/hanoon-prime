@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import signal
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -38,8 +39,7 @@ class IBStreamingBot(BotCycleMixin):
             raise ImportError("ib_insync required")
         self.ib: Any = ib.IB()
         self.account = account
-        # Safety nets OFF by default — user activates via webapp telemetry.
-        # When triggered, the bot blocks new entries but NEVER stops.
+        # Safety nets OFF by default; blocks entries when tripped, never stops.
         self.hippocampus = Hippocampus(safety_enabled=False)
         self._halted: bool = False
         self.brain_state = BrainState()
@@ -49,6 +49,7 @@ class IBStreamingBot(BotCycleMixin):
         consolidation = getattr(self.juli.brain, "_consolidation", None)
         if consolidation is not None:
             consolidation.safety.attach_journal(self.journal)
+            self._wire_kill_hook(consolidation.safety)
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
         self.executor.on_fill_confirmed = self._confirm_fill
@@ -65,11 +66,26 @@ class IBStreamingBot(BotCycleMixin):
         self._hold_notified: dict[str, float] = {}
         self._closing_retries: dict[str, float] = {}  # backoff for dead close-order retry
         self._last_bars: int = 0
-        # Gateway supervision state (rebuild runner_gateway port)
+        self._init_position_cache()
+        # Gateway supervision state (rebuild runner_gateway.py port)
         self._gw_was_connected: bool = True
         self._gw_attempts: int = 0
         self._order_placed_ts: dict[int, float] = {}
         self._setup_signals()
+
+    def _init_position_cache(self) -> None:
+        self._positions_lock = threading.RLock()
+        self._position_marks: dict[str, Any] = {"positions": [], "total_pnl": 0.0, "count": 0}
+
+    def _wire_kill_hook(self, safety: Any) -> None:
+        def _kill_cancel(reason: str) -> None:
+            log.critical("KILL cancel_all on %s", reason)
+            try:
+                self.executor.cancel_all()
+            except Exception as exc:
+                log.warning("Kill cancel failed: %s", exc)
+
+        safety.on_kill(_kill_cancel)
 
     def _setup_signals(self) -> None:
         """Handle SIGINT/SIGTERM for graceful shutdown."""
@@ -91,13 +107,24 @@ class IBStreamingBot(BotCycleMixin):
         for attempt in range(1, MAX_RECONNECT + 1):
             log.info("Connect %s:%s (attempt %d)", host, port, attempt)
             if try_connect(self.ib, host, port, client_id):
-                self.ib.execDetailsEvent += self.streamer.record_execution
-                self.ib.commissionReportEvent += self.streamer.record_commission
+                self._wire_events_once()
                 log.info("Connected. Account: %s", self.account)
                 return
             if attempt < MAX_RECONNECT:
                 time.sleep(RECONNECT_DELAY)
         raise ConnectionError(f"Failed after {MAX_RECONNECT} attempts")
+
+    def _wire_events_once(self) -> None:
+        """Attach IB execution/commission handlers a single time.
+
+        ``connect`` is called on every gateway reconnect; blindly re-attaching
+        would register duplicate handlers and record each fill N times.
+        """
+        if self.__dict__.get("_events_wired"):
+            return
+        self.ib.execDetailsEvent += self.streamer.record_execution
+        self.ib.commissionReportEvent += self.streamer.record_commission
+        self._events_wired = True
 
     def run(self, tickers: list[str] | None = None, poll: float = 1.0) -> None:
         """Run with optional seed tickers."""
@@ -160,16 +187,10 @@ class IBStreamingBot(BotCycleMixin):
                 "positions": positions,
                 "horizons": sorted(TRADING_CONFIG.horizons),
                 "daily_pnl": float(getattr(pnl_obj, "dailyPnL", 0.0) or 0.0),
-                "wins": (
-                    int(mem.get("recent_wr_n", 0) * mem.get("recent_wr", 0.0))
-                    if isinstance(mem, dict)
-                    else 0
-                ),
-                "losses": (
-                    int(mem.get("recent_wr_n", 0) * (1 - mem.get("recent_wr", 0.0)))
-                    if isinstance(mem, dict)
-                    else 0
-                ),
+                "wins": int(mem.get("recent_wr_n", 0) * mem.get("recent_wr", 0.0))
+                if isinstance(mem, dict) else 0,
+                "losses": int(mem.get("recent_wr_n", 0) * (1 - mem.get("recent_wr", 0.0)))
+                if isinstance(mem, dict) else 0,
             }
         except Exception as exc:
             log.debug("Chat state failed: %s", exc)

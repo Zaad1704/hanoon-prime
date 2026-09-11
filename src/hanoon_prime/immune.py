@@ -59,6 +59,7 @@ MAX_POSITION_NOTIONAL: float = 5_000.0  # $5,000 max notional per trade
 MAX_LOSS_PER_TRADE: float = 50.0  # $50 hard cap per individual trade
 MAX_CONCURRENT_POSITIONS: int = 3  # max open positions simultaneously
 DAILY_LOSS_LIMIT: float = 200.0  # $200 daily loss → halt
+KILL_DAILY_LOSS_LIMIT: float = 500.0  # $500 daily loss → latched kill switch
 CONSECUTIVE_LOSSES_PAUSE: int = 3  # 3 consec losses → pause
 PAUSE_DURATION_MIN: int = 60  # pause duration in minutes
 

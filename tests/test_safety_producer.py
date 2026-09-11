@@ -9,6 +9,7 @@ from hanoon_prime.brain.policy.safety import SafetyProducer
 from hanoon_prime.immune import (
     CONSECUTIVE_LOSSES_PAUSE,
     DAILY_LOSS_LIMIT,
+    KILL_DAILY_LOSS_LIMIT,
     MAX_CONCURRENT_POSITIONS,
 )
 
@@ -115,3 +116,70 @@ def test_reason_contains_pause_reason():
     s.on_position_count(MAX_CONCURRENT_POSITIONS + 1)
     _, reason = s.authorized()
     assert reason != ""
+
+
+# ── Kill switch latch (0.9) ─────────────────────────────────────────────
+
+_KILL_HOOKS: list[str] = []
+
+
+def make_kill(journal: list | None = None) -> SafetyProducer:
+    _KILL_HOOKS.clear()
+    s = make(journal=journal)
+    s.on_kill(lambda reason: _KILL_HOOKS.append(reason))
+    return s
+
+
+def test_kill_latches_on_hard_loss_limit():
+    s = make_kill()
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    ok, reason = s.authorized()
+    assert ok is False and "kill" in reason
+    assert s.latched is True
+    assert _KILL_HOOKS == ["kill_daily_loss_limit"], "kill hook must run once"
+
+
+def test_resume_does_not_release_kill():
+    s = make_kill()
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    s.authorized()
+    s.resume()
+    assert s.latched is True, "resume must NOT clear a latched kill"
+    assert s.authorized()[0] is False
+
+
+def test_kill_release_rearms():
+    s = make_kill()
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    s.authorized()
+    s.release_kill()
+    assert s.latched is False
+    s.on_daily_pnl(50.0)
+    assert s.authorized()[0] is True
+
+
+def test_kill_journals_latched_event():
+    events: list[dict] = []
+    s = make_kill(journal=events)
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    s.authorized()
+    kill = [e for e in events if e.get("event") == "kill"]
+    assert kill and kill[0].get("latched") is True
+
+
+def test_kill_hook_runs_once_while_latched():
+    s = make_kill()
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    for _ in range(3):
+        assert s.authorized()[0] is False
+    assert _KILL_HOOKS == ["kill_daily_loss_limit"]
+
+
+def test_kill_beats_soft_halt_even_after_halt_trips():
+    s = make_kill()
+    s.on_daily_pnl(-(DAILY_LOSS_LIMIT + 1.0))
+    ok, _ = s.authorized()
+    assert ok is False and s.halted is True and s.latched is False
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    ok, reason = s.authorized()
+    assert ok is False and s.latched is True and "kill" in reason

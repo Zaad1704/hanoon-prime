@@ -534,6 +534,24 @@ class NeuromorphicBrain:
             }
         )
 
+    def release_kill(self) -> None:
+        """Re-arm the kill switch after an operator acknowledges the trip."""
+        if self._consolidation is not None:
+            self._consolidation.safety.release_kill()
+            self._consolidation.safety.resume()
+        policy = self.state.get("policy_state", DEFAULT_POLICY_STATE)
+        if not isinstance(policy, dict):
+            policy = dict(DEFAULT_POLICY_STATE)
+        self.state.update(
+            policy_state={
+                **policy,
+                "authorized": True,
+                "halted": False,
+                "latched": False,
+                "pause_reason": "",
+            }
+        )
+
     def set_safety_enabled(self, enabled: bool) -> None:
         """Toggle safety via the producer so the slow cortex honors it."""
         if self._consolidation is not None:

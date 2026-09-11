@@ -110,8 +110,16 @@ def protect_position(
             continue
         if pos.position < 0:
             continue
-        if sym in pending or sym in brackets:
+        if sym in pending:
             continue
+        if sym in brackets:
+            exp_action = "SELL" if pos.position > 0 else "BUY"
+            if _validate_protection(
+                _get_oca_orders(ib_client, sym), abs(pos.position), exp_action
+            ):
+                continue
+            # Stale bracket entry — protection died. Clear and re-protect.
+            brackets.pop(sym, None)
         _reprotect_position(ib_client, sym, pos, streamer, brackets)
 
 

@@ -139,6 +139,7 @@ class ConsolidationEngine:
             authorized=auth,
             enabled=self.safety.enabled,
             halted=self.safety.halted,
+            latched=self.safety.latched,
             pause_reason=reason if not auth else "",
             consecutive_losses=int(self.state.get("consecutive_losses", 0)),
             daily_pnl=float(feed.get("daily_pnl", 0.0)),

@@ -487,32 +487,57 @@ class _H(BaseHTTPRequestHandler):
     # ── POST handlers (unchanged behaviour) ─────────────────────────────
 
     def _handle_safety_net(self) -> None:
-        """Toggle safety net on/off, or resume from a halt (brain commands)."""
+        """Toggle safety net on/off, resume a halt, or re-arm the kill switch."""
         action = self._body().get("action", "")
         if action in ("enable", "disable"):
-            en = action == "enable"
-            brain = self._brain()
-            if brain is not None:
-                brain.set_safety_enabled(en)
-            else:
-                hp = getattr(self.bot, "hippocampus", None) if self.bot else None
-                if hp is not None:
-                    hp.safety_enabled = en
-            log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
-            self._r(200, {"safety_net_enabled": en, "halting": False})
+            self._toggle_safety_net(action == "enable")
+        elif action == "kill_release":
+            self._release_kill()
         elif action == "resume":
-            brain = self._brain()
-            if brain is not None:
-                brain.resume()
-                policy = self._policy_state()
-                self._r(200, {"halted": policy.get("halted", False)})
-                return
-            if self.bot and hasattr(self.bot, "_halted"):
-                self.bot._halted = False
-                log.info("Halt CLEARED via webapp")
-            self._r(200, {"halted": getattr(self.bot, "_halted", False)})
+            self._resume_halt()
         else:
-            self._r(400, {"error": 'expected {"action": "enable"|"disable"|"resume"}'})
+            self._r(400, {"error": 'expected {"action": "enable"|"disable"|"resume"|"kill_release"}'})
+
+    def _toggle_safety_net(self, en: bool) -> None:
+        """Enable/disable the safety net via brain or hippocampus fallback."""
+        brain = self._brain()
+        if brain is not None:
+            brain.set_safety_enabled(en)
+        else:
+            hp = getattr(self.bot, "hippocampus", None) if self.bot else None
+            if hp is not None:
+                hp.safety_enabled = en
+        log.info("Safety net %s via webapp", "ENABLED" if en else "DISABLED")
+        self._r(200, {"safety_net_enabled": en, "halting": False})
+
+    def _release_kill(self) -> None:
+        """Latch is deliberate: only an explicit kill_release re-arms it."""
+        brain = self._brain()
+        if brain is None:
+            self._r(400, {"error": "brain not ready"})
+            return
+        brain.release_kill()
+        policy = self._policy_state()
+        self._r(
+            200,
+            {
+                "halted": policy.get("halted", False),
+                "latched": self._latched_state(),
+            },
+        )
+
+    def _resume_halt(self) -> None:
+        """Clear a halt via brain resume (kill latch stays latched)."""
+        brain = self._brain()
+        if brain is not None:
+            brain.resume()
+            policy = self._policy_state()
+            self._r(200, {"halted": policy.get("halted", False)})
+            return
+        if self.bot and hasattr(self.bot, "_halted"):
+            self.bot._halted = False
+            log.info("Halt CLEARED via webapp")
+        self._r(200, {"halted": getattr(self.bot, "_halted", False)})
 
     def _handle_config(self) -> None:
         """GET: return config. POST: update config fields."""
@@ -694,6 +719,10 @@ class _H(BaseHTTPRequestHandler):
         policy = brain.state.get("policy_state")
         return policy if isinstance(policy, dict) else {}
 
+    def _latched_state(self) -> bool:
+        """Kill-switch latch flag from the published policy state."""
+        return bool(self._policy_state().get("latched", False))
+
     def _ib_positions(self) -> list[Any]:
         ib = self._ib()
         return list(ib.positions()) if ib else []
@@ -737,8 +766,22 @@ class _H(BaseHTTPRequestHandler):
         }
 
     def _positions(self) -> dict[str, Any]:
-        """Live-marked positions surface (portfolio marks + ticker fallback)."""
-        get_snap = getattr(self.bot, "_snapshot", None)
+        """Live-marked positions surface from the main-cycle cache.
+
+        Read-only on the refresher thread: the cache is populated by the
+        bot's main cycle so IB is only ever touched from its own thread.
+        Falls back to a direct read when the cache is empty (single-shot
+        requests on the request handler thread).
+        """
+        bot = self.bot
+        cache = getattr(bot, "_position_marks", None)
+        if cache is not None:
+            lock = getattr(bot, "_positions_lock", None)
+            if lock is not None:
+                with lock:
+                    return dict(cache)
+            return dict(cache)
+        get_snap = getattr(bot, "_snapshot", None)
         return mark_positions(self._ib(), get_snap)
 
     def _recent_trades(self) -> dict[str, Any]:

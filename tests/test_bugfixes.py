@@ -54,7 +54,7 @@ class TestBug1ThresholdBypass:
         """Verdict with SizingResult(shares=0) must NOT place bracket."""
         mixin = self._make_mixin()
         tk = MagicMock()
-        tk.hasBidAsk = True
+        tk.hasBidAsk = lambda: True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
@@ -65,7 +65,7 @@ class TestBug1ThresholdBypass:
         """Verdict with no sizing must NOT place bracket."""
         mixin = self._make_mixin()
         tk = MagicMock()
-        tk.hasBidAsk = True
+        tk.hasBidAsk = lambda: True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
@@ -73,11 +73,22 @@ class TestBug1ThresholdBypass:
         mixin.executor.place_bracket.assert_not_called()
         mixin.juli.brain.register_position.assert_not_called()
 
+    def test_skips_when_no_bid_ask(self):
+        """hasBidAsk()==False must block execution (regression: method-not-called)."""
+        mixin = self._make_mixin()
+        tk = MagicMock()
+        tk.hasBidAsk = lambda: False
+        tk.bid, tk.ask = 100.0, 101.0
+        mixin.streamer.ticker_subs = {"TSLA": tk}
+
+        mixin._execute_verdict(self._enter_verdict(SizingResult(shares=3)))
+        mixin.executor.place_bracket.assert_not_called()
+
     def test_places_bracket_and_notes_cooldown_when_sizing_valid(self):
         """Verdict with valid sizing MUST place bracket and stamp cooldown."""
         mixin = self._make_mixin()
         tk = MagicMock()
-        tk.hasBidAsk = True
+        tk.hasBidAsk = lambda: True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer.ticker_subs = {"TSLA": tk}
 
@@ -288,7 +299,7 @@ class TestBug3OffMarketGuard:
 
         mixin = BotCycleMixin.__new__(BotCycleMixin)
         tk = MagicMock()
-        tk.hasBidAsk = True
+        tk.hasBidAsk = lambda: True
         tk.bid, tk.ask = 100.0, 101.0
         mixin.streamer = MagicMock()
         mixin.streamer.ticker_subs = {"TSLA": tk}

@@ -292,6 +292,29 @@ def test_R7_journal_is_append_only():
         assert j.verify_chain(), "R7 VIOLATION: Hash chain broken"
 
 
+def test_R7_journal_concurrent_appends_keep_chain_intact():
+    """Concurrent appends from multiple threads must never corrupt the chain."""
+    import threading
+
+    from hanoon_prime.memory import Journal
+
+    with tempfile.TemporaryDirectory() as tmp:
+        j = Journal(Path(tmp) / "concurrent.jsonl")
+
+        def _writer(base: int, n: int) -> None:
+            for i in range(n):
+                j.append({"thread": base, "i": i})
+
+        threads = [threading.Thread(target=_writer, args=(t, 50)) for t in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert j.count() == 200
+        assert j.verify_chain(), "R7 VIOLATION: concurrent appends broke hash chain"
+
+
 # ── R8: Learning ecosystem ───────────────────────────────────────────────
 def test_R8_learning_ecosystem_integrated():
     """Cognitive learning ecosystem must be integrated: STDP + Hippocampus + Nash.

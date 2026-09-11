@@ -186,7 +186,13 @@ class BotCycleMixin:
         return ok
 
     def _resubscribe_all(self) -> None:
-        """Re-request market data after a reconnect (IB drops subs silently)."""
+        """Re-request market data after a reconnect (IB drops subs silently).
+
+        IB also drops per-position PnL streams and the Ticker objects are
+        REPLACED by reqMktData, which detaches tick watchers. Re-attach
+        both for every open position so hard-stop breaches and PnL alerts
+        survive a reconnect.
+        """
         targets = set(self.executor.tracked_tickers) | set(self.streamer.ticker_subs)
         for t in targets:
             try:
@@ -198,6 +204,11 @@ class BotCycleMixin:
                 self.streamer.seed_history(t)
             except Exception as exc:
                 log.debug("re-seed %s failed: %s", t, exc)
+            # New Ticker object → old updateEvent closures are detached.
+            if getattr(self, "_watched", None) is not None:
+                self._watched.discard(t)
+            self.streamer._pnl_singles.pop(t, None)
+            self._attach_position_watchers(t)
 
     def _sweep_stale_orders(self) -> None:
         """Brain-aware stale-order reconcile (JULI fast path, every cycle).
@@ -371,7 +382,7 @@ class BotCycleMixin:
     def _snapshot(self, sym: str) -> dict[str, Any] | None:
         """Build snapshot dict from live ticker data."""
         tk = self.streamer.ticker_subs.get(sym)
-        if tk is None or not tk.hasBidAsk:
+        if tk is None or not tk.hasBidAsk():
             return None
         base: dict[str, Any] = {
             "bid": float(tk.bid),
@@ -565,6 +576,7 @@ class BotCycleMixin:
             try:
                 equity, synced = resolve_account_equity(self.ib, self.account)
                 self._positions = feed_positions(self.ib)
+                self._cache_positions_marks()
                 self._account_summary = _float_account_summary(
                     read_account_summary(self.ib)
                 )
@@ -575,16 +587,13 @@ class BotCycleMixin:
                 log.debug("Account sync skipped: %s", exc)
         carried = getattr(self, "_account_equity", None)
         if carried is not None:
-            # Feed is rebuilt every cycle; carry the last known equity so
-            # the slow-cortex pulse always sees it between 30s refresh ticks.
+            # Carry equity between 30s refresh ticks.
             feed["equity"] = carried
             feed["equity_synced"] = getattr(self, "_account_equity_synced", True)
         summary = getattr(self, "_account_summary", None)
         if summary:
-            # Same carry semantics: raw IB accountSummary tags between ticks.
             feed["account_summary"] = summary
-        # Carry cached positions (set on 30s sync) so the brain always sees
-        # open positions between refresh ticks, just like equity.
+        # Carry cached positions so the brain sees them between tick syncs.
         positions = feed.get("positions") or getattr(self, "_positions", None) or []
         feed["positions"], feed["positions_open"] = positions, len(positions)
         self.juli._state.update(
@@ -595,6 +604,23 @@ class BotCycleMixin:
         # Mirror IB account context to the executor for close notifications.
         self.executor._account_feed = {"equity": feed.get("equity"), "daily_pnl": daily}
 
+    def _cache_positions_marks(self) -> None:
+        """Cache portfolio marks on the main cycle thread.
+
+        The telemetry refresher reads this cache so it never calls live
+        IB methods from a foreign thread (ib_insync ewriter rule).
+        """
+        from ._ib_marks import mark_positions as _mp
+
+        snap = getattr(self, "_snapshot", None)
+        marks = _mp(self.ib, snap)
+        lock = getattr(self, "_positions_lock", None)
+        if lock is not None:
+            with lock:
+                self._position_marks = marks
+        else:
+            self._position_marks = marks
+
     def _execute_verdict(self, verdict: Verdict) -> None:
         """Execute one ENTER verdict (live bid/ask, sizing, open skip)."""
         ticker = verdict.ticker
@@ -603,7 +629,7 @@ class BotCycleMixin:
             log.info("SKIP %s sizing=0", ticker)
             return
         tk = self.streamer.ticker_subs.get(ticker)
-        if tk is None or not tk.hasBidAsk or math.isnan(tk.bid) or math.isnan(tk.ask):
+        if tk is None or not tk.hasBidAsk() or math.isnan(tk.bid) or math.isnan(tk.ask):
             log.warning("VERDICT UNEXECUTABLE %s: no live bid/ask", ticker)
             return
         if ticker in self.hippocampus._open_positions:
@@ -773,10 +799,11 @@ class BotCycleMixin:
             t
             for t in self.hippocampus._open_positions
             if not holds_through_close(self.executor._horizons.get(t, "scalp"))
+            and t not in self._closing
         ]
         if not intraday:
             log.info(
-                "EOD: only overnight-safe horizons open (%.1f min to close)",
+                "EOD: no unprotected intraday positions (%.1f min to close)",
                 remaining,
             )
             return False
@@ -785,8 +812,10 @@ class BotCycleMixin:
             remaining,
             len(intraday),
         )
+        for t in intraday:
+            self._closing.add(t)
         closed = self.executor.close_all_positions(self.streamer, only=set(intraday))
-        log.warning("EOD FLATTEN: sent limit orders for %d positions", closed)
+        log.warning("EOD FLATTEN: sent market orders for %d positions", closed)
         return bool(closed)
 
     def _confirm_fill(self, ticker: str, entry_price: float) -> None:
