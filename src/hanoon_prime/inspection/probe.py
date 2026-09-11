@@ -26,7 +26,10 @@ START_MARKER = re.compile(r"ib_adapter\s+Starting \(seed=")
 HEARTBEAT_MARKER = re.compile(r"ib_cycle\s+HEARTBEAT")
 CYCLE_MARKER = re.compile(r"ib_cycle\s+CYCLE ")
 CYCLE_BARS_RE = re.compile(r"ib_cycle\s+CYCLE\s+bars=(\d+)")
-EVAL_MARKER = re.compile(r"ib_cycle\s+EVAL ")
+# Live bot logs verdict summaries via the `juli` logger as `EVAL TICKER:ACTION...`
+# (NOT `ib_cycle EVAL`); match the token generically so a logger rename can't
+# silently blind the veto guard again.
+EVAL_MARKER = re.compile(r"EVAL\s+[A-Z]")
 SLEEP_MARKER = re.compile(r"SESSION SLEEP")
 GUARD_MARKER = re.compile(r"NETTING GUARD")
 TRACE_MARKER = re.compile(r"Traceback \(most recent call last\)")

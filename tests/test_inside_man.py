@@ -36,15 +36,13 @@ def _write_log(ctx: InspectionContext, *lines: str) -> None:
 
 
 def _eval_line(token: str) -> str:
-    """One EVAL log line carrying a single verdict token."""
-    ts = datetime.datetime.now().strftime("%H:%M:%S") + ".000"
-    return f"{ts} INFO ib_cycle EVAL {token}\n"
+    """One EVAL log line carrying a single verdict token.
 
-
-def _eval_line(token: str) -> str:
-    """One EVAL log line carrying a single verdict token."""
+    Mirrors the live bot format (logged by the ``juli`` logger); a marker
+    regression that stops matching production lines fails the tests.
+    """
     ts = datetime.datetime.now().strftime("%H:%M:%S") + ".000"
-    return f"{ts} INFO ib_cycle EVAL {token}\n"
+    return f"{ts} INFO juli EVAL {token}\n"
 
 
 # ── brain_halim_bounded ──────────────────────────────────────────────
