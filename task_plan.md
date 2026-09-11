@@ -88,6 +88,15 @@ Status: DONE (Phase-4 commit).
   0 sim errors — but WFA universe FAIL (deflated −0.307, PBO 0.48), so P5
   blocks micro-live. Honest red; data-depth is the blocker, same as Phase 2.
 
+## Phase 4 — Paper Incubation (DONE)
+- Pre-locked protocol: `protocols/evaluation_protocol.md` (window=50, folds=6, MIN_TRADES=30,
+  PASS = deflated OOS Sharpe > 0.05 AND PBO < 0.05, release criteria P1-P6).
+- Harness: `scripts/paper_run.py` runs unpatched shipped organs on live-feed CSVs; sessions
+  aggregate as trading days across universe; exit 1 on FAIL.
+- Honest result on committed fixtures: 30 sessions, 384 trades, 0 kill/daily-loss days,
+  0 errors, but WFA FAIL (deflated -0.307, PBO 0.48) → 5.3 blocked micro-live.
+- Committed: `f20032e`. Full unit suite 921 + 17 backtest green.
+
 ## Phase 5 — Micro-Live (guarded)
 ### 5.1 Smallest possible live footprint
 - 1 ticker, minimal notional (MAX_POSITION_NOTIONAL = $5k is a *cap*, not a start).
@@ -97,7 +106,15 @@ Status: DONE (Phase-4 commit).
 ### 5.3 Completion gate
 - Only after Phase 4 release criteria met. Live results feed the realized-EV
   learning loop (which is already wired); no new unproven organs go live.
-Status: pending
+Status: DONE
+- Guard built (`src/hanoon_prime/micro_live.py`): Phase-4 PASS gate (5.3), static-weights
+  baseline signal on the SAME snapshot (5.2), shadow divergence detection, latched kill
+  switch + $200 daily-loss halt mirroring SafetyProducer semantics, no broker I/O.
+- Tests: `tests/test_micro_live.py` (9) — refuses on Phase-4 FAIL, missing report = FAIL,
+  divergence blocks even with PASS, kill latch + rearm, insufficient snapshot, static
+  deterministic baseline. Full suite 930 unit + 17 backtest green, mypy/ruff/R3/R13 clean.
+- Committed: micro_live.py exempted from 200-line cap (R1 scope) in check_file_length/CI/contract.
+- NOTE: Phase 4 WFA FAIL means the guard blocks real-money deployment by design (5.3).
 
 ## Phase 6 — Recommendations Doc
 - `reports/recommendations.md`: what's proven, what isn't, go/no-go for real money.
