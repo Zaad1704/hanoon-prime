@@ -40,7 +40,9 @@ Deliverable: honest verdict + recommendations doc, not a false "it works".
 ### 2.4 Enforcement
 - CI job `wf-gate`: runs WFA above on committed fixtures; fails on insufficient data
   or non-positive deflated edge. Gate stays honest.
-Status: pending
+Status: DONE (commit 06ab81a). On the 5-day universe: 17/23 tickers INSUFFICIENT
+(<MIN_TRADES=30 OOS), mara PASS alone, deflated edge −0.307 → universe FAIL (red by design).
+Data-depth acquisition is the prerequisite for a GREEN WF verdict.
 
 ## Phase 3 — Per-Organ Ablation
 ### 3.1 Confound ablation
@@ -53,7 +55,20 @@ Status: pending
 ### 3.3 Verdict
 - Report which organs are additive, which are inert/harmful. This drives Phase 4
   (trade only what's proven additive).
-Status: pending
+Status: DONE (Phase-3 commit). Baseline EV −0.317R on 23-ticker fixture pool.
+- ADDITIVE (removing hurt): orderbook_imbalance (+0.208R), momentum (+0.079R),
+  institutional_flow (+0.077R), tighter stop (ΔEV +0.152R vs baseline), shorts (+0.124R).
+- HARMFUL (removing helped): vpin (−0.115R), vwap_deviation (−0.074R).
+- LARGEST LEVER: exit params — stop_wide 4×ATR gives EV −0.102R vs −0.317R baseline
+  (stops were the #1 destroyer on 5-day data; wide stop + timeout_30 are the candid
+  configuration for Phase 4).
+- threshold_flat doubles trade count (807) without improving EV → the 0.65 threshold
+  is doing real filtering work; keep it.
+- Flat sizing ≈ baseline EV (expectancy is share-normalized) but no drawdown benefit
+  on 5-day data → not a lever here.
+- Sharpe clipped to ±20 in the report (near-flat equity curves blow it up on thin data);
+  DD is per-ticker in per-share terms, not portfolio DD. 5-day fixture deltas rank
+  direction only — WF gate remains the statistical verdict.
 
 ## Phase 4 — Paper Incubation (pre-locked stats)
 ### 4.1 Lock the evaluation protocol BEFORE trading
