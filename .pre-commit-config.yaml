@@ -25,7 +25,7 @@ repos:
         exclude: ^src/hanoon_prime/(ib_cycle|telemetry|brain/(config|ev_gate|risk|exits)|realized_ev)\.py$|^halim/.*$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
+    rev: v2.3.1
     hooks:
       - id: mypy
         args: [--strict, --warn-return-any, --warn-unused-configs, --disallow-untyped-defs, --ignore-missing-imports, --exclude='src/hanoon_prime/ib_(adapter|streamer|executor|compat|cycle)\.py$', --exclude='src/hanoon_prime/(hands|validator|config|ev_gate|risk|exits|neurons/stdp|realized_ev)\.py$']

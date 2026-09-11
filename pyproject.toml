@@ -54,6 +54,10 @@ module = "ib_insync.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "scipy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "hanoon_prime.brain.*"
 disable_error_code = ["index"]
 

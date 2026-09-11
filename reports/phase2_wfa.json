@@ -1,0 +1,42 @@
+{
+  "admissible_tickers": [
+    {
+      "ticker": "INTC",
+      "oos_trades": 30,
+      "ev_per_trade": -0.0015,
+      "sharpe": -0.2123,
+      "verdict": "FAIL"
+    },
+    {
+      "ticker": "MARA",
+      "oos_trades": 38,
+      "ev_per_trade": 0.0017,
+      "sharpe": 0.1528,
+      "verdict": "PASS"
+    },
+    {
+      "ticker": "RDDT",
+      "oos_trades": 41,
+      "ev_per_trade": -0.0007,
+      "sharpe": -0.1027,
+      "verdict": "FAIL"
+    },
+    {
+      "ticker": "VALE",
+      "oos_trades": 30,
+      "ev_per_trade": -0.0014,
+      "sharpe": -0.4057,
+      "verdict": "FAIL"
+    }
+  ],
+  "pooled_sharpe": -0.0456,
+  "deflated_edge": -0.3068,
+  "pbo": 0.4844,
+  "verdict": "FAIL",
+  "detail": "Deflated OOS Sharpe -0.307 <= 0 after 126 trials.",
+  "ticker_count": 23,
+  "fold_config": {
+    "folds": 6,
+    "min_trades": 30
+  }
+}
