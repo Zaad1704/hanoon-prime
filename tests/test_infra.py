@@ -150,7 +150,7 @@ def test_print_results_has_unprofitable():
 
 def test_print_results_empty():
     code = _print_results({})
-    assert code == 0
+    assert code == 1
 
 
 def test_run_backtest_with_errors():
@@ -163,6 +163,7 @@ def test_run_backtest_with_errors():
     assert len(errors) > 0
 
 
+@pytest.mark.backtest
 def test_run_backtest_fast_tickers():
     _skip_if_no_data()
     available = [t for t in FAST_TICKERS if (DATA_DIR / f"{t}_1min.csv").exists()]

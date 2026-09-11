@@ -83,11 +83,11 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e ".[dev]"
-      - name: Run backtest on test universe
+      - name: Run backtest on committed fixtures
         run: |
           python -m hanoon_prime.backtest \
-            --data-dir data/market_data \
-            --tickers AAPL,MSFT,SPY,TSLA,NVDA \
+            --data-dir data/fixtures \
+            --tickers ALL \
             --output metrics
       - name: Profitability gate
         run: |
@@ -121,7 +121,7 @@ jobs:
       - name: Run auto-calibration
         run: |
           python -m hanoon_prime.calibrate \
-            --data-dir data/market_data \
+            --data-dir data/fixtures \
             --output /tmp/calibration.json
       - name: Verify safe-to-activate
         run: |

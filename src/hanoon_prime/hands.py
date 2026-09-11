@@ -28,6 +28,7 @@ from .immune import (
     EDGE_LOOKBACK,
     FEE_RATE,
     FIXED_FEE,
+    SLIPPAGE_BPS,
     TIMEOUT_BARS,
 )
 from .types import BarSeries, Position, Trade
@@ -73,6 +74,11 @@ class SimState:
     last_z: dict[str, float]
 
 
+def _adverse_fill(price: float, direction: int) -> float:
+    """Adverse-slippage fill: buyers pay up, sellers take less."""
+    return price * (1.0 + SLIPPAGE_BPS / 10000.0 * direction)
+
+
 def _make_position(d: int, entry: float, atr: float) -> tuple[float, float]:
     """Return (stop, target) for direction d."""
     if d > 0:
@@ -92,16 +98,17 @@ def _enter_position(
     if shares <= 0:
         return None
     d = thought.direction
-    stop, target = _make_position(d, entry.price, entry.atr)
+    fill = _adverse_fill(entry.price, d)
+    stop, target = _make_position(d, fill, entry.atr)
     return Position(
         ticker=ticker,
         entry_idx=idx,
-        entry_price=entry.price,
+        entry_price=fill,
         shares=shares,
         direction=d,
         stop_price=stop,
         target_price=target,
-        peak_price=entry.price,
+        peak_price=fill,
         score=thought.score,
         atr=entry.atr,
     )
@@ -243,9 +250,10 @@ def _try_exit(
     )
     if not exit_r:
         return position, None
+    fill = _adverse_fill(exit_r[0], -position.direction)
     trade = _close_position(
         position,
-        ExitContext(price=exit_r[0], idx=i + 1, reason=exit_r[1]),
+        ExitContext(price=fill, idx=i + 1, reason=exit_r[1]),
         brain,
         state,
     )

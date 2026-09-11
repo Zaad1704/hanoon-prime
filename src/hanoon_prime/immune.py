@@ -134,6 +134,7 @@ TELEMETRY_AUTH_ENABLED: bool = True  # bearer gate on POST mutations
 TARGET_R_R: float = 3.0  # 2.0×ATR stop : 6.0×ATR target = 3:1
 FEE_RATE: float = 0.0001  # 0.01% per leg (institutional ECN)
 FIXED_FEE: float = 0.01  # $0.01 per leg (negligible round-trip)
+SLIPPAGE_BPS: float = 5.0  # 0.05% per fill — adverse-slippage model for backtests
 KELLY_FRACTION: float = 0.25  # fractional Kelly (25%)
 
 # ── Indicator weights (abs sum = 1.0) ────────────────────────────────

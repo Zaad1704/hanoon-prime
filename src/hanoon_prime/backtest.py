@@ -135,6 +135,9 @@ def _print_results(results: dict[str, dict[str, Any]]) -> int:
         total_trades,
     )
     log.info("%s", "=" * 60)
+    if not results:
+        log.info("\n💀 BACKTEST MISSING: no ticker produced a result (no data!)")
+        return 1
     unprofitable = _find_unprofitable(results)
     if unprofitable:
         log.info("\n💀 PROFITABILITY GATE FAILED: %s", unprofitable)

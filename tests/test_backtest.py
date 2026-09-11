@@ -21,7 +21,7 @@ from hanoon_prime.eyes import compute_buy_volume, estimate_bid_ask, load_ohlcv
 from hanoon_prime.immune import EDGE_LOOKBACK
 from hanoon_prime.types import BarSeries
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "market_data"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "fixtures"
 
 # Fast subset for unit testing
 FAST_TICKERS = ["AAPL", "MSFT", "SPY", "TSLA", "NVDA"]
@@ -125,6 +125,7 @@ def test_brain_pipeline_runs(ticker):
     assert thought.direction in (-1, 0, 1)
 
 
+@pytest.mark.backtest
 def test_full_universe_backtest(sample_tickers):
     """Run backtest on all available tickers and check aggregate profitability."""
     available = [t for t in sample_tickers if _check_data_available(t)]

@@ -31,10 +31,10 @@ pytest tests/test_contract.py -v
 
 ## Safety Nets (hard stops, enforced as exceptions)
 
-- Max position size: $1,000
+- Max position size: $5,000
 - Max loss per trade: $50
 - Max concurrent positions: 3
-- Daily loss limit: $200 → hard shutdown
+- Daily loss limit: $200 → hard shutdown ($500 → latched kill switch)
 - Emergency stop: 3 consecutive losses → pause 60 min
 
 ## Development Rules

@@ -11,7 +11,11 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "market_data"
+_DATA_CANDIDATES = (
+    Path(__file__).resolve().parent.parent / "data" / "fixtures",
+    Path(__file__).resolve().parent.parent / "data" / "market_data",
+)
+DATA_DIR = next((p for p in _DATA_CANDIDATES if p.exists()), _DATA_CANDIDATES[0])
 
 
 @pytest.fixture
