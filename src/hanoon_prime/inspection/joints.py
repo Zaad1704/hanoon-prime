@@ -53,6 +53,7 @@ from .safety import (
     no_traceback,
     policy_flags,
 )
+from .side_policy import side_policy_conviction as _spc
 from .system import (
     bot_alive,
     bot_from_trusted_checkout,
@@ -152,6 +153,7 @@ SPECS: tuple[CheckSpec, ...] = (
     CheckSpec(
         "inside_man", "veto_conviction_integrity", veto_conviction_integrity, hard=True
     ),
+    CheckSpec("inside_man", "side_policy_conviction", _spc, report=True),
 )
 
 # fmt: off

@@ -6,6 +6,7 @@ rejected at the validity stage.
 """
 
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 from hanoon_prime.brain.orchestrator import NeuromorphicBrain
@@ -64,6 +65,30 @@ def test_halted_state_produces_visible_vetoed():
     assert v.reason == "daily_loss_limit"
     assert v.stage == "safety"
     assert v.ticker == "NVD"
+    assert v.score == 0.9  # cortex conviction surfaces on the halted veto
+
+
+def test_session_disabled_veto_preserves_score():
+    """A disabled session still records real |score| on its veto."""
+    b = _brain()
+    b.tick = lambda alpha, ticker, **kw: _fake_result()
+    b.trading_policy = replace(b.trading_policy, session_rth=False)
+    v = b.decide_entry("NVD", _snap(), {}, "rth")
+    assert v.action == VETOED
+    assert v.reason == "session_disabled"
+    assert v.score == 0.9
+
+
+def test_low_penny_veto_preserves_score():
+    """A sub-dollar tick vetoed as low_penny still carries the cortex score."""
+    b = _brain()
+    b.tick = lambda alpha, ticker, **kw: _fake_result(score=0.5)
+    snap = _snap()
+    snap["last"] = 0.50  # below PENNY_PRICE (1.00); |score| 0.5 < PENNY_SCORE_BAR 0.85
+    v = b.decide_entry("PENY", snap, {}, "rth")
+    assert v.action == VETOED
+    assert v.reason == "low_penny_score"
+    assert v.score == 0.5
 
 
 def test_valid_edge_admitted_with_size():

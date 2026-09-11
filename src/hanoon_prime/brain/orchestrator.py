@@ -303,6 +303,30 @@ class NeuromorphicBrain:
             )
         return SimpleNamespace(direction=direction, score=score, confidence=confidence)
 
+    def _veto(
+        self,
+        ticker: str,
+        thought: SimpleNamespace,
+        reason: str,
+        *,
+        stage: str = "trading_policy",
+        direction: int = 0,
+    ) -> Verdict:
+        """A VETOED verdict that carries the cortex conviction score (not 0.000).
+
+        Centralises score-population so every veto path reports real
+        conviction instead of Verdict.score's 0.0 default. ``direction`` is
+        0 (no side) unless the gate is direction-selective (direction_rejected).
+        """
+        return Verdict(
+            ticker=ticker,
+            action=VETOED,
+            reason=reason,
+            stage=stage,
+            score=float(thought.score),
+            direction=direction,
+        )
+
     def _apply_fast_gates(
         self,
         ticker: str,
@@ -313,33 +337,17 @@ class NeuromorphicBrain:
     ) -> Verdict | None:
         """Session/direction/penny/safety gates; None = admitted through."""
         if not self.trading_policy.is_session_active(session):
-            return Verdict(
-                ticker=ticker,
-                action=VETOED,
-                reason="session_disabled",
-                stage="trading_policy",
-            )
+            return self._veto(ticker, thought, "session_disabled")
         side = "BUY" if thought.direction > 0 else "SELL"
         if not self.trading_policy.is_direction_allowed(side):
-            return Verdict(
-                ticker=ticker,
-                action=VETOED,
-                reason="direction_rejected",
-                stage="trading_policy",
-                score=float(thought.score),
-                direction=thought.direction,
+            return self._veto(
+                ticker, thought, "direction_rejected", direction=thought.direction
             )
-        price = float(snap.get("last") or 0.0)
         cleared, penalty = self.trading_policy.is_penny_bar_cleared(
-            ticker, price, float(thought.score)
+            ticker, float(snap.get("last") or 0.0), float(thought.score)
         )
         if not cleared:
-            return Verdict(
-                ticker=ticker,
-                action=VETOED,
-                reason=penalty,
-                stage="trading_policy",
-            )
+            return self._veto(ticker, thought, penalty)
         if policy.get("authorized", True) is False:
             return self._halted_verdict(ticker, thought, snap, policy)
         return None
@@ -368,11 +376,8 @@ class NeuromorphicBrain:
                 direction=thought.direction,
                 score=float(thought.score),
             )
-        return Verdict(
-            ticker=ticker,
-            action=VETOED,
-            reason=str(policy.get("pause_reason") or "halted"),
-            stage="safety",
+        return self._veto(
+            ticker, thought, str(policy.get("pause_reason") or "halted"), stage="safety"
         )
 
     def _admit_verdict(
