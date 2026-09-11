@@ -73,6 +73,16 @@ if [[ -f "$BOT_ROOT/.env" ]]; then
   set +a
 fi
 
+# ── 0c. Telemetry CORS (automatic) ────────────────────────────────
+# The bot allow-lists the webapp origins and derives the tunnel origin
+# from runtime/tunnel_url.txt automatically. TELEMETRY_CORS_ORIGIN adds
+# EXTRA origins (comma-separated) on top — nothing to configure by hand
+# for the standard setup.
+export TELEMETRY_CORS_ORIGIN="${TELEMETRY_CORS_ORIGIN:-}"
+if [[ -n "$TELEMETRY_CORS_ORIGIN" ]]; then
+  ok "Extra telemetry CORS origins: $TELEMETRY_CORS_ORIGIN"
+fi
+
 # ── 1. IB Gateway Watchdog ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 log "Step 1/5: IB Gateway watchdog"
 

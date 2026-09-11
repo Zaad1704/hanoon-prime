@@ -65,6 +65,7 @@ ROUTES_GET = {
     "/ib": "_ib_raw",
     "/decisions": "_decisions",
     "/trade-quality": "_trade_quality",
+    "/auth": "_auth",
 }
 POST_ROUTES = {"/safety-net", "/config"}
 
@@ -90,6 +91,19 @@ POST_HANDLERS = {
 
 # /ib is served on demand with a short TTL: it walks live IB objects
 # (tickers, accounts, orders) — cheap, but not needed at 1s cadence.
+
+# Browser origins allowed to read telemetry cross-origin. The tunnel URL
+# (runtime/tunnel_url.txt) and any TELEMETRY_CORS_ORIGIN entries are added
+# automatically, so a Vercel-hosted webapp works with zero manual config.
+DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "https://www.hanoonweb.xyz",
+    "https://hanoonweb.xyz",
+    "https://hanoon-dash.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+)
 EXTRA_TTL["/ib"] = 1.0
 
 # Route → key inside the snapshot payload
@@ -545,12 +559,19 @@ class _H(BaseHTTPRequestHandler):
             log.warning("Bad POST body: %s", e)
             return {}
 
-    def _r(self, code: int, d: dict[str, Any]) -> None:
+    def _r(
+        self,
+        code: int,
+        d: dict[str, Any],
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         body = json.dumps(d, default=str).encode()
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self._send_cors_headers()
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -558,19 +579,32 @@ class _H(BaseHTTPRequestHandler):
             log.debug("Client disconnected: %s", exc.__class__.__name__)
 
     def _send_cors_headers(self) -> None:
-        """Reflect the allowed origin (env/tunnel) — never the '*' wildcard."""
-        origin = self._cors_origin()
-        if origin is not None:
-            self.send_header("Access-Control-Allow-Origin", origin)
+        """Reflect an allowed origin — never the '*' wildcard.
 
-    def _cors_origin(self) -> str | None:
-        """Allowed browser origin: TELEMETRY_CORS_ORIGIN env or the cloudflared
-        tunnel URL in runtime/tunnel_url.txt. None => deny cross-origin."""
-        if self.cors_origin:
-            return self.cors_origin
-        env = os.environ.get("TELEMETRY_CORS_ORIGIN")
-        if env:
-            return env
+        Accepts a single origin (str) or an allow-list (list). With a list,
+        the request's own Origin is reflected back when it is allowed, so
+        multiple first-party frontends (webapp + tunnel + localhost dev)
+        work simultaneously. Requests without an Origin header (curl, SSE
+        tooling, health checks) get the full list for informational use.
+        """
+        allowed = self._cors_origin()
+        if allowed is None:
+            return
+        origin = self.headers.get("Origin")
+        if isinstance(allowed, str):
+            if origin is None or origin == allowed:
+                self.send_header("Access-Control-Allow-Origin", allowed)
+                self.send_header("Vary", "Origin")
+            return
+        if isinstance(allowed, list):
+            if origin is None:
+                self.send_header("Access-Control-Allow-Origin", ", ".join(allowed))
+            elif origin in allowed:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+
+    def _tunnel_origin(self) -> str | None:
+        """Origin derived from the cloudflared tunnel URL file, if readable."""
         try:
             tun = Path(self._repo_root()) / "runtime" / "tunnel_url.txt"
             if tun.is_file():
@@ -580,6 +614,29 @@ class _H(BaseHTTPRequestHandler):
         except Exception:
             log.debug("cors origin probe failed", exc_info=True)
         return None
+
+    def _cors_origin(self) -> str | list[str] | None:
+        """Allowed browser origin(s).
+
+        Precedence: handler attr (tests / explicit pin) > merged allow-list
+        of DEFAULT_ALLOWED_ORIGINS + auto-derived cloudflared tunnel origin
+        + any TELEMETRY_CORS_ORIGIN entries (single or comma-separated).
+        Merging (not overriding) means the webapp works with zero manual
+        config while the tunnel URL can change freely. None => deny.
+        """
+        if self.cors_origin:
+            return self.cors_origin
+        allowed: list[str] = list(DEFAULT_ALLOWED_ORIGINS)
+        tun = self._tunnel_origin()
+        if tun and tun not in allowed:
+            allowed.append(tun)
+        env = os.environ.get("TELEMETRY_CORS_ORIGIN")
+        if env:
+            for o in env.split(","):
+                o = o.strip()
+                if o and o not in allowed:
+                    allowed.append(o)
+        return allowed or None
 
     def _authorized(self) -> bool:
         """Bearer gate for mutations. Open when auth disabled or token unset."""
@@ -591,6 +648,33 @@ class _H(BaseHTTPRequestHandler):
     def _unauthorized(self) -> None:
         """401 for unauthenticated mutations."""
         self._r(401, {"error": "unauthorized"})
+
+    def _auth(self) -> None:
+        """GET /auth — hand the bearer token to first-party browser origins.
+
+        Design: GETs are already open (the tunnel is the perimeter), so the
+        token on its own grants nothing extra. Gating this route on the CORS
+        allow-list keeps random websites from being able to read it via
+        cross-origin fetch, while the first-party webapp auto-provisions
+        with zero manual setup. Auth disabled => auth_disabled, so the UI
+        knows POSTs need no header.
+        """
+        if not self.auth_enabled or not self.telemetry_token:
+            self._r(200, {"auth": False, "auth_disabled": True})
+            return
+        allowed = self._cors_origin()
+        origin = self.headers.get("Origin")
+        ok = isinstance(allowed, str) and (origin is None or origin == allowed)
+        ok = ok or (isinstance(allowed, list) and (origin is None or origin in allowed))
+        if not ok:
+            log.warning("/auth denied for origin %r", origin)
+            self._r(403, {"error": "origin not allowed"})
+            return
+        self._r(
+            200,
+            {"auth": True, "token": self.telemetry_token, "scheme": "Bearer"},
+            extra_headers={"Cache-Control": "no-store"},
+        )
 
     def _ib(self) -> Any:
         return getattr(self.bot, "ib", None) if self.bot else None
@@ -1400,7 +1484,9 @@ class TelemetryAPI:
         else:
             _H.auth_enabled = False
             _H.telemetry_token = ""
-        _H.cors_origin = os.environ.get("TELEMETRY_CORS_ORIGIN") or None
+        # CORS allow-list is resolved per-request in _cors_origin(): the
+        # tunnel origin can change on restart, so it is never pinned here.
+        _H.cors_origin = None
 
     def _ensure_token_file(self) -> Path:
         tp = self._token_path()

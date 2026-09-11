@@ -230,7 +230,9 @@ class TestTokenProvisioning:
         assert _H.auth_enabled is True
         assert _H.telemetry_token == tp.read_text().strip()
         assert len(_H.telemetry_token) >= 32
-        assert _H.cors_origin == "https://web.hanoon"
+        # Env origins merge into the allow-list (resolved per-request).
+        h = _H.__new__(_H)
+        assert "https://web.hanoon" in h._cors_origin()
 
     def test_open_when_auth_disabled(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(tel, "TELEMETRY_AUTH_ENABLED", False)
@@ -246,3 +248,109 @@ def monkeypatch_H(**attrs: Any) -> None:
     """Set _H class attrs for the current test (restored by autouse fixture)."""
     for k, v in attrs.items():
         setattr(_H, k, v)
+
+
+class TestMultiOriginCors:
+    """Allow-list of several first-party origins (webapp + tunnel + dev)."""
+
+    def test_allowed_request_origin_is_reflected(self, tmp_path) -> None:
+        monkeypatch_H(
+            auth_enabled=True,
+            telemetry_token=TOKEN,
+            cors_origin=["https://app.example.com", "https://www.hanoonweb.xyz"],
+        )
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/health")
+            req.add_header("Origin", "https://www.hanoonweb.xyz")
+            with urllib.request.urlopen(req) as r:
+                aco = r.headers.get("Access-Control-Allow-Origin")
+            assert aco == "https://www.hanoonweb.xyz"
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_disallowed_origin_gets_no_aco(self, tmp_path) -> None:
+        monkeypatch_H(
+            auth_enabled=True,
+            telemetry_token=TOKEN,
+            cors_origin=["https://app.example.com"],
+        )
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/health")
+            req.add_header("Origin", "https://evil.example.net")
+            with urllib.request.urlopen(req) as r:
+                aco = r.headers.get("Access-Control-Allow-Origin")
+            assert aco is None
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
+class TestAuthRoute:
+    """GET /auth hands the bearer token to first-party origins only."""
+
+    def test_token_handed_to_allowed_origin(self, tmp_path) -> None:
+        monkeypatch_H(
+            auth_enabled=True,
+            telemetry_token=TOKEN,
+            cors_origin=["https://www.hanoonweb.xyz"],
+        )
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/auth")
+            req.add_header("Origin", "https://www.hanoonweb.xyz")
+            with urllib.request.urlopen(req) as r:
+                body = json.loads(r.read())
+            assert body == {"auth": True, "token": TOKEN, "scheme": "Bearer"}
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_token_denied_to_foreign_origin(self, tmp_path) -> None:
+        monkeypatch_H(
+            auth_enabled=True,
+            telemetry_token=TOKEN,
+            cors_origin=["https://www.hanoonweb.xyz"],
+        )
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/auth")
+            req.add_header("Origin", "https://evil.example.net")
+            try:
+                with urllib.request.urlopen(req) as r:
+                    code, body = r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                code, body = e.code, json.loads(e.read())
+            assert code == 403
+            assert "token" not in body
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_auth_disabled_reports_open_mutations(self, tmp_path) -> None:
+        monkeypatch_H(auth_enabled=False, telemetry_token="", cors_origin=None)
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/auth") as r:
+                body = json.loads(r.read())
+            assert body == {"auth": False, "auth_disabled": True}
+        finally:
+            srv.shutdown()
+            srv.server_close()
