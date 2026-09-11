@@ -80,7 +80,13 @@ Status: DONE (Phase-3 commit). Baseline EV −0.317R on 23-ticker fixture pool.
 ### 4.3 Release criteria
 - Floor: e.g., ≥ N trades over ≥ M sessions AND deflated Sharpe above threshold
   AND no 3-day observation where kill-switch would have fired in paper.
-Status: pending
+Status: DONE (Phase-4 commit).
+- Pre-locked: `protocols/evaluation_protocol.md` (hash-pinned in each report).
+- Harness: `scripts/paper_run.py` (unpatched shipped organs, per-day session
+  aggregation) + `tests/test_paper_run.py`.
+- On committed fixtures: 30 observed sessions, 384 trades, 0 kill-switch days,
+  0 sim errors — but WFA universe FAIL (deflated −0.307, PBO 0.48), so P5
+  blocks micro-live. Honest red; data-depth is the blocker, same as Phase 2.
 
 ## Phase 5 — Micro-Live (guarded)
 ### 5.1 Smallest possible live footprint
