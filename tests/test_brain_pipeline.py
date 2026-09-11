@@ -79,6 +79,9 @@ def test_direction_vetoed():
     b.tick = lambda alpha, ticker, **kw: _fake_result(side="SELL", direction=-1)
     v = b.decide_entry("NVD", _snap(), {}, "rth")
     assert v.action == VETOED and v.reason == "direction_rejected"
+    # Cortex conviction must survive ONTO the vetoed Verdict so the log/journal/
+    # inspection reflect real conviction — not a misleading 0.000 default.
+    assert v.score == 0.9
 
 
 def test_zero_conviction_direction_is_no_signal():

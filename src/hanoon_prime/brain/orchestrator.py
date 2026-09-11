@@ -326,6 +326,7 @@ class NeuromorphicBrain:
                 action=VETOED,
                 reason="direction_rejected",
                 stage="trading_policy",
+                score=float(thought.score),
                 direction=thought.direction,
             )
         price = float(snap.get("last") or 0.0)
