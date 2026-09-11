@@ -669,7 +669,9 @@ class TestNettingGuard:
     """_guard_netting buys back accidental shorts while long_only."""
 
     def test_flattens_short_when_long_only(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB", "SOXS"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = []
@@ -686,7 +688,9 @@ class TestNettingGuard:
         assert exc._flattening == {"OLB": 5}
 
     def test_skips_when_both_directions(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "both")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "both"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         streamer = MagicMock()
@@ -695,7 +699,9 @@ class TestNettingGuard:
         exc.ib.placeOrder.assert_not_called()
 
     def test_skips_when_buy_already_in_flight(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = [_open_trade("OLB", "BUY")]
@@ -705,7 +711,9 @@ class TestNettingGuard:
         exc.ib.placeOrder.assert_not_called()
 
     def test_no_double_order_for_same_qty(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = []
@@ -716,7 +724,9 @@ class TestNettingGuard:
         exc.ib.placeOrder.assert_not_called()
 
     def test_prunes_flattening_when_short_closed(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", 50, 0.3)]
         exc._flattening = {"OLB": 5}
@@ -726,7 +736,9 @@ class TestNettingGuard:
         assert exc._flattening == {}
 
     def test_skips_sym_in_closing(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = []
@@ -736,7 +748,9 @@ class TestNettingGuard:
         exc.ib.placeOrder.assert_not_called()
 
     def test_skips_when_contract_missing(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = []
@@ -746,7 +760,9 @@ class TestNettingGuard:
         exc.ib.placeOrder.assert_not_called()
 
     def test_cancels_sell_legs_before_flatten(self, monkeypatch):
-        monkeypatch.setattr(TRADING_CONFIG, "direction_mode", "long_only")
+        monkeypatch.setattr(
+            TRADING_CONFIG, "direction_mode", "long_only"
+        )  # allow: monkeypatch TRADING_CONFIG
         exc = make_executor(tracked={"OLB"})
         exc.ib.positions.return_value = [_pos("OLB", -5, 0.3)]
         exc.ib.openTrades.return_value = [_open_trade("OLB", "SELL")]

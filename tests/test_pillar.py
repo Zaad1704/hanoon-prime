@@ -25,7 +25,9 @@ def _direction_mode_default(monkeypatch: pytest.MonkeyPatch) -> None:
     The policy-aware downgrade only fires for policy-blocked sides
     (direction_mode != "both"); the existing FAIL tests must still FAIL.
     """
-    monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "both")
+    monkeypatch.setattr(
+        pillar.TRADING_CONFIG, "direction_mode", "both"
+    )  # allow: monkeypatch TRADING_CONFIG
     # Mock snapshot() so tests don't depend on a running bot's telemetry.
     monkeypatch.setattr(
         pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "both"}}
@@ -154,7 +156,9 @@ def test_pillar_long_only_short_skew_is_policy_warn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """shorts blocked (long_only): SHORT veto skew is configured, not a defect."""
-    monkeypatch.setattr(pillar.TRADING_CONFIG, "direction_mode", "long_only")
+    monkeypatch.setattr(
+        pillar.TRADING_CONFIG, "direction_mode", "long_only"
+    )  # allow: monkeypatch TRADING_CONFIG
     monkeypatch.setattr(
         pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "long_only"}}
     )

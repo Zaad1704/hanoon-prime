@@ -138,3 +138,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      # Anti-monkeypatch contract (denylist + contract no-patch + self-patch)
+      - id: no-monkeypatch-politics
+        name: Anti-monkeypatch contract (denylist + no self-patch)
+        entry: python3 scripts/check_monkeypatch.py
+        language: system
+        pass_filenames: false
+        always_run: true
