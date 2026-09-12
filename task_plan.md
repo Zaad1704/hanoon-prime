@@ -177,10 +177,47 @@ Status: DONE
 - Bench now renders BOTH all-ticker and admissible-only EV so the report cannot be
   misread as a GO (phase7_bench.py `_pool_admissible`).
 
+## Phase 8 — Staged-Exit Sandbox (DONE)
+### 8.1 Alpaca 180d dataset
+- `scripts/fetch_alpaca.py` pulls ~180 calendar days of IEX 1-min RTH bars for all 23
+  tickers into `data/research/alpaca_180d/` (gitignored) via the v2 stocks/{symbol}/bars
+  REST API with page-token pagination, UTC→ET conversion. Creds live in the gitignored
+  `.env` (ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY — paper keys were rotated after the
+  burn; keep new ones out of committed files).
+### 8.2 Exit-hook plumbing (shipped core, default OFF, byte-identical when None)
+- `hands.SimHooks.exit_plan` + `plan_exit` callable: `(i, ctx, bars, pos) -> ExitPlan`.
+  `ExitPlan` = scale_out fraction | fill_price | reason | close_remaining flag.
+- Partial-exit ledger keyed by `entry_idx` in `SimState.staged`; one entry = one Trade
+  with blended composite pnl `realized + (1−closed_frac)·leg(final)`; each leg uses
+  `_compute_pnl(frac=leg)` so fee math is identical to shipped at frac=1.0. Scale-outs
+  never touch equity (final close appends once) → WFA pools stay comparable.
+- `_try_exit` routes to `_apply_exit_plan` when the hook exists, else the shipped
+  `_check_exit` path verbatim. Contracts R1/R3/R11/R13 + 30 contract tests green;
+  cap exemptions added for phase8.py like phase7.py.
+### 8.3 Sandbox module + benchmark
+- `src/hanoon_prime/phase8.py`: `StageRun`(lean + StageCfg), `make_staged_exit`,
+  `run_walk_forward_staged`. Arms: control (lean static), stage_atr (scale 50% @ 1.5xATR,
+  stop→breakeven, runner trails 3xATR), stage_vwap (trailing VWAP), stage_nobe (no BE floor).
+- `scripts/phase8_bench.py` — same WFA OOS scoring + dual EV pools; `reports/phase8_bench_alpaca.{json,md}`.
+### 8.4 Result (180d, 23 tickers, admissible = 22)
+- | variant | EV(R) | WR | R:R | trades | defl.edge | PBO | verdict |
+  | control (lean static) | −0.116 | 23.7% | 2.73 | 3937 | −0.108 | 0.66 | FAIL |
+  | stage_atr | −0.166 | 46.6% | 0.79 | 4612 | −0.175 | 0.52 | FAIL |
+  | stage_vwap | −0.176 | 49.2% | 0.67 | 5326 | −0.213 | 0.48 | FAIL |
+  | stage_nobe | −0.189 | 39.1% | 1.08 | 4400 | −0.176 | 0.42 | FAIL |
+- Honest reading: every staged arm roughly DOUBLES win rate (23.7% → ~47–49%) but cuts
+  R:R ~3:1 → ~0.7, so pooled OOS EV *falls* vs the static control. The win-rate thesis is
+  mechanically real and EV-negative — the breakeven floor helps (nobe is worst) but not
+  enough. **Sandbox NO-GO**: the binding constraint is that the entrance edge is not
+  positive on this panel (same PBO≈0.48–0.66 non-PASS everywhere), not the exit policy.
+
 ---
 
 ## Next Step
-Acquire deeper 1-min data (the single blocker across Phases 2–7), re-lock the Phase-4
+Acquire deeper 1-min data (the single blocker across Phases 2–8), re-lock the Phase-4
 protocol on its over a statistically meaningful panel, and let the WFA gate PASS
 before any live capital. The lean 3-factor + regime-gate stack is ready to flip ON
 via `phase7.SimHooks` once a deeper-data Phase 4 reproduces a positive deflated edge.
+Exit policy is instrumented (`phase8.SimHooks.exit_plan`) but the 180d panel already
+shows staged exits double WR at the cost of EV — re-test them only against a panel
+where the control EV is positive.

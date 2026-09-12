@@ -1,0 +1,86 @@
+{
+  "data": "data/research/alpaca_180d",
+  "spy": "data/research/alpaca_180d/SPY_1min.csv",
+  "min_trades_for_admissible": 30,
+  "weights": {
+    "vwap_deviation": 0.4,
+    "momentum": 0.35,
+    "relative_strength_spy": 0.25
+  },
+  "pools": {
+    "control": {
+      "ev": -0.1159,
+      "wr": 0.2367,
+      "trades": 3937.0,
+      "sharpe": -0.0576,
+      "rr": 2.7347
+    },
+    "stage_atr": {
+      "ev": -0.1662,
+      "wr": 0.4662,
+      "trades": 4612.0,
+      "sharpe": -0.1282,
+      "rr": 0.7887
+    },
+    "stage_vwap": {
+      "ev": -0.1756,
+      "wr": 0.4923,
+      "trades": 5326.0,
+      "sharpe": -0.1667,
+      "rr": 0.6746
+    },
+    "stage_nobe": {
+      "ev": -0.1885,
+      "wr": 0.3909,
+      "trades": 4400.0,
+      "sharpe": -0.1273,
+      "rr": 1.0759
+    }
+  },
+  "wfa": {
+    "control": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0576,
+      "deflated_edge": -0.1076,
+      "pbo": 0.6562,
+      "admissible": 22,
+      "adm_ev": -0.1159,
+      "adm_wr": 0.2367,
+      "adm_trades": 3937.0,
+      "detail": "Deflated OOS Sharpe -0.108 <= 0 after 132 trials."
+    },
+    "stage_atr": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.1282,
+      "deflated_edge": -0.1749,
+      "pbo": 0.5156,
+      "admissible": 22,
+      "adm_ev": -0.1662,
+      "adm_wr": 0.4662,
+      "adm_trades": 4612.0,
+      "detail": "Deflated OOS Sharpe -0.175 <= 0 after 132 trials."
+    },
+    "stage_vwap": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.1667,
+      "deflated_edge": -0.2132,
+      "pbo": 0.4844,
+      "admissible": 22,
+      "adm_ev": -0.1756,
+      "adm_wr": 0.4923,
+      "adm_trades": 5326.0,
+      "detail": "Deflated OOS Sharpe -0.213 <= 0 after 132 trials."
+    },
+    "stage_nobe": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.1273,
+      "deflated_edge": -0.1762,
+      "pbo": 0.4219,
+      "admissible": 22,
+      "adm_ev": -0.1885,
+      "adm_wr": 0.3909,
+      "adm_trades": 4400.0,
+      "detail": "Deflated OOS Sharpe -0.176 <= 0 after 132 trials."
+    }
+  }
+}

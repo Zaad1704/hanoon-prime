@@ -36,11 +36,28 @@ from .types import BarSeries, Position, Trade
 
 GATE = Callable[[int, "EvalContext", Any, BarSeries], bool]
 ALPHA_EXTRA = Callable[[int, "EvalContext", BarSeries], dict[str, float]]
+EXIT_PLAN = Callable[[int, "EvalContext", BarSeries, "Position"], Optional["ExitPlan"]]
+
+
+@dataclass(slots=True)
+class ExitPlan:
+    """Phase-8 opt-in: a staged-exit action for the current bar.
+
+    ``scale_out`` — fraction of the ORIGINAL position realized now at
+    ``fill_price`` while the runner stays open. ``close_remaining`` closes
+    whatever is left after earlier scale-outs; the composite trade then
+    equals the realized legs plus the remaining leg at ``fill_price``.
+    """
+
+    scale_out: float = 0.5
+    fill_price: float = 0.0
+    reason: str = "scale_out"
+    close_remaining: bool = False
 
 
 @dataclass(slots=True)
 class SimHooks:
-    """Phase-7 opt-in plumbing for ``simulate_ticker``.
+    """Phase-7/8 opt-in plumbing for ``simulate_ticker``.
 
     Shipped decision path is UNCHANGED when all hooks are None:
       * ``times``: per-bar timestamps aligned with ``bars`` (enables the
@@ -49,11 +66,15 @@ class SimHooks:
         RVOL) can block entries.
       * ``extra_alpha``: merged into the cerebellum alpha so additional
         factors (e.g. RS vs SPY) reach the Cortex scorer.
+      * ``exit_plan``: consulted before the ATR stop/target/timeout check
+        so a staged/partial-exit policy can override the shipped exit path
+        (Phase-8 sandbox only; None = shipped path unchanged).
     """
 
     times: Optional[list[Any]] = None
     gate: Optional[GATE] = None
     extra_alpha: Optional[ALPHA_EXTRA] = None
+    exit_plan: Optional[EXIT_PLAN] = None
 
     def allows(self, i: int, ctx: "EvalContext", bars: BarSeries) -> bool:
         """Gate check: True when no gate hook or the gate passes bar ``i``."""
@@ -66,6 +87,14 @@ class SimHooks:
         if self.extra_alpha is None:
             return {}
         return self.extra_alpha(i, ctx, bars) or {}
+
+    def plan_exit(
+        self, i: int, ctx: "EvalContext", bars: BarSeries, pos: "Position"
+    ) -> Optional[ExitPlan]:
+        """Exit action for bar ``i`` (None when no exit hook is set)."""
+        if self.exit_plan is None:
+            return None
+        return self.exit_plan(i, ctx, bars, pos)
 
 
 @dataclass(slots=True)
@@ -103,10 +132,16 @@ class ExitContext:
 
 @dataclass(slots=True)
 class SimState:
-    """Mutable accumulator shared by enter/exit/close steps."""
+    """Mutable accumulator shared by enter/exit/close steps.
+
+    ``staged`` records, per open position, the composite pnl_pct already
+    banked by earlier scale-outs plus the cumulative fraction realized —
+    the ledger Phase-8 exit hooks need for the final composite trade.
+    """
 
     equity: list[float]
     last_z: dict[str, float]
+    staged: dict[int, tuple[float, float]] = field(default_factory=dict)
 
 
 def _adverse_fill(price: float, direction: int) -> float:
@@ -174,8 +209,13 @@ def _check_exit(
     return None
 
 
-def _compute_pnl(pos: Position, exit_price: float) -> float:
-    """Compute P&L percentage after fees."""
+def _compute_pnl(pos: Position, exit_price: float, frac: float = 1.0) -> float:
+    """Compute P&L percentage after fees for a fraction ``frac`` of position.
+
+    The gross move is scale-invariant; the fixed-fee leg is amortized over
+    the leg's own notional so a partial scale-out pays its own fill costs
+    (contact with the shipped all-or-nothing fee math at ``frac=1.0``).
+    """
     d = pos.direction
     gross = (
         (exit_price - pos.entry_price) / pos.entry_price
@@ -183,8 +223,9 @@ def _compute_pnl(pos: Position, exit_price: float) -> float:
         else (pos.entry_price - exit_price) / pos.entry_price
     )
     notional = pos.entry_price * pos.shares
-    fees = 2 * (FIXED_FEE + FEE_RATE * notional)
-    return gross - fees / notional if notional > 0 else 0.0
+    if notional <= 0:
+        return 0.0
+    return frac * gross - 2 * (FIXED_FEE + FEE_RATE * frac * notional) / notional
 
 
 def _close_position(
@@ -192,10 +233,16 @@ def _close_position(
     exit: ExitContext,
     brain: Optional[Hippocampus],
     state: SimState,
+    pnl_pct: Optional[float] = None,
 ) -> Trade:
-    """Close position: P&L, equity update, learning feedback."""
+    """Close position: P&L, equity update, learning feedback.
+
+    ``pnl_pct`` optionally carries a Phase-8 composite (realized legs +
+    remaining leg) instead of a single-fill P&L.
+    """
     d = pos.direction
-    pnl_pct = _compute_pnl(pos, exit.price)
+    if pnl_pct is None:
+        pnl_pct = _compute_pnl(pos, exit.price)
     won = pnl_pct > 0
     if brain is not None:
         brain.record_trade(
@@ -271,16 +318,53 @@ def _try_enter(
     )
 
 
+def _apply_exit_plan(
+    i: int,
+    pos: Position,
+    ctx: EvalContext,
+    state: SimState,
+    plan: ExitPlan,
+) -> tuple[Optional[Position], Optional[Trade]]:
+    """Execute a Phase-8 staged exit plan. Returns (position, trade)."""
+    d = pos.direction
+    fill = _adverse_fill(plan.fill_price, -d)
+    real, closed = state.staged.get(pos.entry_idx, (0.0, 0.0))
+    if not plan.close_remaining:
+        leg = min(plan.scale_out, 1.0 - closed)
+        if leg <= 0.0:
+            return pos, None
+        state.staged[pos.entry_idx] = (
+            real + _compute_pnl(pos, fill, frac=leg),
+            closed + leg,
+        )
+        return pos, None
+    remaining = max(0.0, 1.0 - closed)
+    composite = real + _compute_pnl(pos, fill, frac=remaining)
+    trade = _close_position(
+        pos,
+        ExitContext(price=fill, idx=i + 1, reason=plan.reason),
+        ctx.brain,
+        state,
+        pnl_pct=composite,
+    )
+    state.staged.pop(pos.entry_idx, None)
+    return None, trade
+
+
 def _try_exit(
     i: int,
-    position: Optional[Position],
+    ctx: EvalContext,
     bars: BarSeries,
-    brain: Optional[Hippocampus],
+    position: Optional[Position],
     state: SimState,
 ) -> tuple[Optional[Position], Optional[Trade]]:
     """Try to exit an open position. Returns (position, trade)."""
     if position is None or position.entry_idx >= i:
         return position, None
+    if ctx.hooks is not None:
+        plan = ctx.hooks.plan_exit(i, ctx, bars, position)
+        if plan is not None:
+            return _apply_exit_plan(i, position, ctx, state, plan)
     exit_r = _check_exit(
         position, float(bars.low[i + 1]), float(bars.high[i + 1]), i + 1
     )
@@ -290,7 +374,7 @@ def _try_exit(
     trade = _close_position(
         position,
         ExitContext(price=fill, idx=i + 1, reason=exit_r[1]),
-        brain,
+        ctx.brain,
         state,
     )
     return None, trade
@@ -333,7 +417,7 @@ def _process_bar(
             ),
             ctx.brain,
         )
-    position, trade = _try_exit(i, position, bars, ctx.brain, state)
+    position, trade = _try_exit(i, ctx, bars, position, state)
     state.last_z = z_scores
     return position, state.last_z, trade
 
