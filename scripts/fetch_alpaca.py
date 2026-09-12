@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """scripts/fetch_alpaca.py — 1-min OHLCV research data from the Alpaca data API.
 
-Pulls RTH 1-minute bars from the Alpaca v2 stocks/bars endpoint and writes
+Pulls 1-minute bars from the Alpaca v2 stocks/bars endpoint and writes
 them as eyes-compatible CSVs (same format as the committed fixtures), so the
 whole pipeline (eyes.load_ohlcv / wfa / phase7 bench) consumes them unchanged.
+
+``--window`` selects which session slice is kept:
+  * ``rth``        — 09:30-15:59 ET (default; fixtures + strategy inputs)
+  * ``pre-market`` — 08:00-09:25 ET (Phase-9 catalyst screen: pre-market RVOL)
+  * ``post-market``— 16:00-19:59 ET
 
 Primary purpose: acquire 60-180+ trading days of intraday history for the
 Phase-7 lean-stack probe — the committed fixtures cover only ~5 days, too thin
@@ -22,18 +27,22 @@ account's keys work for the public data endpoint.
 
 Notes (deliberately documented):
   * Bars come back in UTC; they are converted to America/New_York wall time so
-    the 09:30-11:00 ET session gate sees the correct hours, and are filtered to
-    09:30-15:59 to match the fixture convention (matches yfinance fetcher too).
+    the 09:30-11:00 ET session gate sees the correct hours.
   * The free data feed is IEX: volume is IEX-exchange only, not the consolidated
     tape, and unsupported/illiquid names may return empty. Acceptable for a
     relative benchmark; the definitive Phase-4 panel should use SIP or the
     live IB feed.
+  * Pre-market depth depends on IEX liquidity: sparse names may return few or
+    zero pre-market bars on some days (the screen uses trailing means, so a
+    missing session simply adds a zero to the baseline).
 
 Usage:
   ALPACA_API_KEY_ID=... ALPACA_API_SECRET_KEY=... python scripts/fetch_alpaca.py \\
       --out-dir data/research/alpaca_180d --days 180
   python scripts/fetch_alpaca.py --tickers AAPL,SPY --days 60 \\
       --out-dir data/research/alpaca_60d
+  python scripts/fetch_alpaca.py --window pre-market \\
+      --out-dir data/research/alpaca_180d_pre --days 180
 """
 
 from __future__ import annotations
@@ -60,6 +69,16 @@ _BASE = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 _ET = ZoneInfo("America/New_York")
 _MARKET_OPEN = "09:30"
 _MARKET_CLOSE = "15:59"
+_PREMKT_OPEN = "08:00"
+_PREMKT_CLOSE = "09:25"
+_POST_OPEN = "16:00"
+_POST_CLOSE = "19:59"
+
+WINDOWS: dict[str, tuple[str, str]] = {
+    "rth": (_MARKET_OPEN, _MARKET_CLOSE),
+    "pre-market": (_PREMKT_OPEN, _PREMKT_CLOSE),
+    "post-market": (_POST_OPEN, _POST_CLOSE),
+}
 
 
 @dataclass
@@ -135,19 +154,35 @@ def _ts_str(ts: datetime) -> str:
     return ts.isoformat(sep=" ", timespec="seconds")
 
 
-def _rth_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep only regular-hours bars (09:30-15:59 ET) and sort by time."""
+def _window_bars(
+    bars: list[dict[str, Any]], start: str, end: str
+) -> list[dict[str, Any]]:
+    """Keep bars whose wall-clock time is in [start, end) and sort by time."""
+    start_m = _hhmm_minutes_before(start)
+    end_m = _hhmm_minutes_before(end)
     out = []
     for b in bars:
         t = _to_et(b["t"])
-        if _MARKET_OPEN <= t.strftime("%H:%M") <= _MARKET_CLOSE:
+        m = t.hour * 60 + t.minute
+        if start_m <= m < end_m:
             out.append(b)
     out.sort(key=lambda b: b["t"])
     return out
 
 
+def _hhmm_minutes_before(hhmm: str) -> int:
+    """Minutes since midnight for an HH:MM wall-clock string."""
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _rth_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only regular-hours bars (09:30-15:59 ET) and sort by time."""
+    return _window_bars(bars, _MARKET_OPEN, _MARKET_CLOSE)
+
+
 def _fetch_symbol(
-    symbol: str, cfg: ApiCfg, start: str, end: str
+    symbol: str, cfg: ApiCfg, start: str, end: str, window: tuple[str, str]
 ) -> list[dict[str, Any]]:
     """Fetch *all* 1-min bars for a symbol by walking page tokens."""
     bars: list[dict[str, Any]] = []
@@ -171,7 +206,7 @@ def _fetch_symbol(
         if not page_token or not chunk:
             break
         time.sleep(cfg.pause)
-    return _rth_bars(bars)
+    return _window_bars(bars, window[0], window[1])
 
 
 def _session_count(bars: list[dict[str, Any]]) -> int:
@@ -207,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tickers", default="ALL")
     parser.add_argument("--days", type=int, default=180)
     parser.add_argument("--feed", default="iex")
+    parser.add_argument("--window", choices=sorted(WINDOWS), default="rth")
     parser.add_argument("--limit", type=int, default=10000)
     parser.add_argument("--pause", type=float, default=0.35)
     args = parser.parse_args(argv)
@@ -235,11 +271,12 @@ def main(argv: list[str] | None = None) -> int:
     cfg = ApiCfg(
         key=key, secret=secret, feed=args.feed, limit=args.limit, pause=args.pause
     )
+    window = WINDOWS[args.window]
     for ticker in tickers:
         try:
-            bars = _fetch_symbol(ticker, cfg, start_s, end_s)
+            bars = _fetch_symbol(ticker, cfg, start_s, end_s, window)
             if not bars:
-                raise RuntimeError("no RTH bars returned")
+                raise RuntimeError(f"no {args.window} bars returned")
             _write_csv(out_dir / f"{ticker}_1min.csv", ticker, bars)
             sessions = _session_count(bars)
             fetched.append((ticker, len(bars), sessions))

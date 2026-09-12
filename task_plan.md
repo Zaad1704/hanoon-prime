@@ -213,16 +213,7 @@ Status: DONE
 
 ---
 
-## Next Step
-Acquire deeper 1-min data (the single blocker across Phases 2–8), re-lock the Phase-4
-protocol on its over a statistically meaningful panel, and let the WFA gate PASS
-before any live capital. The lean 3-factor + regime-gate stack is ready to flip ON
-via `phase7.SimHooks` once a deeper-data Phase 4 reproduces a positive deflated edge.
-Exit policy is instrumented (`phase8.SimHooks.exit_plan`) but the 180d panel already
-shows staged exits double WR at the cost of EV — re-test them only against a panel
-where the control EV is positive.
-
-## Phase 9 — Catalyst-Screen Feasibility Spec (SPEC, no code yet)
+## Phase 9 — Catalyst-Screen Feasibility Spec (SPEC)
 ### 9.1 What is actually obtainable (verified by probe)
 | input | source | status |
 |---|---|---|
@@ -244,3 +235,49 @@ costed layer is therefore the *historical catalyst panel*, not any code.
   requires a vendor decision and a historical news layer; only justified AFTER
   Path A shows positive OOS EV (defended against the standing PBO≈0.5 noise floor).
 - Default: implement Path A first; Path B stays parked unless A wins.
+
+## Phase 9 — Catalyst-Screen Path A (DONE)
+### 9.4 What shipped
+- `scripts/fetch_alpaca.py` gained `--window {rth,pre-market,post-market}` so the
+  SAME credentials/pagination machinery writes 08:00–09:25 ET bars to a parallel
+  dir (strategy RTH inputs untouched). Full 180d pre-market panel in
+  `data/research/alpaca_180d_pre/` (23 tickers; SPY 119 sessions — sparse pre-market
+  IEX liquidity on names like SNOW=8, VALE=11 is honest signal).
+- `scripts/fetch_earnings.py` pulls scheduled earnings timestamps (ET) via yfinance
+  (`get_earnings_dates`) into `data/research/earnings/{TICKER}.json` (22 tickers;
+  SPY has none). Randomized session mapping was a bug vector — `list(set())` order;
+  fixed defensively with explicit `sorted()` + a 3-process determinism check
+  (identical JSON sha256 across runs).
+- `src/hanoon_prime/phase9.py` (sandbox): `premkt_flagged_dates` (leak-free, trailing
+  20 PRIOR sessions), `earnings_session_dates` (BMO hour<16 → same day; AMC → next
+  panel session), `make_catalyst_hooks` (regime gate AND catalyst-mask), and
+  `run_walk_forward_catalyst` — byte-identical to `run_walk_forward_lean` when every
+  session is allowed (contract-tested).
+- `scripts/phase9_bench.py` + `reports/phase9_bench_alpaca.{json,md}`: control vs
+  catalyst vs earnings_only vs rvol_only through the SAME WFA OOS scoring.
+### 9.5 Result (180d panel, deterministic)
+- | variant | EV(R) | WR | R:R | trades | flagged sess | verdict |
+  | control (every session) | −0.116 | 23.7% | 2.73 | 3937 | — | FAIL |
+  | catalyst (earnings x premkt-RVOL>5) | −0.129 | 33.3% | 1.61 | 6 | 6 | INSUFFICIENT |
+  | earnings_only | −0.097 | 19.1% | 3.73 | 68 | 60 | INSUFFICIENT |
+  | rvol_only (any session) | −0.394 | 12.8% | 3.73 | 39 | 29 | INSUFFICIENT |
+- Honest reading: the funnel is real (earnings_only pulls EV −0.116 → −0.097R, the
+  calendar component helps; the pre-market 5x volume filter on top HURTS and the
+  combined arm trades 6 times). None can reach MIN_TRADES=30/ticker because a 180d
+  panel holds ~2 scheduled earnings sessions per ticker. **NO-GO, and the number to
+  fix is panel depth (years of pre-market + earnings history), not the screen.**
+- Path B (paid news/surprise) remains parked: no advantage when the backlog is depth.
+- **Determinism fix worth keeping:** the session resolver is now `sorted()` and the
+  bench output is hash-stable across processes — the 32→58-session drift between
+  first runs tracked a `list(set())` iteration-order bug (PYTHONHASHSEED), not data.
+
+
+## Next Step
+Acquire YEARS-deep intraday data (the single blocker across Phases 2–9): the 180d
+Alpaca panel was enough to prove factor, exit, and catalyst tweaks all hit the same
+wall — no entry edge, WFA PASS unreachable. The catalyst screen trivially needs
+years just to place 30 earnings trades per ticker. Re-lock the Phase-4 protocol on a
+multi-year panel, then let the WFA gate PASS before any live capital. The lean stack
+(`phase7.SimHooks`), staged exits (`phase8.exit_plan`), and the earnings/pre-market
+catalyst funnel (`phase9.run_walk_forward_catalyst`) are all instrumented, fail-closed,
+and ready to re-run the moment deeper data exists.

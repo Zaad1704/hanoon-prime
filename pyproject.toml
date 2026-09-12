@@ -122,6 +122,7 @@ ignore = ["E501", "E701"]
 # SimHooks callables keep the fixed (i, ctx, ts-or-bars) hook signature even
 # when a specific hook doesn't need ctx — matches hands.EvalContext contract.
 "src/hanoon_prime/phase7.py" = ["ARG001", "ARG002"]
+"src/hanoon_prime/phase9.py" = ["ARG001", "PLR0913"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

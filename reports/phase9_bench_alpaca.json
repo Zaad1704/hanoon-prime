@@ -1,0 +1,207 @@
+{
+  "rth": "data/research/alpaca_180d",
+  "premkt": "data/research/alpaca_180d_pre",
+  "earnings": "data/research/earnings",
+  "min_trades_for_admissible": 30,
+  "weights": {
+    "vwap_deviation": 0.4,
+    "momentum": 0.35,
+    "relative_strength_spy": 0.25
+  },
+  "pools": {
+    "control": {
+      "ev": -0.1159,
+      "wr": 0.2367,
+      "trades": 3937.0,
+      "sharpe": -0.0576,
+      "rr": 2.7347
+    },
+    "catalyst": {
+      "ev": -0.1288,
+      "wr": 0.3333,
+      "trades": 6.0,
+      "sharpe": -0.0952,
+      "rr": 1.6136
+    },
+    "earnings_only": {
+      "ev": -0.0967,
+      "wr": 0.1912,
+      "trades": 68.0,
+      "sharpe": -0.0415,
+      "rr": 3.725
+    },
+    "rvol_only": {
+      "ev": -0.3939,
+      "wr": 0.1282,
+      "trades": 39.0,
+      "sharpe": -0.1926,
+      "rr": 3.7274
+    }
+  },
+  "catalog_sessions": {
+    "AAPL": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 0
+    },
+    "CRWD": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "DDOG": {
+      "earnings": 2,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "F": {
+      "earnings": 3,
+      "rvol": 1,
+      "catalyst": 1
+    },
+    "INTC": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 0
+    },
+    "IREN": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "MARA": {
+      "earnings": 3,
+      "rvol": 1,
+      "catalyst": 0
+    },
+    "MRNA": {
+      "earnings": 2,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "MSFT": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 1
+    },
+    "NET": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "NIO": {
+      "earnings": 2,
+      "rvol": 3,
+      "catalyst": 1
+    },
+    "NVDA": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 0
+    },
+    "PFE": {
+      "earnings": 2,
+      "rvol": 1,
+      "catalyst": 0
+    },
+    "PLTR": {
+      "earnings": 3,
+      "rvol": 1,
+      "catalyst": 0
+    },
+    "RDDT": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "SNAP": {
+      "earnings": 3,
+      "rvol": 2,
+      "catalyst": 0
+    },
+    "SNOW": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "SOFI": {
+      "earnings": 2,
+      "rvol": 2,
+      "catalyst": 1
+    },
+    "SOUN": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 2
+    },
+    "T": {
+      "earnings": 2,
+      "rvol": 0,
+      "catalyst": 0
+    },
+    "TSLA": {
+      "earnings": 3,
+      "rvol": 3,
+      "catalyst": 0
+    },
+    "VALE": {
+      "earnings": 3,
+      "rvol": 0,
+      "catalyst": 0
+    }
+  },
+  "wfa": {
+    "control": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0576,
+      "deflated_edge": -0.1076,
+      "pbo": 0.6562,
+      "admissible": 22,
+      "adm_ev": -0.1159,
+      "adm_wr": 0.2367,
+      "adm_trades": 3937.0,
+      "flagged_sessions": null,
+      "contributing_tickers": 22,
+      "detail": "Deflated OOS Sharpe -0.108 <= 0 after 132 trials."
+    },
+    "catalyst": {
+      "verdict": "INSUFFICIENT",
+      "pooled_sharpe": 0.0,
+      "deflated_edge": 0.0,
+      "pbo": 0.5,
+      "admissible": 0,
+      "adm_ev": 0.0,
+      "adm_wr": 0.0,
+      "adm_trades": 0.0,
+      "flagged_sessions": 6,
+      "contributing_tickers": 5,
+      "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+    },
+    "earnings_only": {
+      "verdict": "INSUFFICIENT",
+      "pooled_sharpe": 0.0,
+      "deflated_edge": 0.0,
+      "pbo": 0.4531,
+      "admissible": 0,
+      "adm_ev": 0.0,
+      "adm_wr": 0.0,
+      "adm_trades": 0.0,
+      "flagged_sessions": 60,
+      "contributing_tickers": 22,
+      "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+    },
+    "rvol_only": {
+      "verdict": "INSUFFICIENT",
+      "pooled_sharpe": 0.0,
+      "deflated_edge": 0.0,
+      "pbo": 0.3125,
+      "admissible": 0,
+      "adm_ev": 0.0,
+      "adm_wr": 0.0,
+      "adm_trades": 0.0,
+      "flagged_sessions": 29,
+      "contributing_tickers": 13,
+      "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+    }
+  }
+}
