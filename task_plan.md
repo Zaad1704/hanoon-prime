@@ -272,12 +272,49 @@ costed layer is therefore the *historical catalyst panel*, not any code.
   first runs tracked a `list(set())` iteration-order bug (PYTHONHASHSEED), not data.
 
 
+## Phase 10 — Vendor Feasibility: IBKR vs Polygon (DONE)
+### 10.1 Decision
+The backlog problem is PANEL DEPTH (multi-year 1-min + pre-market history, the
+single blocker from Phases 2–9). Two candidate vendors were probed to choose where
+the deep panel comes from:
+- **IBKR** — already integrated (bots run off the Gateway), probed LIVE against the
+  running gateway (port 4002, paper account DUO429233): **WINS, zero new infra.**
+- **Polygon.io** — no credentials held yet; REST-only (new fetch machinery + a
+  $29–199/mo plan for >2yr minute-bars). **Parked as fallback.**
+
+### 10.2 IBKR live-probe results (empirical, 2026-09-12)
+- Connection: `127.0.0.1:4002` paper account, any clientId works, no auth needed
+  (unlike Alpaca/Polygon API keys). Head-timestamp depth: AAPL **1980**, SPY 1993,
+  NVDA 1999 (i.e. the Gateway serves 4+ decades of raw history).
+- 1-min bars confirmed at 5-year depth AND 7-year depth: full months fetch clean
+  from end-dates 2025-01, 2023-01, **2018-01/2019-01** — no subscription errors,
+  no "no historical data" gaps. This is the exact depth Phase 9 was missing.
+- Extended-hours coverage: bars from **04:00–20:00 ET** (tradingHours confirms
+  0400-2000). Pre-market (08:00–09:29 ET) present even in the Jan-2019 sample —
+  AAPL 1800 PRE bars/month. **Sparse names are the live test**: VALE and SNOW each
+  returned full 90-min pre-market blocks on 15/15 sessions in the latest 3 weeks —
+  the IEX thin-liquidity failure (VALE=11, SNOW=8 sessions over 180d) is gone on
+  IBKR's consolidated feed.
+- Throughput math: ~40–60s per 1-month/1-min request; pacing limit (60 req /
+  10 min) is NOT binding at that rate. 5y × 23 tickers ≈ 1380 month-requests ≈
+  **8–14h wall-clock**, one batch run, then the panel is static.
+- Gotcha (determinism-free but real): a stale `ib.client.serverVersion()` is a
+  bound method in 0.9.86 (call it); `reqHistoricalData` returns empty on pacing
+  hiccups (Error 162) — always retry-on-empty with backoff.
+
+### 10.3 Why not Polygon
+Polygon would sell the same thing (minute bars + pre-market) at $29–199/mo plus a
+new REST ingest path, and we hold no credentials to even probe its pre-market
+coverage. The 180d Alpaca IEX panels stay as a cheap sanity cross-check; IBKR's
+Gateway is the depth source.
+
 ## Next Step
-Acquire YEARS-deep intraday data (the single blocker across Phases 2–9): the 180d
-Alpaca panel was enough to prove factor, exit, and catalyst tweaks all hit the same
-wall — no entry edge, WFA PASS unreachable. The catalyst screen trivially needs
-years just to place 30 earnings trades per ticker. Re-lock the Phase-4 protocol on a
-multi-year panel, then let the WFA gate PASS before any live capital. The lean stack
-(`phase7.SimHooks`), staged exits (`phase8.exit_plan`), and the earnings/pre-market
-catalyst funnel (`phase9.run_walk_forward_catalyst`) are all instrumented, fail-closed,
-and ready to re-run the moment deeper data exists.
+Build the IBKR depth ingest: `scripts/fetch_ibkr.py` paging 1-minute bars
+(useRTH=False, backward-look from present) into eyes-compatible CSVs across the
+universe — target ~2–5 years, session-sliced (RTH + pre-market + post-market like
+`fetch_alpaca.py --window`). Then re-run `scripts/phase9_bench.py` (plus the
+phase7/phase8 benches) on the deep panel for a definitive PASS/NO-GO at
+MIN_TRADES=30/ticker. Path B (paid news/surprise) stays parked until Path A wins.
+Existing assets ready: `phase7.SimHooks`, `phase8.exit_plan`,
+`phase9.run_walk_forward_catalyst` — all fail-closed and byte-identical under the
+lean control.
