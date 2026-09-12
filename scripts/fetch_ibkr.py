@@ -175,6 +175,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--client-id", type=int, default=CLIENT_ID)
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--pause", type=float, default=1.0)
+    parser.add_argument(
+        "--resume", action="store_true", help="skip tickers with existing CSVs"
+    )
     args = parser.parse_args(argv)
 
     if args.tickers.upper() == "ALL":
@@ -207,6 +210,11 @@ def main(argv: list[str] | None = None) -> int:
     fetched: list[tuple[str, int, int]] = []
     failed: list[tuple[str, str]] = []
     for ticker in tickers:
+        csv_path = out_dir / f"{ticker}_1min.csv"
+        if args.resume and csv_path.exists():
+            fetched.append((ticker, -1, -1))
+            print(f"{ticker:6s} {args.window:11s} RESUME (csv exists)")
+            continue
         try:
             stack = Stock(ticker, "SMART", "USD")
             ib.qualifyContracts(stack)
@@ -224,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if not filled:
                 raise RuntimeError(f"no {args.window} bars returned")
-            _write_csv(out_dir / f"{ticker}_1min.csv", ticker, filled)
+            _write_csv(csv_path, ticker, filled)
             sessions = len({_fmt_et(b)[:10] for b in filled})
             fetched.append((ticker, len(filled), sessions))
             print(
@@ -243,7 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     if not fetched:
         print("ERROR: nothing fetched", file=sys.stderr)
         return 1
-    print(f"\nFetched {len(fetched)} tickers into {out_dir}")
+    real = [f for f in fetched if f[1] > 0]
+    if not real:
+        print(f"All {len(fetched)} tickers already present (resume); nothing to do")
+        return 0
+    print(f"\nFetched {len(real)} tickers into {out_dir}")
     return 0
 
 
