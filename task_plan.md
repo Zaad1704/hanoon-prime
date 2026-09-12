@@ -1,4 +1,4 @@
-# HANOON PRIME — Phases 2–5: From Honest Gate to Validated Live Edge
+# HANOON PRIME — Phases 2–7: From Honest Gate to Validated Live Edge
 
 ## Goal
 Carry the Phase-1 state (real committed data, non-vacuous R2 gate, CI red by design)
@@ -121,8 +121,45 @@ Status: DONE
   design; what flips it to GO is a deeper-data Phase 4 PASS + re-validation
   of exit-lever findings. Phase 2/3/4/5 evidence summarized with citations.
 
+## Phase 7 — Lean 3-Factor Sandbox (DONE)
+### 7.1 Live/backtest signal audit + subtraction decision
+- Live `compute_alpha_from_snap` scored 5 core + 22 higher-order factors, backtest
+  scored only 5 core; equalized only because INDICATOR_WEIGHTS covers the 5.
+- Contested factors verified in literature: VPIN (Andersen & Bondarenko 2014 —
+  poor vol predictor, spiked AFTER flash crash), institutional_flow is a 5-bar
+  price×volume heuristic (not institutional flows), orderbook imbalance is predictive
+  only at tick/second granularity (Cont et al. 2013), not 1-min bars.
+- USER DECISION (subtraction not addition): DROP vpin, institutional_flow,
+  orderbook_imbalance; KEEP vwap_deviation + momentum; ADD relative strength vs SPY;
+  gate entries to RVOL>2.0 x 09:30–11:00 ET. Sandbox-first: no shipped organ touched
+  until the benchmark beats baseline.
+### 7.2 Opt-in SimHooks plumbing (shipped core, default OFF)
+- `hands.simulate_ticker(..., hooks=SimHooks())`: opt-in per-bar regime gate + extra
+  alpha injection. Default None = byte-identical shipped path (contract-tested).
+- `hands/phase7` live path unchanged: gate only consults `gates.allows(i, bars)`
+  BEFORE entry; extra-alpha merges RS into the cerebellum alpha dict pre-Cortex.
+### 7.3 Sandbox module + benchmark harness
+- `src/hanoon_prime/phase7.py`: LEAN_WEIGHTS {vwap .40, momentum .35, RS .25},
+  RVOL floor (20-bar), session window, RS-vs-SPY (15-bar carry), LeanCfg toggles.
+- `scripts/phase7_bench.py` runs baseline vs lean vs gate-only vs RS-only through
+  the SAME WFA OOS scoring + R-expectancy pool + deflated Sharpe/PBO/verdicts.
+### 7.4 Result (commit/push candidate)
+- | variant | EV(R) | WR | trades | defl.edge | verdict |
+  | baseline | −0.283 | 21.3% | 541 | −0.307 | FAIL |
+  | lean (gated+RS) | −0.158 | 25.0% | 148 | 0 (no admissible) | INSUFFICIENT |
+  | lean_no_rs (gate only) | −0.176 | 23.9% | 155 | 0 | INSUFFICIENT |
+  | lean_no_gate (RS only) | −0.366 | 18.2% | 622 | −0.311 | FAIL |
+- Gate raises WR ~31% vs ungated lean but sits exactly at the 3:1 breakeven WR (25%);
+  RS adds only ~+4.7% WR; the gate's 4x trade cut pushes tickers under MIN_TRADES=30.
+  R-expectancy stays negative for every variant → **sandbox NO-GO confirmed**.
+- Conclusion: the blocker was always data depth, not factor selection. The lean stack
+  improves win rate but cannot clear the WFA gate on 5-day fixtures; deeper data
+  (Phase 4 PASS) remains the prerequisite for GO.
+
 ---
 
 ## Next Step
-Start Phase 2.1: build the walk-forward harness on committed fixtures with
-purge/embargo, min-trade floor, and honest per-ticker verdicts.
+Acquire deeper 1-min data (the single blocker across Phases 2–7), re-lock the Phase-4
+protocol on its over a statistically meaningful panel, and let the WFA gate PASS
+before any live capital. The lean 3-factor + regime-gate stack is ready to flip ON
+via `phase7.SimHooks` once a deeper-data Phase 4 reproduces a positive deflated edge.

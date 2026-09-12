@@ -119,6 +119,9 @@ ignore = ["E501", "E701"]
 "src/hanoon_prime/brain/adaptive_thresholds.py" = ["PLR0913"]
 "src/hanoon_prime/ib_executor.py" = ["PLR0913"]
 "src/hanoon_prime/juli.py" = ["PLR0913"]
+# SimHooks callables keep the fixed (i, ctx, ts-or-bars) hook signature even
+# when a specific hook doesn't need ctx — matches hands.EvalContext contract.
+"src/hanoon_prime/phase7.py" = ["ARG001", "ARG002"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

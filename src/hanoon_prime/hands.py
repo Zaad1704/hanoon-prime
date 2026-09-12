@@ -13,8 +13,9 @@ objects — all arithmetic is unchanged, only the parameter packaging.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from .cerebellum import compute_alpha
 from .cortex import Cortex, Thought
@@ -33,6 +34,39 @@ from .immune import (
 )
 from .types import BarSeries, Position, Trade
 
+GATE = Callable[[int, "EvalContext", Any, BarSeries], bool]
+ALPHA_EXTRA = Callable[[int, "EvalContext", BarSeries], dict[str, float]]
+
+
+@dataclass(slots=True)
+class SimHooks:
+    """Phase-7 opt-in plumbing for ``simulate_ticker``.
+
+    Shipped decision path is UNCHANGED when all hooks are None:
+      * ``times``: per-bar timestamps aligned with ``bars`` (enables the
+        gate and session-aware extras).
+      * ``gate``: consulted before entry so regime filters (time window,
+        RVOL) can block entries.
+      * ``extra_alpha``: merged into the cerebellum alpha so additional
+        factors (e.g. RS vs SPY) reach the Cortex scorer.
+    """
+
+    times: Optional[list[Any]] = None
+    gate: Optional[GATE] = None
+    extra_alpha: Optional[ALPHA_EXTRA] = None
+
+    def allows(self, i: int, ctx: "EvalContext", bars: BarSeries) -> bool:
+        """Gate check: True when no gate hook or the gate passes bar ``i``."""
+        if self.gate is None or self.times is None:
+            return True
+        return bool(self.gate(i, ctx, self.times[i], bars))
+
+    def extra(self, i: int, ctx: "EvalContext", bars: BarSeries) -> dict[str, float]:
+        """Extra alpha factors for bar ``i`` (empty when no hook)."""
+        if self.extra_alpha is None:
+            return {}
+        return self.extra_alpha(i, ctx, bars) or {}
+
 
 @dataclass(slots=True)
 class EvalContext:
@@ -41,6 +75,7 @@ class EvalContext:
     brain: Hippocampus
     window: int
     ticker: str
+    hooks: Optional[SimHooks] = None
 
     @property
     def cortex(self) -> Cortex:
@@ -196,15 +231,16 @@ def _evaluate_bar(i: int, ctx: EvalContext, bars: BarSeries) -> Thought:
         bars.buy_volume[i - w : i + 1],
     )
     bids, asks = estimate_bid_ask(v_w, bv_w)
-    return ctx.cortex.evaluate(
-        compute_alpha(
-            close=bars.close[i - w : i + 1],
-            volume=v_w,
-            buy_volume=bv_w,
-            bid_sizes=bids,
-            ask_sizes=asks,
-        )
+    alpha = compute_alpha(
+        close=bars.close[i - w : i + 1],
+        volume=v_w,
+        buy_volume=bv_w,
+        bid_sizes=bids,
+        ask_sizes=asks,
     )
+    if ctx.hooks is not None:
+        alpha.update(ctx.hooks.extra(i, ctx, bars))
+    return ctx.cortex.evaluate(alpha)
 
 
 def _try_enter(
@@ -260,6 +296,13 @@ def _try_exit(
     return None, trade
 
 
+def _clock_allows(ctx: EvalContext, i: int, bars: BarSeries) -> bool:
+    """Phase-7 opt-in: gate passes only when hooks.gate allows bar ``i``."""
+    if ctx.hooks is None:
+        return True
+    return ctx.hooks.allows(i, ctx, bars)
+
+
 def _process_bar(
     i: int,
     ctx: EvalContext,
@@ -270,7 +313,12 @@ def _process_bar(
     """Process one bar: evaluate, enter, exit. Returns (pos, z, trade)."""
     thought = _evaluate_bar(i, ctx, bars)
     z_scores = thought.z_scores
-    if position is None and thought.direction != 0 and ctx.brain.check_entry_allowed():
+    if (
+        position is None
+        and thought.direction != 0
+        and ctx.brain.check_entry_allowed()
+        and _clock_allows(ctx, i, bars)
+    ):
         atr_val = rolling_atr(
             bars.high[: i + 1], bars.low[: i + 1], bars.close[: i + 1], ATR_PERIOD
         )
@@ -295,8 +343,14 @@ def simulate_ticker(
     bars: BarSeries,
     window: int = EDGE_LOOKBACK,
     brain: Optional[Hippocampus] = None,
+    hooks: Optional[SimHooks] = None,
 ) -> tuple[list[Trade], list[float]]:
-    """Run the JULI pipeline bar-by-bar. Returns (trades, equity_curve)."""
+    """Run the JULI pipeline bar-by-bar. Returns (trades, equity_curve).
+
+    ``hooks`` (Phase-7 opt-in) can add a per-bar regime gate and extra alpha
+    factors without changing the shipped decision path: see ``SimHooks``.
+    Default None = shipped behavior unchanged.
+    """
     buy_vol = compute_buy_volume(bars.close, bars.high, bars.low, bars.volume)
     bars = BarSeries(
         bars.close,
@@ -306,7 +360,7 @@ def simulate_ticker(
         buy_volume=buy_vol,
     )
     brain = brain or Hippocampus()
-    ctx = EvalContext(brain=brain, window=window, ticker=ticker)
+    ctx = EvalContext(brain=brain, window=window, ticker=ticker, hooks=hooks)
     state = SimState(equity=[0.0], last_z={})
     trades: list[Trade] = []
     position: Optional[Position] = None

@@ -1,0 +1,74 @@
+{
+  "data": "data/fixtures",
+  "spy": "data/fixtures/SPY_1min.csv",
+  "min_trades_for_admissible": 30,
+  "weights": {
+    "vwap_deviation": 0.4,
+    "momentum": 0.35,
+    "relative_strength_spy": 0.25
+  },
+  "pools": {
+    "baseline": {
+      "ev": -0.2825,
+      "wr": 0.2126,
+      "trades": 541.0,
+      "sharpe": -0.164,
+      "rr": 2.3754
+    },
+    "lean": {
+      "ev": -0.1578,
+      "wr": 0.25,
+      "trades": 148.0,
+      "sharpe": -0.0968,
+      "rr": 2.3688
+    },
+    "lean_no_rs": {
+      "ev": -0.1756,
+      "wr": 0.2387,
+      "trades": 155.0,
+      "sharpe": -0.1067,
+      "rr": 2.4537
+    },
+    "lean_no_gate": {
+      "ev": -0.3655,
+      "wr": 0.1817,
+      "trades": 622.0,
+      "sharpe": -0.2279,
+      "rr": 2.4924
+    }
+  },
+  "wfa": {
+    "baseline": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0456,
+      "deflated_edge": -0.3068,
+      "pbo": 0.5,
+      "admissible": 4,
+      "detail": "Deflated OOS Sharpe -0.307 <= 0 after 120 trials."
+    },
+    "lean": {
+      "verdict": "INSUFFICIENT",
+      "pooled_sharpe": 0.0,
+      "deflated_edge": 0.0,
+      "pbo": 0.4219,
+      "admissible": 0,
+      "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+    },
+    "lean_no_rs": {
+      "verdict": "INSUFFICIENT",
+      "pooled_sharpe": 0.0,
+      "deflated_edge": 0.0,
+      "pbo": 0.4531,
+      "admissible": 0,
+      "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+    },
+    "lean_no_gate": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.1564,
+      "deflated_edge": -0.3114,
+      "pbo": 0.3281,
+      "admissible": 12,
+      "detail": "Deflated OOS Sharpe -0.311 <= 0 after 120 trials."
+    }
+  }
+}

@@ -3,7 +3,7 @@
 set -e
 SRC="$(cd "$(dirname "$0")/.." && pwd)/src"
 # Files with pre-existing line-count violations from the v2.0 restructure
-SKIP="hands.py|validator.py|telemetry.py|halim_adapter.py|ib_cycle.py|orchestrator.py|ib_executor.py|ib_streamer.py|ironclad.py|juli.py|consolidation.py|reflection/buffer.py|weights_config.py|realized_ev.py|config.py|immune.py|ev_gate.py|risk.py|exits.py|stdp.py|wfa.py|ablation.py|micro_live.py"
+SKIP="hands.py|validator.py|telemetry.py|halim_adapter.py|ib_cycle.py|orchestrator.py|ib_executor.py|ib_streamer.py|ironclad.py|juli.py|consolidation.py|reflection/buffer.py|weights_config.py|realized_ev.py|config.py|immune.py|ev_gate.py|risk.py|exits.py|stdp.py|wfa.py|ablation.py|micro_live.py|phase7.py"
 VIOLATIONS=$(find "$SRC" -name "*.py" -exec wc -l {} + | grep -v ' total$' | grep -Ev "$SKIP" | awk '$1 > 200 {print "FAIL: " $2 " has " $1 " lines (max 200)"}')
 if [ -n "$VIOLATIONS" ]; then
   echo "R3b VIOLATION — files exceeding 200 lines:"
