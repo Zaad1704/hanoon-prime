@@ -95,8 +95,8 @@ def _write_csv(path: Path, ticker: str, data: pd.DataFrame) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Price", "Close", "High", "Low", "Open", "Volume"])
-        writer.writerow([f"Ticker,{ticker},{ticker},{ticker},{ticker},{ticker}"])
-        writer.writerow(["Datetime,,,,,"])
+        writer.writerow(["Ticker", ticker, ticker, ticker, ticker, ticker])
+        writer.writerow(["Datetime", "", "", "", "", ""])
         for ts, row in data.iterrows():
             writer.writerow(
                 [
