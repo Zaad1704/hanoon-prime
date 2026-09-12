@@ -221,3 +221,26 @@ via `phase7.SimHooks` once a deeper-data Phase 4 reproduces a positive deflated 
 Exit policy is instrumented (`phase8.SimHooks.exit_plan`) but the 180d panel already
 shows staged exits double WR at the cost of EV — re-test them only against a panel
 where the control EV is positive.
+
+## Phase 9 — Catalyst-Screen Feasibility Spec (SPEC, no code yet)
+### 9.1 What is actually obtainable (verified by probe)
+| input | source | status |
+|---|---|---|
+| pre-market 1-min gainers + volume | Alpaca IEX `feed=iex` (same creds/machinery as fetch_alpaca) | FREE, verified — extended-hours bars present (AAPL probe: 08:00–09:23 pre-market, to 16:54 after); currently discarded by `_rth_bars` |
+| RVOL>5 pre-market filter | derived from above + existing 180d RTH volume for the trailing baseline | FREE |
+| scheduled earnings date/time (historical) | yfinance earnings calendar | FREE (back-testable years-deep) |
+| real-time news headline / earnings **surprise** | Alpaca `v1beta/news` | **NOT available** — HTTP 404 on current paper/basic account (no news entitlement). Paid vendors (Polygon, Benzinga, FMP) or a paid Alpaca plan required. |
+| historical news/surprise timestamps per ticker per day | paid vendors only | PAID — this is the real validation cost, not the screener |
+### 9.2 The gate insight
+A live catalyst screener is trivial; our own protocol blocks shipping it until a WFA
+PASS, and WFA needs HISTORICAL pre-market rankings + catalyst timestamps. The scarce,
+costed layer is therefore the *historical catalyst panel*, not any code.
+### 9.3 Decision — two tracks
+- **Path A (free, v1, testable now):** scheduled-earnings-day screen — yfinance
+  historical earnings dates x existing Alpaca pre-market RVOL panel; WFA only
+  earnings-day-morning entries vs the control. Tests the "calendar-catalyst +
+  pre-market volume" thesis with zero spend. No news/surprise component.
+- **Path B (paid):** true catalyst (news + surprise + live pre-market rankings) —
+  requires a vendor decision and a historical news layer; only justified AFTER
+  Path A shows positive OOS EV (defended against the standing PBO≈0.5 noise floor).
+- Default: implement Path A first; Path B stays parked unless A wins.
