@@ -44,6 +44,9 @@
       "deflated_edge": -0.3068,
       "pbo": 0.5,
       "admissible": 4,
+      "adm_ev": -0.0787,
+      "adm_wr": 0.2734,
+      "adm_trades": 139.0,
       "detail": "Deflated OOS Sharpe -0.307 <= 0 after 120 trials."
     },
     "lean": {
@@ -52,6 +55,9 @@
       "deflated_edge": 0.0,
       "pbo": 0.4219,
       "admissible": 0,
+      "adm_ev": 0.0,
+      "adm_wr": 0.0,
+      "adm_trades": 0.0,
       "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
     },
     "lean_no_rs": {
@@ -60,6 +66,9 @@
       "deflated_edge": 0.0,
       "pbo": 0.4531,
       "admissible": 0,
+      "adm_ev": 0.0,
+      "adm_wr": 0.0,
+      "adm_trades": 0.0,
       "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
     },
     "lean_no_gate": {
@@ -68,6 +77,9 @@
       "deflated_edge": -0.3114,
       "pbo": 0.3281,
       "admissible": 12,
+      "adm_ev": -0.2626,
+      "adm_wr": 0.208,
+      "adm_trades": 399.0,
       "detail": "Deflated OOS Sharpe -0.311 <= 0 after 120 trials."
     }
   }

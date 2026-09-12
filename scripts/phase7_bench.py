@@ -37,7 +37,7 @@ from hanoon_prime.phase7 import (
     load_spy_closes,
     run_walk_forward_lean,
 )
-from hanoon_prime.wfa import MIN_TRADES, run_walk_forward, verdicts
+from hanoon_prime.wfa import MIN_TRADES, _pooled_returns, run_walk_forward, verdicts
 
 VARIANTS = ("baseline", "lean", "lean_no_rs", "lean_no_gate")
 
@@ -65,6 +65,30 @@ def _pool(results: dict[str, list[Any]]) -> dict[str, float]:
         "wr": wr,
         "trades": float(len(r)),
         "sharpe": float(np.mean(r) / (sd + 1e-12)) if sd > 0 else 0.0,
+        "rr": rr,
+    }
+
+
+def _pool_admissible(results: dict[str, list[Any]]) -> dict[str, float]:
+    """R-expectancy pooled over protocol-admissible tickers (>= MIN_TRADES).
+
+    This mirrors the WFA verdict path (``wfa._pooled_returns``): non-admissible
+    tickers are excluded entirely, so a positive all-ticker EV driven only by
+    thin/thin-traded tickers is surfaced here honestly instead of as a GO.
+    """
+    r = _pooled_returns(results)
+    if r.size == 0:
+        return {"ev": 0.0, "wr": 0.0, "trades": 0.0, "rr": 0.0}
+    wins = r[r > 0]
+    losses = r[r <= 0]
+    aw = float(np.mean(wins)) if wins.size else 0.0
+    al = abs(float(np.mean(losses))) if losses.size else 0.0
+    rr = aw / al if al > 0 else 0.0
+    wr = float(np.mean(r > 0))
+    return {
+        "ev": wr * rr - (1.0 - wr) if al > 0 else float(wr),
+        "wr": wr,
+        "trades": float(r.size),
         "rr": rr,
     }
 
@@ -124,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in VARIANTS:
         results = _run_variant(name, tickers, data_dir, spy_closes)
         pools[name] = _pool(results)
+        adm = _pool_admissible(results)
         v = verdicts(results)
         stats[name] = {
             "verdict": v.verdict,
@@ -131,12 +156,16 @@ def main(argv: list[str] | None = None) -> int:
             "deflated_edge": round(float(v.deflated_edge), 4),
             "pbo": round(float(v.pbo), 4),
             "admissible": len(v.admissible_tickers),
+            "adm_ev": round(adm["ev"], 4),
+            "adm_wr": round(adm["wr"], 4),
+            "adm_trades": round(adm["trades"], 1),
             "detail": v.detail,
         }
         p = pools[name]
         print(
             f"{name:12s} EV={p['ev']:+.3f}R WR={p['wr']:.1%} "
-            f"trades={int(p['trades']):4d} verdict={v.verdict}"
+            f"trades={int(p['trades']):4d} verdict={v.verdict} "
+            f"[adm EV={adm['ev']:+.3f}R/{int(adm['trades'])}t]"
         )
 
     if args.output:
@@ -220,6 +249,34 @@ def _render_findings(
     gate_wr = _wr_delta(gated, ungated)
     rs_wr = _wr_delta(lean, gated)
     wr_vs_base = _wr_delta(lean, base)
+    adm_lean = stats["lean"]["adm_ev"]
+    adm_base = stats["baseline"]["adm_ev"]
+    lean_up = lean["ev"] > base["ev"]
+    lean_positive = lean["ev"] > 0.0
+    adm_clean = adm_lean > adm_base
+    up_by = abs(lean["ev"] - base["ev"])
+    if lean_up and lean_positive and adm_clean:
+        headline = (
+            f"**Conclusion:** the lean stack removes {up_by:+.3f}R vs the "
+            "shipped cocktail, turns all-ticker OOS R-expectancy positive, "
+            "AND stays above baseline on the admissible subset — directional "
+            "support for the subtraction thesis. A protocol GO still needs a "
+            f"PASS on {MIN_TRADES}+ OOS trades/ticker under the deflation bar."
+        )
+    elif lean_up and lean_positive:
+        headline = (
+            f"**Conclusion:** the lean stack removes {up_by:+.3f}R vs the "
+            "shipped cocktail and turns all-ticker OOS R-expectancy positive. "
+            "BUT the protocol-admissible subset (>= 30 OOS trades/ticker) stays "
+            f"below baseline (adm EV {adm_lean:+.3f}R vs {adm_base:+.3f}R) — the "
+            "all-ticker flip is driven by thin tickers the protocol correctly "
+            "discounts. NOT a GO; keep the gate verdict."
+        )
+    else:
+        headline = (
+            "**Conclusion:** subtraction does not clear the gate on this set; "
+            "sandbox answer remains NO-GO (data, not factors, is the bound)."
+        )
     out = [
         "## Findings (computed from the run)",
         "",
@@ -227,17 +284,20 @@ def _render_findings(
         "  versus the ungated lean stack, while cutting OOS trades ~4x.",
         f"- SPY-relative factor adds **{rs_wr}** WR over gate-only — small.",
         f"- Lean WR vs shipped baseline: **{wr_vs_base}**.",
-        f"- R-expectancy: baseline {base['ev']:+.3f}, lean {lean['ev']:+.3f}.",
-        f"- Admissible tickers: baseline {stats['baseline']['admissible']},",
-        f" lean {stats['lean']['admissible']} (the gate drops many tickers",
-        f" under the {MIN_TRADES}-trade floor).",
-        f"- Best verdict remains {stats['baseline']['verdict']}; PBO across",
-        "  variants is 0.33-0.50 (overfit risk unchanged).",
+        f"- Pooled OOS R-expectancy (ALL tickers): baseline {base['ev']:+.3f}",
+        f" ({int(base['trades'])} trades), lean {lean['ev']:+.3f}",
+        f" ({int(lean['trades'])} trades).",
+        f"- Pooled OOS R-expectancy (admissible only): baseline",
+        f" {adm_base:+.3f}, lean {adm_lean:+.3f}",
+        f" ({int(stats['lean']['adm_trades'])} trades, {stats['lean']['admissible']}",
+        f" tickers) — the protocol pools only tickers with {MIN_TRADES}+ OOS",
+        " trades, so all-ticker and admissible EV can diverge.",
+        f"- Protocol verdict: lean {stats['lean']['verdict']}",
+        f" (deflated edge {stats['lean']['deflated_edge']:+.3f}, PBO",
+        f" {stats['lean']['pbo']:.2f}); baseline {stats['baseline']['verdict']}",
+        f" (deflated edge {stats['baseline']['deflated_edge']:+.3f}).",
         "",
-        "**Conclusion:** subtraction on its own does not clear the gate.",
-        "Win rate improves sharply with gating, the SPY-relative factor is",
-        "nearly inert, and the reduced trade count undercuts the WFA floor.",
-        "Sandbox answer: NO-GO confirmed — data, not factors, is the bound.",
+        headline,
     ]
     return out
 

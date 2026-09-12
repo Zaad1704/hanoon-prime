@@ -155,6 +155,27 @@ Status: DONE
 - Conclusion: the blocker was always data depth, not factor selection. The lean stack
   improves win rate but cannot clear the WFA gate on 5-day fixtures; deeper data
   (Phase 4 PASS) remains the prerequisite for GO.
+### 7.5 Deeper-data probe (yfinance, +14 sessions) — DONE (research set, not fixtures)
+- `scripts/fetch_yfinance.py` pulls 1-min RTH OHLCV for all 23 universe tickers into
+  `data/research/yfinance_1m/` (gitignored). Yahoo caps 1m granularity at ~8 days per
+  request, so it walks back in weekly chunks (~30 calendar days = 19 sessions, vs the
+  5 committed). Same eyes CSV format; nothing ships off it.
+- Re-run on the deeper set (`reports/phase7_bench_yf.{json,md}`):
+  | variant | EV(all) | EV(adm>=30t) | WR | trades | defl.edge | PBO | verdict |
+  | baseline | −0.183R | −0.183R | 21.1% | 1670 | −0.159 | 0.44 | FAIL |
+  | lean | **+0.070R** | −0.027R | 27.7% | 629 | −0.197 | 0.47 | FAIL |
+  | lean_no_rs | +0.004R | −0.072R | 25.7% | 657 | −0.200 | 0.45 | FAIL |
+  | lean_no_gate | −0.263R | −0.263R | 19.8% | 2325 | −0.203 | 0.45 | FAIL |
+- Honest reading: all-ticker OOS R-expectancy finally flips positive (+0.070R) for the
+  gated lean stack while every other variant stays negative, and the regime gate keeps
+  its ~+30% WR lift. BUT the protocol-admissible subset (>=30 trades, 9/23 tickers) is
+  still −0.027R — the flip is concentrated in thin tickers the protocol correctly
+  discounts. Deflated edge is still negative for every variant → **protocol verdict
+  remains FAIL; not a GO.** Directionally the subtraction thesis survives deeper data
+  (lean −0.158R → −0.027R admissible as depth goes 5d → 19d), which is the strongest
+  evidence yet that 60-180d of data is the real unlock.
+- Bench now renders BOTH all-ticker and admissible-only EV so the report cannot be
+  misread as a GO (phase7_bench.py `_pool_admissible`).
 
 ---
 

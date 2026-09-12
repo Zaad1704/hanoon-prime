@@ -1,0 +1,86 @@
+{
+  "data": "data/research/yfinance_1m",
+  "spy": "data/research/yfinance_1m/SPY_1min.csv",
+  "min_trades_for_admissible": 30,
+  "weights": {
+    "vwap_deviation": 0.4,
+    "momentum": 0.35,
+    "relative_strength_spy": 0.25
+  },
+  "pools": {
+    "baseline": {
+      "ev": -0.1828,
+      "wr": 0.2108,
+      "trades": 1670.0,
+      "sharpe": -0.0842,
+      "rr": 2.8772
+    },
+    "lean": {
+      "ev": 0.07,
+      "wr": 0.2766,
+      "trades": 629.0,
+      "sharpe": 0.0304,
+      "rr": 2.8679
+    },
+    "lean_no_rs": {
+      "ev": 0.0038,
+      "wr": 0.2572,
+      "trades": 657.0,
+      "sharpe": 0.0017,
+      "rr": 2.9024
+    },
+    "lean_no_gate": {
+      "ev": -0.2626,
+      "wr": 0.1978,
+      "trades": 2325.0,
+      "sharpe": -0.1366,
+      "rr": 2.7272
+    }
+  },
+  "wfa": {
+    "baseline": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0842,
+      "deflated_edge": -0.1589,
+      "pbo": 0.4375,
+      "admissible": 22,
+      "adm_ev": -0.1828,
+      "adm_wr": 0.2108,
+      "adm_trades": 1670.0,
+      "detail": "Deflated OOS Sharpe -0.159 <= 0 after 132 trials."
+    },
+    "lean": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0148,
+      "deflated_edge": -0.197,
+      "pbo": 0.4688,
+      "admissible": 9,
+      "adm_ev": -0.0271,
+      "adm_wr": 0.2721,
+      "adm_trades": 294.0,
+      "detail": "Deflated OOS Sharpe -0.197 <= 0 after 132 trials."
+    },
+    "lean_no_rs": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.0391,
+      "deflated_edge": -0.2003,
+      "pbo": 0.4531,
+      "admissible": 11,
+      "adm_ev": -0.0722,
+      "adm_wr": 0.2514,
+      "adm_trades": 366.0,
+      "detail": "Deflated OOS Sharpe -0.200 <= 0 after 132 trials."
+    },
+    "lean_no_gate": {
+      "verdict": "FAIL",
+      "pooled_sharpe": -0.1366,
+      "deflated_edge": -0.2034,
+      "pbo": 0.4531,
+      "admissible": 22,
+      "adm_ev": -0.2626,
+      "adm_wr": 0.1978,
+      "adm_trades": 2325.0,
+      "detail": "Deflated OOS Sharpe -0.203 <= 0 after 132 trials."
+    }
+  }
+}
