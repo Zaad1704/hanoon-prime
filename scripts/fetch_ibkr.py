@@ -116,28 +116,52 @@ def _fetch_month(
     raise RuntimeError(f"{contract.symbol} page ended {end_dt}: {last_err}")
 
 
+def _bucket(bars: list[object], windows: set[str]) -> dict[str, dict[str, object]]:
+    """Split one month of 04:00-19:59 ET bars into per-window UTC-keyed dicts."""
+    out: dict[str, dict[str, object]] = {w: {} for w in windows}
+    for b in bars:
+        m = _et_minute(b)
+        for w in windows:
+            lo, hi = _SESS[w]
+            if lo <= m <= hi:
+                out[w][_utc_key(b)] = b
+    return out
+
+
 def _fetch_ticker(
     ib: IB,
     stack: Stock,
     end: datetime,
     start: datetime,
-    window: str,
+    windows: set[str],
     timeout: float,
     pause: float,
     max_pages: int,
-) -> tuple[list[object], int]:
-    """All 1-min bars in (start, end] within ``window`` via month paging."""
-    seen: dict[str, object] = {}
+) -> tuple[dict[str, list[object]], int]:
+    """All 1-min bars in (start, end] bucketed per window via month paging.
+
+    The API pages have no window notion (useRTH=False returns the full
+    extended hours month), so one pass fills every requested window and the
+    same page is never fetched twice across co-requested windows.
+    """
+    seen: dict[str, dict[str, object]] = {w: {} for w in windows}
     months, cursor = 0, end
     while cursor > start and months < max_pages:
         bars = _fetch_month(ib, stack, cursor, timeout, pause)
         months += 1
-        lo, hi = _SESS[window]
-        for b in bars:
-            if lo <= _et_minute(b) <= hi:
-                seen[_utc_key(b)] = b
+        for w, bucket in _bucket(bars, windows).items():
+            seen[w].update(bucket)
         cursor = min(b.date for b in bars) - timedelta(minutes=5)
-    ordered = sorted(seen.values(), key=lambda b: _utc_key(b))
+        if months % 5 == 0 or months <= 2:
+            rows = " ".join(f"{w}={len(seen[w])}" for w in sorted(windows))
+            print(
+                f"    {stack.symbol:5s} page {months:2d}/{max_pages} "
+                f"window_bar={_fmt_et(bars[-1])[:16]} {rows}",
+                flush=True,
+            )
+    ordered = {
+        w: sorted(v.values(), key=lambda b: _utc_key(b)) for w, v in seen.items()
+    }
     return ordered, months
 
 
@@ -170,38 +194,62 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--years", type=int, default=2)
     parser.add_argument("--months", type=int, default=0, help="cap pages (tests)")
     parser.add_argument("--window", choices=sorted(_SESS), default="rth")
+    parser.add_argument(
+        "--all-windows",
+        action="store_true",
+        help="bucket rth+pre-market+post-market from the same pages (1 pass)",
+    )
     parser.add_argument("--host", default=HOST)
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--client-id", type=int, default=CLIENT_ID)
-    parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--pause", type=float, default=1.0)
     parser.add_argument(
         "--resume", action="store_true", help="skip tickers with existing CSVs"
     )
     args = parser.parse_args(argv)
 
+    windows: set[str] = set(_SESS) if args.all_windows else {args.window}
+
     if args.tickers.upper() == "ALL":
         tickers = _discover_tickers(_FIXTURE_DIR)
     else:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
 
-    out_dir = (
-        Path(args.out_dir)
-        if args.out_dir
-        else Path(f"data/research/ibkr_{args.years}y_{_SLICE[args.window]}")
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dirs = {
+        w: (
+            Path(args.out_dir)
+            if args.out_dir and not args.all_windows
+            else Path(f"data/research/ibkr_{args.years}y_{_SLICE[w]}")
+        )
+        for w in windows
+    }
+    for d in out_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
     end = datetime.now(_UTC)
     start = end - timedelta(days=365 * args.years)
     max_pages = args.months or (12 * args.years)
 
     ib = IB()
-    try:
-        ib.connect(args.host, args.port, clientId=args.client_id, timeout=10)
-    except Exception as exc:
-        print(f"ERROR connect {args.host}:{args.port} clientId={args.client_id}: {exc}")
-        print("  -> ensure IB Gateway is running (paper port 4002 by default)")
-        return 1
+    ib.clientId = args.client_id
+    for attempt in range(1, 4):
+        try:
+            ib.connect(args.host, args.port, clientId=args.client_id, timeout=10)
+            break
+        except Exception as exc:
+            print(
+                f"connect attempt {attempt}/3 clientId={args.client_id}: {exc}",
+                flush=True,
+            )
+            if attempt < 3:
+                time.sleep(3)
+            else:
+                print(
+                    f"ERROR connect {args.host}:{args.port} "
+                    f"clientId={args.client_id}: {exc}"
+                )
+                print("  -> ensure IB Gateway is running (paper port 4002 by default)")
+                return 1
     print(
         f"CONNECTED {args.host}:{args.port} clientId={args.client_id} "
         f"accounts={list(ib.managedAccounts())}"
@@ -210,10 +258,12 @@ def main(argv: list[str] | None = None) -> int:
     fetched: list[tuple[str, int, int]] = []
     failed: list[tuple[str, str]] = []
     for ticker in tickers:
-        csv_path = out_dir / f"{ticker}_1min.csv"
-        if args.resume and csv_path.exists():
+        missing = [
+            w for w in windows if not (out_dirs[w] / f"{ticker}_1min.csv").exists()
+        ]
+        if args.resume and not missing:
             fetched.append((ticker, -1, -1))
-            print(f"{ticker:6s} {args.window:11s} RESUME (csv exists)")
+            print(f"{ticker:6s} {'+'.join(sorted(windows))} RESUME (csv exists)")
             continue
         try:
             stack = Stock(ticker, "SMART", "USD")
@@ -225,19 +275,20 @@ def main(argv: list[str] | None = None) -> int:
                 stack,
                 end,
                 start,
-                args.window,
+                set(missing) if args.resume else windows,
                 args.timeout,
                 args.pause,
                 max_pages,
             )
-            if not filled:
-                raise RuntimeError(f"no {args.window} bars returned")
-            _write_csv(csv_path, ticker, filled)
-            sessions = len({_fmt_et(b)[:10] for b in filled})
-            fetched.append((ticker, len(filled), sessions))
+            for w in sorted(missing if args.resume else windows):
+                _write_csv(out_dirs[w] / f"{ticker}_1min.csv", ticker, filled[w])
+            first_w = sorted(filled)[0]
+            sessions = len({_fmt_et(b)[:10] for b in filled[first_w]})
+            fetched.append((ticker, len(filled[first_w]), sessions))
             print(
-                f"{ticker:6s} {args.window:11s} bars={len(filled):7d} "
-                f"sessions={sessions:4d} pages={months:3d}"
+                f"{ticker:6s} bars={sum(len(v) for v in filled.values()):7d} "
+                f"sessions={sessions:4d} pages={months:3d} "
+                f"{' '.join(f'{w}={len(filled[w])}' for w in sorted(filled))}"
             )
         except Exception as exc:
             failed.append((ticker, str(exc)))
@@ -255,7 +306,9 @@ def main(argv: list[str] | None = None) -> int:
     if not real:
         print(f"All {len(fetched)} tickers already present (resume); nothing to do")
         return 0
-    print(f"\nFetched {len(real)} tickers into {out_dir}")
+    print(
+        f"\nFetched {len(real)} tickers into {','.join(str(d) for d in out_dirs.values())}"
+    )
     return 0
 
 

@@ -295,9 +295,20 @@ the deep panel comes from:
   returned full 90-min pre-market blocks on 15/15 sessions in the latest 3 weeks —
   the IEX thin-liquidity failure (VALE=11, SNOW=8 sessions over 180d) is gone on
   IBKR's consolidated feed.
-- Throughput math: ~40–60s per 1-month/1-min request; pacing limit (60 req /
-  10 min) is NOT binding at that rate. 5y × 23 tickers ≈ 1380 month-requests ≈
-  **8–14h wall-clock**, one batch run, then the panel is static.
+- Throughput math (CORRECTED 2026-09-13 after live deep-page probing): the
+  earlier "8–14h" estimate was wrong. IBKR serves deep historical months from the
+  HMDS backend at ~50 bars/s per client (recent/cached months ~218 bars/s solo).
+  Parallelism scales to ~110 bars/s aggregate with 4 clients, ~2.2x solo max;
+  more clients do NOT help (6 clients ≈ 383 bars/s cached, but deep is ~flat).
+  Deep 1-min pages measured LIVE: **~400–420s per month-request**, 5y × 23
+  tickers × 60 months ≈ 1200 remaining requests ≈ **~35–50h wall-clock**.
+  Pacing limit (60 req / 10 min) is NOT binding; the backend bandwidth is.
+  `--timeout` MUST be ≥600s for deep pages under concurrency (180s default
+  causes spurious Error 162 timeouts — root cause of the earlier 6-worker
+  "failure", which was NOT a gateway serialization issue). STATUS 2026-09-13:
+  `run_deep_bench.sh 5 4` running detached (20:03 +06). Current rate ~12–14
+  min/deep page per worker at 4-way → 5y ≈ 50h, 3y ≈ 30h (both overshoot the
+  Monday-open deadline; user chose to keep 5y running overnight).
 - Gotcha (determinism-free but real): a stale `ib.client.serverVersion()` is a
   bound method in 0.9.86 (call it); `reqHistoricalData` returns empty on pacing
   hiccups (Error 162) — always retry-on-empty with backoff.
@@ -308,13 +319,72 @@ new REST ingest path, and we hold no credentials to even probe its pre-market
 coverage. The 180d Alpaca IEX panels stay as a cheap sanity cross-check; IBKR's
 Gateway is the depth source.
 
-## Next Step
-Build the IBKR depth ingest: `scripts/fetch_ibkr.py` paging 1-minute bars
-(useRTH=False, backward-look from present) into eyes-compatible CSVs across the
-universe — target ~2–5 years, session-sliced (RTH + pre-market + post-market like
-`fetch_alpaca.py --window`). Then re-run `scripts/phase9_bench.py` (plus the
-phase7/phase8 benches) on the deep panel for a definitive PASS/NO-GO at
-MIN_TRADES=30/ticker. Path B (paid news/surprise) stays parked until Path A wins.
-Existing assets ready: `phase7.SimHooks`, `phase8.exit_plan`,
-`phase9.run_walk_forward_catalyst` — all fail-closed and byte-identical under the
-lean control.
+## Phase 11 — Edge-Falsification Autopsy (180d panel, pre-registered diagnostics)
+
+### 11.1 Question
+Phases 7/9 concluded "panel depth is the blocker" — the assumption being that a
+deep panel would let the lean 3-factor stack clear MIN_TRADES=30. Before
+committing 35–50h of wall-clock to the IBKR 5y fetch, two pre-registered
+diagnostics were run on the ALREADY-ON-DISK 180d Alpaca panel to verify that
+assumption. Both were answered with evidence, and the assumption is **wrong**.
+
+### 11.2 Diagnostic 1 — Gross vs Net EV (`scripts/diag_gross_score.py`)
+- NET pooled lean-stack EV = **−0.116R**; GROSS (fee drag removed) = **−0.078R**.
+- Mean fee drag = −0.024% per trade (`FEE_RATE` 0.01%/leg + `FIXED_FEE` $0.01,
+  `immune.py:135-136`) — **negligible.**
+- **Costs are ruled out:** even with zero fees/slippage the signal is gross-negative.
+  The 3-point WR shortfall is in the signal, not execution.
+
+### 11.3 Diagnostic 2 — Score-Band Monotonicity (`scripts/diag_gross_score.py`)
+- Slicing 3,937 OOS trades by entry score shows **no rank-ordering**:
+  | score band | trades | EV (net) | EV (gross) | WR |
+  |---|---|---|---|---|
+  | < 0.0 | 1,925 | −0.175R | −0.140R | 22.2% |
+  | 0.5–0.7 | 191 | −0.189R | −0.143R | 22.5% |
+  | 0.7–0.8 | 424 | −0.038R | +0.014R | 26.7% |
+  | 0.8–0.9 | 459 | −0.200R | −0.162R | 23.3% |
+  | ≥ 0.9 | 938 | +0.004R | +0.039R | 25.8% |
+- The 0.8–0.9 band is WORSE than 0.7–0.8 — the fingerprint of noise, not signal
+  quality. A real edge would show EV rising monotonically with conviction.
+
+### 11.4 Diagnostic 3 — ≥0.90 band admissibility slice (`scripts/diag_band_ticker.py`)
+The one net-positive pocket (+0.004R / 938t) was audited per-ticker against the
+SAME MIN_TRADES=30 floor the WFA protocol uses:
+- **Not a mega-cap artifact:** carries were MRNA (+0.94R), RDDT (+0.64), CRWD
+  (+0.41); AAPL/NVDA/TSLA were NEGATIVE (−0.34/−0.14/−0.16). Top-3 EV tickers =
+  90t = only 10% of the band.
+- **8 tickers clear ≥30 trades with positive EV** (MRNA, CRWD, PLTR, MSFT, MARA,
+  IREN, SNOW, F); 13 of 22 are negative.
+- **But pooled across admissible tickers only: EV = −0.000R** (838t, WR 25.4%,
+  rr 2.93 — breakeven WR 25.4%). **Exactly at breakeven.**
+- The earlier +0.004R was a **pooling illusion**: mixing thin and admissible
+  tickers. Under protocol admissibility the pocket is statistically zero.
+
+### 11.5 Verdict — DEFINITIVE NO-GO
+1. **1-minute technical momentum (VWAP + momentum + RS vs SPY) has ZERO
+   predictive alpha** above breakeven on retail-bar granularity.
+2. **The 5y IBKR fetch cannot revive it** — deeper data only tightens the CI
+   around an expectancy already pinned at 0.000R. The fetch was CANCELED
+   (2026-09-13) after this verdict; the 3 completed CSVs (AAPL/CRWD/F) and the
+   `fetch_ibkr.py`/`run_deep_bench.sh` machinery stay for a future, different
+   alpha source.
+3. **Architecture is intact, signal is disproved.** The WFA gates, SimHooks
+   fail-closed plumbing, deflation, and deterministic benches did their exact
+   job: they prevented capital deployment into a zero-EV system. This is the
+   mechanism working as designed, not failing.
+4. Post-verdict posture: engine frozen fail-closed / dry-run; no live capital.
+
+## Next Step — pivot to a different alpha source (new hypothesis)
+The technical-single-name-1min hypothesis is falsified; more of the same data or
+more of the same tuning will not un-falsify it. Candidate directions to
+pre-register and bench with the SAME harness (no engine changes):
+- **Cross-sectional market neutral**: long vs short the score spread within the
+  universe (relative value), not absolute direction.
+- **Alternative microstructure alpha**: order-flow / imbalance / trade-sign on
+  bar granularity, not price-only factors.
+- **Higher-frame daily horizon setups**: session-/day-level entries where
+  execution cost is a smaller fraction of expectancy and the 26.8% breakeven bar
+  is structurally easier to clear.
+- Any new candidate reuses `phase7.SimHooks`, `phase8.exit_plan`,
+  `phase9.run_walk_forward_catalyst`, and the deterministic WFA gate unchanged —
+  the harness is the asset now, not the factors.
