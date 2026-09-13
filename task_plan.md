@@ -374,17 +374,117 @@ SAME MIN_TRADES=30 floor the WFA protocol uses:
    mechanism working as designed, not failing.
 4. Post-verdict posture: engine frozen fail-closed / dry-run; no live capital.
 
-## Next Step — pivot to a different alpha source (new hypothesis)
-The technical-single-name-1min hypothesis is falsified; more of the same data or
-more of the same tuning will not un-falsify it. Candidate directions to
-pre-register and bench with the SAME harness (no engine changes):
-- **Cross-sectional market neutral**: long vs short the score spread within the
-  universe (relative value), not absolute direction.
-- **Alternative microstructure alpha**: order-flow / imbalance / trade-sign on
-  bar granularity, not price-only factors.
-- **Higher-frame daily horizon setups**: session-/day-level entries where
-  execution cost is a smaller fraction of expectancy and the 26.8% breakeven bar
-  is structurally easier to clear.
-- Any new candidate reuses `phase7.SimHooks`, `phase8.exit_plan`,
-  `phase9.run_walk_forward_catalyst`, and the deterministic WFA gate unchanged —
-  the harness is the asset now, not the factors.
+## Phase 12 — Pre-Registered Verdict Spec: Daily Cross-Sectional Momentum
+
+### 12.1 Hypothesis (single, falsifiable)
+> **Across the 22-name RTH panel, a cross-sectionally RANKED momentum book
+> (long top-K by trailing 5-session return, short bottom-K, dollar-neutral,
+> held session-open→close) carries positive net expectancy that survives the
+> WFA gate — because the book is long/short *relative value*, not absolute
+> direction, market beta is neutralized by construction.**
+
+This is deliberately NOT a rescaled version of the failed §11 hypothesis. §11
+tested the absolute *level* of a per-ticker composite score; §12 tests a
+*spread between ranked names*. The ranking (not the indicator) is the edge.
+The claim dies if peaks-ranking does not monotonically predict future O→C
+dispersion.
+
+### 12.2 Panel constraints (verified 2026-09-13, data on disk)
+- `data/research/alpaca_180d/`: **22 names + SPY, 125/125 sessions each —
+  complete, no gaps** → a daily strategy yields ~125 observations/ticker, which
+  trivially clears MIN_TRADES=30 (unlike the 2-earnings-sessions/180d ceiling
+  that made §9 INSUFFICIENT).
+- `data/research/alpaca_180d_pre/` is **too thin to be a primary source**
+  (CRWD 16, VALE 11, SNOW 8 sessions) — the §12 spread runs on RTH only;
+  pre-market is NOT used. SPY is a neutralizer/benchmark, never traded.
+
+### 12.3 Pre-registered strategy (FROZEN — no tuning after results)
+- Universe: the 22 non-SPY tickers (fixed, from `_discover_tickers`).
+- Signal at session `t` close: trailing **5-session** log return per ticker.
+- Book at session `t+1`: **long top-7, short bottom-7** by signal, dollar-weighted
+  equal-leg (net cash zero across legs). Every universe ticker is in the book
+  every session → 125 observations/ticker.
+- Hold: enter next-session **open**, exit same-session **close** (O→C). Direction:
+  long leg +O→C, short leg −O→C.
+- **No parameter search permitted** in this run: K=7 and lookback=5 are the
+  only values ever tested here. If it fails, it fails as pre-registered.
+- Costs: `FEE_RATE` 0.01%/leg + `FIXED_FEE` $0.01, same as §7–9 (negligible at
+  one round trip per session).
+
+### 12.4 Fail-fast diagnostics (BEFORE the full bench, same two checks)
+1. **Monotonicity (primary kill-test):** rank sessions by signal, form decile
+   portfolios, require O→C return to be monotonically increasing in signal
+   decile. A non-monotone top-vs-bottom profile = no ranking power = **NO-GO,
+   stop now**.
+2. **Gross vs Net EV:** pooled spread EV must be > 0 gross AND net. If costs
+   alone flip the sign (§11's finding: they didn't), that is a different,
+   execution-level conclusion than a signal-level one — recorded as such.
+
+### 12.5 Decision gates (identical surface to §7–9, engine-file-derived)
+The engine at `wfa.py:300-337` gates on, in order:
+1. `admissible`: ≥ MIN_TRADES=30 OOS trades/ticker (expect ~125 → met).
+2. `deflated_edge > 0` (observed pooled Sharpe minus 95th-pct best-by-chance
+   over trials) — **hard gate**.
+3. `pooled_sharpe > 0` — **hard gate**.
+4. `PBO` is **reported, not hard-gated** by the engine (returns 0.5 < 4 tickers;
+   shown in the detail line only). For a manually-armed "confident GO" the
+   analyst additionally requires **PBO < 0.5** — noted as a human override, not
+   an engine constraint.
+- Universe verdict = PASS only when (2) AND (3) both hold; otherwise NO-GO.
+- Per-ticker verdicts, pooled Sharpe, deflated edge, PBO all serialized to
+  `reports/phase12_bench_alpaca.{json,md}` — same shape as §7–9 for the same
+  comparison table.
+
+### 12.6 Deliverables
+- `src/hanoon_prime/phase12.py` (sandbox): session resolution, 5-session signal,
+  top/bottom-K book construction, per-ticker O→C P&L inside FOLD boundaries —
+  emitting the SAME `FoldResult`/`verdicts()` surface so the harness compares
+  apples-to-apples with §7–11. No shipped-engine mutations.
+- `scripts/phase12_bench.py` + the two diagnostics (`scripts/diag_phase12_mono.py`,
+  `scripts/diag_phase12_gross.py`).
+- This verdict spec is the pre-registration: if §12 fails the monotonicity
+  check or the WFA gate, that is the result — no new factors, no cost tweaks,
+  no "K=9" retry. Next candidate chapter begins with a new §13 spec.
+
+### 12.7 What a PASS would NOT mean (anti-overclaim)
+A PASS here says ranks carry across 5 sessions on this 22-name panel. It does
+NOT authorize live capital: that requires a separate, additional gate (e.g.,
+the §5.3 paper-PASS floor that currently confines `MicroLiveGuard` to
+ineligible). Permanently parked as before: no production code touches live
+until a paper run clears the confinement gate.
+
+### 12.8 Verdict — NO-GO (falsified at the primary kill-test, 2026-09-13)
+- **Fail-fast §12.4.1 (monotonicity) = NO-GO.** Cross-sectional decile profile
+  of O→C return vs the lag-1 5-session signal is FLAT NOISE, not monotone:
+  `d1 +0.28% d2 +0.28% d3 +0.19% d4 +0.14% d5 +0.08% d6 +0.10% d7 −0.08%
+  d8 +0.24% d9 −0.01% d10 +0.16%`. There is no ranking structure for the book
+  to exploit — the broadest decile spread (d1 vs d10, +0.12%) is ~0.5bv of a
+  daily move. Kill per spec §12.4.1: **stop now**.
+- Full bench (run for the record, since pre-registered): spread EV **−0.043R**
+  (WR 48.4%, rr 0.98, 1008 trades, all 22 tickers admissible ≥30 trades).
+  Pooled Sharpe −0.03, **deflated edge −0.127** → `verdict=FAIL`. PBO 0.45
+  (below the 0.5 override line, but the point is moot — the edge is negative).
+- Gross vs net (§12.4.2): −0.043R gross → −0.047R net; fees do not flip a
+  signal-level negative. Costs remain exonerated; there is simply no edge.
+- **Features/effects ruled out for the daily-horizon variant:** (1) regime/session
+  filtering (not used — O→C spread trade), (2) parameter freedom (K=7/L=5 were
+  the only values ever run), (3) lookahead (book at session s uses signal at
+  s−1 close, verified in `phase12.run_spread`). What failed is the CORE CLAIM:
+  on this 22-name panel, 5-session cross-sectional momentum does not predict
+  next-session dispersion better than zero.
+
+## Phase 13 — next pre-registered hypothesis
+§12 is closed by its own kill-test; the `phase12.py` sandbox, the
+`monotonicity_profile` decile machine, and `phase12_bench.py` are reusable test
+rigs (the decile-monotonicity gate is a strong generic first-pass signal
+filter). Candidate next hypotheses, each to be written as its OWN §13 verdict
+spec (signal formula + frozen params + fail-fasts) before any bench:
+- **Cross-section in the OTHER direction**: short*term* reversal (1-session
+  persistence, not 5) — the d1..d10 profile shows zero 5-day rank carry, but
+  a same-session/1-day horizon may behave differently. Reuses the rig.
+- **Beta-adjusted rank** (regress out SPY over the return window first) — tests
+  whether raw cross-sectional rank is masked by market beta, before abandoning
+  momentum entirely.
+- **Earnings/event state factor** (the one microstructure feature with an
+  actual economic payday on this panel, per §9 earn-session work).
+No §13 code until its spec is committed — same protocol, same harness.

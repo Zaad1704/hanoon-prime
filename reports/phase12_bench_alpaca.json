@@ -1,0 +1,50 @@
+{
+  "data": "data/research/alpaca_180d",
+  "pre_registered": {
+    "lookback": 5,
+    "k": 7,
+    "hold": "session O->C",
+    "frozen": "no parameter search; K=7 lookback=5 only"
+  },
+  "min_trades_for_admissible": 30,
+  "fail_fast": {
+    "monotonicity": {
+      "profile": {
+        "d1": 0.0028,
+        "d2": 0.0028,
+        "d3": 0.0019,
+        "d4": 0.0014,
+        "d5": 0.0008,
+        "d6": 0.001,
+        "d7": -0.0008,
+        "d8": 0.0024,
+        "d9": -0.0001,
+        "d10": 0.0016
+      },
+      "ok": false
+    },
+    "gross_vs_net": {
+      "gross_ev": -0.0427,
+      "net_ev": -0.0465,
+      "sign_flip": false
+    }
+  },
+  "pool": {
+    "ev": -0.0427,
+    "wr": 0.4841,
+    "trades": 1008.0,
+    "rr": 0.9774,
+    "fees": 0.0
+  },
+  "wfa": {
+    "verdict": "FAIL",
+    "pooled_sharpe": -0.0288,
+    "deflated_edge": -0.1272,
+    "pbo": 0.4531,
+    "admissible": 22,
+    "adm_ev": -0.0427,
+    "adm_wr": 0.4841,
+    "adm_trades": 1008.0,
+    "detail": "Deflated OOS Sharpe -0.127 <= 0 after 132 trials."
+  }
+}
