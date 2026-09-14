@@ -74,3 +74,11 @@ EXTINCT_DECAY: float = 0.005  # recovery per healthy share
 EXTINCT_OVERLAP: int = 2  # shared signature dims for neighbor inhibition
 EXTINCT_CELLS_MAX: int = 4096  # guard against unbounded signature map
 EXTINCT_FILE: Path = STATE_DIR / "juli_extinction.json"
+
+# ── Sleep replay scheduler (brain/sleep_scheduler.py) ─────────────────
+SLEEP_THRESHOLD_SEC: float = 1800  # 30min inactivity before auto-replay
+SLEEP_COOLDOWN_SEC: float = 3600  # at most one replay per hour of downtime
+SLEEP_LOSS_WEIGHT: float = 3.0  # loser replay drive (3× winner)
+SLEEP_WIN_WEIGHT: float = 1.0  # winner replay drive (learn, don't soothe)
+SLEEP_INTERLEAVE_MAX: int = 6  # random historical traces per replay
+SLEEP_MIN_PATTERNS: int = 3  # consolidated patterns before replay makes sense

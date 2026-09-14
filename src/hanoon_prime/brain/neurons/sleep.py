@@ -36,7 +36,8 @@ class SleepReplayEngine:
 
     POISSON_RATE: float = 3.0
     REPLAY_BATCH: int = 10
-    WIN_BIAS: float = 2.0
+    WIN_BIAS: float = 1.0
+    LOSS_BIAS: float = 3.0
     MAX_PATTERNS: int = 100
 
     def __init__(
@@ -54,8 +55,18 @@ class SleepReplayEngine:
         """Should sleep consolidation run? Only when market is closed."""
         return not is_market_open
 
-    def select_patterns(self) -> List[Tuple[Dict[str, float], float]]:
-        """Select attractor patterns for replay."""
+    def select_patterns(
+        self,
+        replay_list: List[Tuple[Dict[str, float], float]] | None = None,
+    ) -> List[Tuple[Dict[str, float], float]]:
+        """Select patterns for replay (3× loser drive, or an override list)."""
+        if replay_list is not None:
+            patterns = list(replay_list)
+            if len(patterns) > self.MAX_PATTERNS:
+                random.shuffle(patterns)
+                patterns = patterns[: self.MAX_PATTERNS]
+            return patterns
+
         attractors: list[Attractor] = list(self._memory)
         if not attractors:
             return []
@@ -65,7 +76,7 @@ class SleepReplayEngine:
             if att.trade_count < 2:
                 continue
 
-            weight = self.WIN_BIAS if att.wins > att.losses else 0.5
+            weight = self.LOSS_BIAS if att.losses >= att.wins else self.WIN_BIAS
             patterns.append(
                 (
                     dict(
@@ -84,11 +95,15 @@ class SleepReplayEngine:
 
         return patterns
 
-    def run_cycle(self, duration_sec: float = 60.0) -> SleepResult:
+    def run_cycle(
+        self,
+        duration_sec: float = 60.0,
+        replay_list: List[Tuple[Dict[str, float], float]] | None = None,
+    ) -> SleepResult:
         """Run one sleep consolidation cycle."""
         start = time.time()
 
-        patterns = self.select_patterns()
+        patterns = self.select_patterns(replay_list)
         if not patterns:
             return SleepResult(duration_ms=(time.time() - start) * 1000)
 

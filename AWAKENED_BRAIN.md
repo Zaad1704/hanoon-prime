@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done, Phase D done — commit hash pending (recorded on commit)
-**Last updated:** 2026-09-14 — Phase D implementation complete
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-14 — Phase E implementation complete
 
 ---
 
@@ -363,19 +363,19 @@ class ExtinctionTracker:
 
 ### Phase E: Sleep Replay Scheduler
 
-**File:** `src/hanoon_prime/brain/sleep_scheduler.py` (new, ~80 lines) + modifications to `brain/consolidation.py`
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/sleep_scheduler.py` (new, 81 lines) + modifications to `brain/consolidation.py` and `brain/neurons/sleep.py`
+**Status:** `done` — commit hash recorded on commit
 **Priority:** 5th — engine exists, needs scheduling
 **Effort:** ~200 lines total
 **Timeline:** Week 5-6
 
 **Acceptance Criteria:**
-- [ ] Auto-trigger `sleep_replay` after 30min inactivity or session close
-- [ ] Replay losing trades 3× more often than winners (prevent overconfidence)
-- [ ] Interleave with random historical trades (CLS interleaved learning)
-- [ ] After replay: update regime_weights and episodic from consolidated patterns
-- [ ] Tests: `tests/test_sleep_scheduler.py`
-- [ ] Pre-commit hooks pass
+- [x] Auto-trigger `sleep_replay` after 30min inactivity or session close
+- [x] Replay losing trades 3× more often than winners (prevent overconfidence)
+- [x] Interleave with random historical trades (CLS interleaved learning)
+- [x] After replay: update regime_weights and episodic from consolidated patterns
+- [x] Tests: `tests/test_sleep_scheduler.py` — 22 tests
+- [x] Pre-commit hooks pass
 
 **Biological Basis:** McClelland 1995 (CLS theory), Kumaran et al. 2016 (CLS updated), Singh et al. 2022 (bidirectional replay)
 
@@ -389,18 +389,24 @@ class SleepScheduler:
     session close. Replay weights losing trades 3× higher.
     """
 
-    def check(self, last_trade_time: float, session_close: bool) -> bool: ...
-    def replay_weights(self, recent_trades: list) -> dict: ...
+    def check(self, last_trade_time: float, session_close: bool, now=None) -> bool: ...
+    def replay_weights(self, recent_trades: list, historical=None) -> list: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/sleep_scheduler.py`
-2. Wire into `consolidation._cycle` — check trigger each cycle
-3. Modify `sleep_replay` call to use weighted replay list
-4. Write `tests/test_sleep_scheduler.py`
-5. Update this doc with commit hash
+1. ✅ Write `brain/sleep_scheduler.py`
+2. ✅ Wire into `consolidation._cycle` — check trigger each cycle
+3. ✅ Modify `sleep_replay` call to use weighted replay list
+4. ✅ Write `tests/test_sleep_scheduler.py` (22 tests)
+5. ⏳ Update this doc with commit hash
 
-**Design Decisions:** (none yet)
+**Design Decisions:**
+1. **`SleepScheduler.check` takes an explicit `now` param** — tests inject synthetic timestamps instead of monkeypatching `time.time`; `_last_trigger` sentinel is `-inf` so the first trigger never hits the cooldown guard.
+2. **Cooldown only after first trigger** — one replay per `SLEEP_COOLDOWN_SEC` (3600s) of downtime; session-close replays share the same guard so a close immediately after an idle replay doesn't double-run.
+3. **`replay_weights(recent, historical)` returns `[(pattern, drive)]`** — losers `SLEEP_LOSS_WEIGHT=3.0`, winners `SLEEP_WIN_WEIGHT=1.0` (the old engine inverted this at 2.0/0.5 — winners were over-replayed, feeding overconfidence); up to `SLEEP_INTERLEAVE_MAX=6` random historical traces interleave per replay.
+4. **Engine override path** — `SleepReplayEngine.select_patterns(replay_list=None)` and `run_cycle(..., replay_list=None)` accept a pre-weighted list; default attractor weighting uses `LOSS_BIAS=3.0` when `losses >= wins` else `WIN_BIAS=1.0`.
+5. **Auto-replay runs a short `duration_sec=5.0` cycle** inside the 30s S2 loop so consolidation is not blocked; the orchestrator's explicit offline `sleep_replay()` still uses the full 60s default.
+6. **`_sleep_patterns()` builds `{"alpha_i": v}` centers** from the shared attractor memory and tags each `(center, att.wins > att.losses)` so the scheduler can weight them; gated on `SLEEP_MIN_PATTERNS=3` so a near-empty memory never churns.
 
 ---
 
@@ -463,7 +469,7 @@ class MetaMonitor:
 | `allostasis.py` | win_loss_record, regime | {setpoint, deviation, dyshomeostatic, violations, trades} | `_update_pillar` (dynamic fallen line), `dynamics.adapt_threshold` (tighten on dyshomeostasis), `shared_state` (`allostatic`), HALIM via `pillar_setpoint` | `runtime/juli_allostasis.json` |
 | `somatic.py` | pillar tilt, rpe.phasic/tonic, allostatic.dyshomeostatic | {marker ±0.10, precision ∈ [0.6, 1.0]} | `_score_pipeline` (raw bias + modifier dampen), `shared_state` (somatic_marker, somatic_precision) | state-only (in-memory snapshot) |
 | `extinction.py` | alpha, outcome, regime, conf, horizon | inhibition weight (context-gated, ≤EXTINCT_MAX) | `_episodic_bias` = excitation − inhibition; regime renewal via `reactivate(canon)` | `runtime/juli_extinction.json` |
-| `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation | — |
+| `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation `_cycle` + `stop()`; `neurons/sleep.py` `replay_list` override | — |
 | `metacog.py` | conf_bin, outcome, alpha, regime | reliability, surprise, sizing_scalar | _score_pipeline, risk | `state.json` |
 
 ---
@@ -483,6 +489,12 @@ class MetaMonitor:
 | 2026-09-14 | Somatic marker bounded ±0.10 | Consistent with existing modulator bounds; prevents single module from dominating | Larger bound — risk of runaway; no bound — dangerous in live system |
 | 2026-09-14 | Extinction via separate inhibition weights, not weight decay modification | Preserves original excitatory weight (CLS: extinction ≠ forgetting); allows reactivation | Increasing decay rate — loses memory; zeroing weights — destroys without context |
 | 2026-09-14 | Sleep replay 3× loser weighting | Prevents overconfidence from replaying winners; matches biological "replay to learn" not "replay to enjoy" | Equal weighting — misses learning opportunity; loser-only — loses winner patterns |
+| 2026-09-14 | `SleepScheduler.check` uses explicit `now` param, `_last_trigger` sentinel `-inf` | Tests inject synthetic time without monkeypatching; sentinel avoids spurious cooldown on first trigger | Monkeypatching `time.time` — fragile and shared-state leaking; sentinel `0.0` fails under synthetic timestamps |
+| 2026-09-14 | Cooldown only after first trigger, shared between idle and session-close | One replay per cooldown window prevents double-runs if session-close follows an idle trigger | Cooldown on all calls — session-close never triggers; no cooldown — double replay in rapid succession |
+| 2026-09-14 | `replay_weights` returns `[(pattern, drive)]` pairs | Caller (consolidation) and engine both see the same structure; no dict-to-list conversion needed | Return a dict — loses ordering; return drive array alone — loses pattern association |
+| 2026-09-14 | Engine `select_patterns` / `run_cycle` accept `replay_list` override | Scheduler passes pre-weighted list; tests isolate weighting from attractor iteration | Always use attractors — no way to test or override weighting externally |
+| 2026-09-14 | Auto-replay runs 5s, offline replay uses full 60s | 5s keeps the 30s S2 loop responsive; offline mode has no latency constraint | Both 60s — S2 loop blocked; both 5s — offline replay incomplete |
+| 2026-09-14 | `_sleep_patterns` wraps attractor centers as `{alpha_i: v}` dicts | Matches the dict-key schema both the scheduler and `select_patterns` consume; no format conversion | Store attractors as dict directly — breaks the `Attractor(center=[float])` dataclass contract |
 | 2026-09-14 | Metacognition as reliability score, not second-order Bayesian | Simpler to implement and validate; can upgrade later | Full Bayesian second-order — premature complexity |
 
 ---
@@ -492,18 +504,18 @@ class MetaMonitor:
 ### Pre-Implementation (Per Phase)
 - [x] AWAKENED_BRAIN.md updated with design decisions
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [x] Full suite passing: `pytest --no-cov -q` (1085 tests)
+- [x] Full suite passing: `pytest --no-cov -q` (1107 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; Phase D pending this commit)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; Phase E pending this commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
 - [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)* *(Phase D: net episodic bias flows through existing `episodic_bias` state key — no prompt edit)*
 - [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)*
-- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D)*
-- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D, 6 under Phase E)*
+- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py; Phase E: `_last_trigger` sentinel changed to `-inf`; auto-replay capped at 5s to avoid blocking S2; `sleep_patterns` builds attractor centers with `{alpha_i: v}` wrapper)*
 
 ### Final Verification (All Phases)
 - [ ] All 6 modules implemented and wired
@@ -525,6 +537,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase B — webapp + inspection evidence | `inspection/pillar.py` emits `pillar_setpoint`/`pillar_deviation`/`below_setpoint` on the `pillar_balance` evidence (helper `_pillar_evidence` keeps `pillar_balance` ≤40 lines); PillarBalancePanel shows the allostatic setpoint line + dyshomeostasis chip; webapp typecheck + build green | `689f9b6` (+ hanoon-dash `a837644`) | Deviation: `pillar_balance` hit 43 lines after evidence addition — extracted `_pillar_evidence` helper to restore R3 compliance |
 | 2026-09-14 | Phase C — Somatic markers | New `brain/somatic.py` (SomaticMarkerGenerator: bounded ±0.10 gut-feel bias from pillar lean + RPE mood + allostatic alarm; negative marker precision-dampens all learned modifiers, floored 0.6); wired via `_somatic_context` into `_score_pipeline` (raw bias + `_compute_mods` precision scale); published `somatic_marker`/`somatic_precision`; 18 tests; full suite 1058 passed | `8da15db` | Deviation: `_compute_mods` private helper extracted to keep `_score_pipeline` at exactly 40 lines after black re-wrapped the modifier sum into 9 lines (R3 contract); somatic is asymmetric (tilt only penalizes) per prospect-theory loss aversion |
 | 2026-09-14 | Phase D — Extinction + context-tagged memory | New `brain/extinction.py` (ExtinctionTracker: context-gated inhibition via signature overlap; perf EWMA; regime renewal); `episodic.py` gains optional context tag on add/predict/modifier; orchestrator `_episodic_bias` returns net excitation−inhibition, reactivates on regime change; `_bounded_thinker()` helper to hold R3 at 40; `conf_bin_label`/`context_key` helpers; 27 tests; full suite 1085 passed | `fd71504` | Deviation: context tagging implemented inside `ExtinctionTracker` + `episodic` (not a parallel overlay); `_signature` uses coarse EPISODIC_KEYS rounding (1-dp) with shared-dim-overlap scaling, not exact k-NN inhibition; `_bounded_thinker()` consolidation to recover R3 when black wrapped the `_compute_mods` call to 3 lines |
+| 2026-09-14 | Phase E — Sleep replay scheduler | New `brain/sleep_scheduler.py` (SleepScheduler: idle/session-close trigger with cooldown; loser 3× weighting; interleaved historical traces); `neurons/sleep.py` flipped `WIN_BIAS` 2.0→1.0, added `LOSS_BIAS=3.0`, `replay_list` override param on `select_patterns`/`run_cycle`; `consolidation.py` wires `_sleeper` into `_cycle` + `stop()` with 5s short replay + `_sleep_patterns` from attractor memory; 22 tests; full suite 1107 passed | `TBD` | Deviation: `_last_trigger` sentinel changed from `0.0` to `-inf` so synthetic-test timestamps don't spuriously hit the cooldown guard; engine merge-count starts at 0 (store=1 create, then 1+ additional), so tests store 3× to reach `trade_count≥2`; auto-replay runs 5s not 60s to avoid blocking the 30s S2 loop |
 
 ---
 

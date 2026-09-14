@@ -22,6 +22,7 @@ from ..types import BarSeries, FillInfo
 from .allostasis import AllostaticController
 from .config import HALIM_MOD_BOUND
 from .halim_adapter import HalimAdapter
+from .learning_config import SLEEP_MIN_PATTERNS
 from .memory import JuliMemory
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .news_sources import NewsFeedEngine
@@ -29,6 +30,7 @@ from .policy.portfolio_risk import PortfolioRiskManager
 from .policy.safety import SafetyProducer
 from .regime import RegimeDetector
 from .shared_state import BrainState
+from .sleep_scheduler import SleepScheduler
 from .thinker import Signal, Thinker
 
 if TYPE_CHECKING:
@@ -66,6 +68,7 @@ class ConsolidationEngine:
         # is unreachable, so the label never stays "unknown" for long.
         self._detector = RegimeDetector()
         self._allostasis = AllostaticController()
+        self._sleeper = SleepScheduler()
         self._sleep_engine = sleep_engine
         self.portfolio_risk = PortfolioRiskManager()
         self.safety = SafetyProducer()
@@ -88,6 +91,7 @@ class ConsolidationEngine:
         self._running = False
         if self._thread:
             self._thread.join(timeout=5.0)
+        self._maybe_sleep_replay(session_close=True)
         self._persist_state()
         log.info("System 2 stopped")
 
@@ -173,6 +177,7 @@ class ConsolidationEngine:
         self._apply_halim_recommendations()
         self._update_policy()
         self._update_pillar()
+        self._maybe_sleep_replay()
         self.news.maybe_refresh()
         self._persist_state()
         log.info(
@@ -452,11 +457,46 @@ class ConsolidationEngine:
         self.supervisor.on_trade_close(trade)
         log.info("Buffer trade closed: %s pnl=%.2f", trade.ticker, trade.pnl)
 
-    def run_sleep_replay(self) -> Optional[SleepResult]:
+    def run_sleep_replay(
+        self,
+        replay_list: list[tuple[dict[str, float], float]] | None = None,
+        duration_sec: float = 60.0,
+    ) -> Optional[SleepResult]:
         """Run sleep consolidation cycle for offline learning."""
         if self._sleep_engine is None:
             return None
-        return self._sleep_engine.run_cycle()
+        return self._sleep_engine.run_cycle(
+            duration_sec=duration_sec, replay_list=replay_list
+        )
+
+    def _sleep_patterns(self) -> list[tuple[dict[str, float], bool]]:
+        """Attractor patterns tagged by win/loss for weighted replay."""
+        if self._sleep_engine is None:
+            return []
+        patterns = []
+        for att in list(self._sleep_engine._memory):
+            if att.trade_count < 2:
+                continue
+            center = {f"alpha_{i}": float(v) for i, v in enumerate(att.center)}
+            patterns.append((center, att.wins > att.losses))
+        return patterns
+
+    def _maybe_sleep_replay(self, session_close: bool = False) -> None:
+        """Auto-trigger weighted sleep replay during idle time or session close."""
+        if self._sleep_engine is None:
+            return
+        trades = self.buffer.get_trades()
+        if not trades:
+            return
+        if not self._sleeper.check(trades[-1].exit_time, session_close=session_close):
+            return
+        patterns = self._sleep_patterns()
+        if len(patterns) < SLEEP_MIN_PATTERNS:
+            return
+        weighted = self._sleeper.replay_weights(patterns)
+        result = self.run_sleep_replay(replay_list=weighted, duration_sec=5.0)
+        if result is not None:
+            log.info("S2 SLEEP: replayed %d patterns", result.patterns_replayed)
 
     @property
     def sleep_engine(self) -> Optional[SleepReplayEngine]:

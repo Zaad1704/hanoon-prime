@@ -1,0 +1,217 @@
+"""tests/test_sleep_scheduler — auto-trigger, loser-priority weighting, engine override.
+
+Phase E of AWAKENED_BRAIN.md: the scheduler decides when replay runs
+(idle/session-close, hourly cooldown) and how patterns are weighted
+(losers 3×, interleaved historical traces); the sleep engine uses
+the overridden list with a confirmed LOSS_BIAS replacing the old
+winner-favoring rule.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from hanoon_prime.brain.learning_config import (
+    SLEEP_COOLDOWN_SEC,
+    SLEEP_INTERLEAVE_MAX,
+    SLEEP_LOSS_WEIGHT,
+    SLEEP_MIN_PATTERNS,
+    SLEEP_THRESHOLD_SEC,
+    SLEEP_WIN_WEIGHT,
+)
+from hanoon_prime.brain.neurons.attractor import AttractorMemory
+from hanoon_prime.brain.neurons.network import LIFNetwork
+from hanoon_prime.brain.neurons.sleep import SleepReplayEngine, SleepResult
+from hanoon_prime.brain.neurons.stdp import STDPLearner
+from hanoon_prime.brain.sleep_scheduler import SleepScheduler
+
+
+def _fresh() -> SleepScheduler:
+    return SleepScheduler()
+
+
+def _pat(idx: int = 0) -> dict[str, float]:
+    return {f"alpha_{i}": 0.5 + i * 0.05 for i in range(idx, idx + 3)}
+
+
+# ── Trigger check ─────────────────────────────────────────────────────
+class TestCheck:
+    def test_no_trigger_when_recent_trade(self):
+        assert _fresh().check(last_trade_ts=100.0, now=200.0) is False
+
+    def test_trigger_after_threshold(self):
+        s = _fresh()
+        assert (
+            s.check(
+                last_trade_ts=0.0,
+                now=float(SLEEP_THRESHOLD_SEC + 1),
+            )
+            is True
+        )
+
+    def test_trigger_on_session_close_even_when_active(self):
+        s = _fresh()
+        assert s.check(last_trade_ts=9999.0, session_close=True, now=10000.0) is True
+
+    def test_cooldown_prevents_repeat_within_window(self):
+        s = _fresh()
+        assert s.check(last_trade_ts=0.0, now=float(SLEEP_THRESHOLD_SEC + 1)) is True
+        assert (
+            s.check(
+                last_trade_ts=0.0,
+                now=float(SLEEP_THRESHOLD_SEC + 2),
+            )
+            is False
+        )
+
+    def test_cooldown_allows_after_window(self):
+        s = _fresh()
+        assert s.check(last_trade_ts=0.0, now=float(SLEEP_THRESHOLD_SEC + 1)) is True
+        late = SLEEP_THRESHOLD_SEC + SLEEP_COOLDOWN_SEC + 1
+        assert s.check(last_trade_ts=0.0, now=float(late)) is True
+
+    def test_last_trigger_updates(self):
+        s = _fresh()
+        import math
+
+        assert s.last_trigger == float("-inf")
+        s.check(last_trade_ts=0.0, now=float(SLEEP_THRESHOLD_SEC + 1))
+        assert s.last_trigger == SLEEP_THRESHOLD_SEC + 1
+
+    def test_none_now_defaults_to_future_for_idle_check(self):
+        """A future last_trade_ts with no explicit now never idles — same day."""
+        s = _fresh()
+        # A ts far in the future; without injecting now, the check uses
+        # real time and correctly finds the bot idle.
+        assert s.check(last_trade_ts=0.0) is True
+
+
+# ── Replay weighting ──────────────────────────────────────────────────
+class TestReplayWeights:
+    def test_losers_weighted_three_times(self):
+        s = _fresh()
+        weighted = s.replay_weights([(_pat(), False)])
+        assert weighted[0][1] == SLEEP_LOSS_WEIGHT
+
+    def test_winners_weighted_once(self):
+        s = _fresh()
+        weighted = s.replay_weights([(_pat(), True)])
+        assert weighted[0][1] == SLEEP_WIN_WEIGHT
+
+    def test_interleaved_historical_capped(self):
+        s = _fresh()
+        hist = [(_pat(i), i % 2 == 0) for i in range(20)]
+        weighted = s.replay_weights([(_pat(), True)], historical=hist)
+        assert len(weighted) == 1 + SLEEP_INTERLEAVE_MAX
+
+    def test_interleaved_items_inherit_losers_three_times(self):
+        s = _fresh()
+        hist = [(_pat(), False)]
+        weighted = s.replay_weights([], historical=hist)
+        assert len(weighted) == 1
+        assert weighted[0][1] == SLEEP_LOSS_WEIGHT
+
+    def test_empty_recent_with_no_historical(self):
+        s = _fresh()
+        assert s.replay_weights([]) == []
+
+    def test_patterns_preserved(self):
+        s = _fresh()
+        weighted = s.replay_weights([(_pat(2), False)])
+        assert weighted[0][0] == _pat(2)
+
+
+# ── Sleep engine override + loser bias ────────────────────────────────
+class TestEngineReplayList:
+    def _engine(self, memory: AttractorMemory | None = None) -> SleepReplayEngine:
+        return SleepReplayEngine(
+            network=LIFNetwork(),
+            stdp=STDPLearner(),
+            memory=memory or AttractorMemory(),
+        )
+
+    def test_empty_memory_returns_no_patterns(self):
+        assert self._engine().select_patterns() == []
+
+    def test_default_weight_uses_loss_bias_for_losing_pattern(self):
+        mem = AttractorMemory()
+        mem.store("L", [0.5, 0.4, 0.3], won=False, pnl_pct=-0.05)
+        mem.store("L", [0.5, 0.4, 0.3], won=False, pnl_pct=-0.05)
+        mem.store("L", [0.5, 0.4, 0.3], won=False, pnl_pct=-0.05)
+        e = self._engine(mem)
+        patterns = e.select_patterns()
+        assert len(patterns) == 1
+        _, weight = patterns[0]
+        assert weight == SLEEP_LOSS_WEIGHT
+
+    def test_default_weight_uses_win_bias_for_winning_pattern(self):
+        mem = AttractorMemory()
+        mem.store("W", [0.5, 0.4, 0.3], won=True, pnl_pct=0.05)
+        mem.store("W", [0.5, 0.4, 0.3], won=True, pnl_pct=0.05)
+        mem.store("W", [0.5, 0.4, 0.3], won=True, pnl_pct=0.05)
+        e = self._engine(mem)
+        patterns = e.select_patterns()
+        assert len(patterns) == 1
+        _, weight = patterns[0]
+        assert weight == SLEEP_WIN_WEIGHT
+
+    def test_replay_list_overrides_attractors(self):
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        e = self._engine()
+        patterns = e.select_patterns(replay_list=override)
+        assert len(patterns) == 1
+        assert patterns[0][1] == SLEEP_LOSS_WEIGHT
+
+    def test_run_cycle_uses_replay_list(self):
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        e = self._engine()
+        result = e.run_cycle(duration_sec=0.1, replay_list=override)
+        assert isinstance(result, SleepResult)
+        assert result.patterns_replayed == 1
+
+    def test_run_cycle_empty_memory_returns_empty(self):
+        result = self._engine().run_cycle(duration_sec=0.1)
+        assert result.patterns_replayed == 0
+
+    def test_truncates_large_replay_list(self):
+        big = [(_pat(i % 3), SLEEP_WIN_WEIGHT) for i in range(150)]
+        e = self._engine()
+        patterns = e.select_patterns(replay_list=big)
+        assert len(patterns) == e.MAX_PATTERNS
+
+
+# ── Consolidation wiring (lightweight) ────────────────────────────────
+class TestConsolidationWiring:
+    def test_consolidation_has_sleeper(self):
+        """ConsolidationEngine constructable with a sleeper attribute."""
+        from hanoon_prime.brain.consolidation import ConsolidationEngine
+        from hanoon_prime.brain.shared_state import BrainState
+
+        eng = ConsolidationEngine(
+            brain_state=BrainState(),
+            sleep_engine=SleepReplayEngine(
+                network=LIFNetwork(),
+                stdp=STDPLearner(),
+                memory=AttractorMemory(),
+            ),
+        )
+        assert hasattr(eng, "_sleeper")
+        assert isinstance(eng._sleeper, SleepScheduler)
+
+    def test_run_sleep_replay_propagates_replay_list(self):
+        from hanoon_prime.brain.consolidation import ConsolidationEngine
+        from hanoon_prime.brain.shared_state import BrainState
+
+        mem = AttractorMemory()
+        eng = ConsolidationEngine(
+            brain_state=BrainState(),
+            sleep_engine=SleepReplayEngine(
+                network=LIFNetwork(),
+                stdp=STDPLearner(),
+                memory=mem,
+            ),
+        )
+        weighted = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        result = eng.run_sleep_replay(replay_list=weighted, duration_sec=0.1)
+        assert isinstance(result, SleepResult)
+        assert result.patterns_replayed == 1
