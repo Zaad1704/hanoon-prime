@@ -474,7 +474,7 @@ class MetaMonitor:
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [ ] Commit hash recorded in this doc under the relevant phase *(fill on commit)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592`)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
 - [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise added to _state)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state)*
@@ -497,7 +497,7 @@ class MetaMonitor:
 | Date | Session | What Changed | Commit | Notes |
 |---|---|---|---|---|
 | 2026-09-14 | Analysis & design | Full brain mapping, 6 biological gaps identified, 6-phase proposal | `d630f56` | Research: dopamine RPE, CLS, allostasis, somatic markers, extinction, metacognition |
-| 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract | *pending* | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
+| 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract; full suite 1020 passed | `9d11592` | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
 
 ---
 
