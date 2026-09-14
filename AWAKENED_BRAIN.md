@@ -199,7 +199,7 @@ class MultiTimescaleRPE:
 - [x] `pillar_awareness.py` compares edge to dynamic setpoint (fallen line = `max(PILLAR_EDGE_FALL, setpoint)` when setpoint < 0; never looser than structural -0.10)
 - [x] `dynamics.adapt_threshold` receives `dyshomeostatic` → aggressive tightening at `ALLOS_TIGHTEN_STEP=0.02`
 - [x] HALIM evidence includes setpoint deviation (via `pillar_setpoint` / `pillar_deviation` keys in `pillar_fields`)
-- [ ] Webapp pillar panel shows setpoint and deviation *(separate hanoon-dash commit after backend green)*
+- [x] Webapp pillar panel shows setpoint and deviation *(hanoon-dash `a837644` — PillarBalancePanel setpoint line + dyshomeostasis chip; inspection `pil__setpoint` keys on the `pillar_balance` evidence via commit `689f9b6`)*
 - [x] Tests: `tests/test_allostasis.py` — setpoint tracking, per-regime independence, dyshomeostasis detection, persistence
 - [x] Pre-commit hooks pass
 
@@ -485,7 +485,7 @@ class MetaMonitor:
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
 - [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic added to _state)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)*
-- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line is a separate hanoon-dash commit)*
+- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)*
 - [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B)*
 - [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
 
@@ -506,6 +506,7 @@ class MetaMonitor:
 | 2026-09-14 | Analysis & design | Full brain mapping, 6 biological gaps identified, 6-phase proposal | `d630f56` | Research: dopamine RPE, CLS, allostasis, somatic markers, extinction, metacognition |
 | 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract; full suite 1020 passed | `9d11592` | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
 | 2026-09-14 | Phase B — Homeostatic setpoint + interoception | New `brain/allostasis.py` (AllostaticController, per-regime setpoint EMA, dyshomeostasis, atomic persistence); `pillar_awareness.py` dynamic fallen line + `_decorate` (setpoint keys for HALIM); `dynamics.adapt_threshold` gains dyshomeostatic tightening; `consolidation._update_pillar` publishes `allostatic`; orchestrator isinstance-guard (Class C watchdog); 21 tests; full suite 1040 passed | `145e600` | Deviation: 2 allostasis tests initially asserted non-transient dyshomeostasis — corrected to the transient-alarm design (violations reset as the EMA absorbs a persistent edge); `or {}` rejected for Class C compliance |
+| 2026-09-14 | Phase B — webapp + inspection evidence | `inspection/pillar.py` emits `pillar_setpoint`/`pillar_deviation`/`below_setpoint` on the `pillar_balance` evidence (helper `_pillar_evidence` keeps `pillar_balance` ≤40 lines); PillarBalancePanel shows the allostatic setpoint line + dyshomeostasis chip; webapp typecheck + build green | `689f9b6` (+ hanoon-dash `a837644`) | Deviation: `pillar_balance` hit 43 lines after evidence addition — extracted `_pillar_evidence` helper to restore R3 compliance |
 
 ---
 
