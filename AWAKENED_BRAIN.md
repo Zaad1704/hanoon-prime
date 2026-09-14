@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done — commit hash pending (recorded on commit)
-**Last updated:** 2026-09-14 — Phase E implementation complete
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-14 — Phase F implementation complete
 
 ---
 
@@ -412,20 +412,20 @@ class SleepScheduler:
 
 ### Phase F: Metacognitive Confidence-of-Confidence
 
-**File:** `src/hanoon_prime/brain/metacog.py` (new, ~100 lines) + modifications to `brain/cognitive/metacognition.py`
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/metacog.py` (new, 148 lines) + modifications to `brain/orchestrator.py`
+**Status:** `done` — commit hash recorded on commit
 **Priority:** 6th — prevents overconfidence
 **Effort:** ~200 lines total
 **Timeline:** Week 6-7
 
 **Acceptance Criteria:**
-- [ ] `MetaMonitor` tracking correlation between confidence bins and actual outcomes
-- [ ] `confidence_reliability` score (rolling calibration correlation)
-- [ ] When reliability drops: all confidence-based sizing shrinks
-- [ ] Surprise detection: situation matches no known pattern → flag
-- [ ] Curiosity drive: high surprise + stable pillar → exploration; high surprise + falling pillar → retreat
-- [ ] Tests: `tests/test_metacog.py`
-- [ ] Pre-commit hooks pass
+- [x] `MetaMonitor` tracking correlation between confidence bins and actual outcomes
+- [x] `confidence_reliability` score (rolling calibration correlation)
+- [x] When reliability drops: all confidence-based sizing shrinks
+- [x] Surprise detection: situation matches no known pattern → flag
+- [x] Curiosity drive: high surprise + stable pillar → exploration; high surprise + falling pillar → retreat
+- [x] Tests: `tests/test_metacog.py` — 25 tests
+- [x] Pre-commit hooks pass
 
 **Biological Basis:** Fleming & Dolan 2012 (metacognition BA10), Schwartenbeck et al. 2015 (active inference + uncertainty)
 
@@ -440,24 +440,32 @@ class MetaMonitor:
     exploration.
     """
 
-    def update(self, conf_bin: int, outcome: bool) -> None: ...
+    def update(self, conf: float, won: bool) -> None: ...
     def reliability(self) -> float: ...
-    def surprise(self, alpha: dict, regime: str, episodic) -> float: ...
+    def surprise(self, alpha: dict, episodic) -> float: ...
     def sizing_scalar(self) -> float: ...
+    def curiosity_scale(self, surprise: float, pillar_state: str) -> float: ...
 
     def save(self) -> dict: ...
     def load(self, data: dict) -> None: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/metacog.py`
-2. Wire into `orchestrator._score_pipeline` — surprise detection
-3. Wire reliability into `risk.py` sizing
-4. Wire curiosity into exploration/exploitation balance
-5. Write `tests/test_metacog.py`
-6. Update this doc with commit hash
+1. ✅ Write `brain/metacog.py`
+2. ✅ Wire into `orchestrator._score_pipeline` — surprise detection
+3. ✅ Wire reliability into `risk.py` sizing
+4. ✅ Wire curiosity into exploration/exploitation balance
+5. ✅ Write `tests/test_metacog.py` (25 tests)
+6. ⏳ Update this doc with commit hash
 
-**Design Decisions:** (none yet)
+**Design Decisions:**
+1. **Rolling Pearson correlation, normalized `0.5 + 0.5·corr`** — a genuine "rolling calibration correlation" (Fleming), with `METACOG_MIN_SAMPLES=8` guard so a young brain isn't penalized; window `METACOG_SAMPLES=40`.
+2. **Metacognition lives in a new store-keyed module, not `realized_ev`** — `realized_ev` reports band WR; `MetaMonitor` owns the second-order calibration correlation, surprise, and curiosity, each independently testable.
+3. **`update(conf, won)` bins internals, `conf_bin` buckets [0,1] into 5 bins** — cheap, monotone; avoids an exact confidence hash and matches coarse-bin philosophy of extinction + realized.
+4. **Surprise = `1 − mean(top-k cosine)` from episodic recall** — the existing k-NN memory already scores "have I seen this before"; empty memory reads as 0.0 novelty (nothing to be surprised about at birth).
+5. **Curiosity gates sizing only (R1)** — `curiosity_scale` nudges size up `METACOG_CURIOUS_SCALE=1.06` on high surprise + stable pillar, down `METACOG_RETREAT_SCALE=0.80` when the pillar is tipping/fallen; surprise alone triggers nothing.
+6. **Reliability shrinks confidence-based sizing** — `sizing_scalar` is 1.0 ≥0.6 reliability, `0.85` mid, `0.70` bad; multiplies alongside existing advisory scalars in `_scale_admitted_size`.
+7. **Persistence to `runtime/juli_metacog.json`** (`HANOO_METACOG_FILE` override) mirroring extinction/allostasis; module-table's `state.json` it supersedes (nicer to keep learned calibration separate from BrainState).
 
 ---
 
@@ -470,7 +478,7 @@ class MetaMonitor:
 | `somatic.py` | pillar tilt, rpe.phasic/tonic, allostatic.dyshomeostatic | {marker ±0.10, precision ∈ [0.6, 1.0]} | `_score_pipeline` (raw bias + modifier dampen), `shared_state` (somatic_marker, somatic_precision) | state-only (in-memory snapshot) |
 | `extinction.py` | alpha, outcome, regime, conf, horizon | inhibition weight (context-gated, ≤EXTINCT_MAX) | `_episodic_bias` = excitation − inhibition; regime renewal via `reactivate(canon)` | `runtime/juli_extinction.json` |
 | `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation `_cycle` + `stop()`; `neurons/sleep.py` `replay_list` override | — |
-| `metacog.py` | conf_bin, outcome, alpha, regime | reliability, surprise, sizing_scalar | _score_pipeline, risk | `state.json` |
+| `metacog.py` | conf, outcome, alpha, episodic, pillar_state | reliability, surprise, sizing_scalar, curiosity_scale | `_score_pipeline` (surprise), `_scale_admitted_size` (sizing + curiosity), `_learn_from_real` (update), `snapshot` | `runtime/juli_metacog.json` |
 
 ---
 
@@ -496,6 +504,12 @@ class MetaMonitor:
 | 2026-09-14 | Auto-replay runs 5s, offline replay uses full 60s | 5s keeps the 30s S2 loop responsive; offline mode has no latency constraint | Both 60s — S2 loop blocked; both 5s — offline replay incomplete |
 | 2026-09-14 | `_sleep_patterns` wraps attractor centers as `{alpha_i: v}` dicts | Matches the dict-key schema both the scheduler and `select_patterns` consume; no format conversion | Store attractors as dict directly — breaks the `Attractor(center=[float])` dataclass contract |
 | 2026-09-14 | Metacognition as reliability score, not second-order Bayesian | Simpler to implement and validate; can upgrade later | Full Bayesian second-order — premature complexity |
+| 2026-09-14 | Rolling Pearson calibration correlation normalized `0.5 + 0.5·corr` | Direct second-order estimate of "does my confidence mean anything" (Fleming BA10); cheap on a 40-window deque | Bin-vs-bin accuracy deltas — lossier; full logistic calibration curve — heavy |
+| 2026-09-14 | Metacog own store, not merged into `realized_ev` | Realized reports realized stats; metacog owns second-order calibration, novelty, curiosity — one responsibility each | Fold into `realized_ev` — couples sizing/exploration with realized bookkeeping |
+| 2026-09-14 | Surprise derived from episodic recall confidence (`1 − mean top-k cosine`) | Reuses the k-NN "seen this before" scoring already validated; empty memory = no surprise | Separate novelty store — redundant distance bookkeeping |
+| 2026-09-14 | Curiosity gates sizing only, never a verdict | Keeps R1 single-decision path; explore/retreat expressed as advisory share nudges (±6%/−20%) | Lowering/raising the entry threshold — violates R1 decision path |
+| 2026-09-14 | `METACOG_MIN_SAMPLES=8` guard before reliability affects sizing | A brain with 3 trades has no calibration signal; penalizing it would be superstitious | Immediate participation — swings sizing on noise |
+| 2026-09-14 | Metacog file at `runtime/juli_metacog.json` | Learned calibration is a brain asset, persisted like allostasis/extinction | `state.json` (planned) — mixes runtime BrainState with persistent learning |
 
 ---
 
@@ -504,18 +518,18 @@ class MetaMonitor:
 ### Pre-Implementation (Per Phase)
 - [x] AWAKENED_BRAIN.md updated with design decisions
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [x] Full suite passing: `pytest --no-cov -q` (1107 tests)
+- [x] Full suite passing: `pytest --no-cov -q` (1132 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E; Phase F pending this commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
-- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)*
+- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)* *(Phase F: meta_reliability + meta_surprise published to state; metacog block in brain snapshot)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)* *(Phase D: net episodic bias flows through existing `episodic_bias` state key — no prompt edit)*
-- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)*
-- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D, 6 under Phase E)*
-- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py; Phase E: `_last_trigger` sentinel changed to `-inf`; auto-replay capped at 5s to avoid blocking S2; `sleep_patterns` builds attractor centers with `{alpha_i: v}` wrapper)*
+- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)* *(Phase F: no webapp change — meta_reliability/meta_surprise published via shared state; dash reads brain snapshot keys)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D, 6 under Phase E, 7 under Phase F)*
+- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py; Phase E: `_last_trigger` sentinel changed to `-inf`; auto-replay capped at 5s to avoid blocking S2; `sleep_patterns` builds attractor centers with `{alpha_i: v}` wrapper; Phase F: `update(conf, won)` bins internally, `surprise(alpha, episodic)` drops regime arg, `_score_pipeline` dropped unused `advisor_delta`/`thinker_conf` entries, curiosity gates sizing not thresholds)*
 
 ### Final Verification (All Phases)
 - [ ] All 6 modules implemented and wired
@@ -538,6 +552,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase C — Somatic markers | New `brain/somatic.py` (SomaticMarkerGenerator: bounded ±0.10 gut-feel bias from pillar lean + RPE mood + allostatic alarm; negative marker precision-dampens all learned modifiers, floored 0.6); wired via `_somatic_context` into `_score_pipeline` (raw bias + `_compute_mods` precision scale); published `somatic_marker`/`somatic_precision`; 18 tests; full suite 1058 passed | `8da15db` | Deviation: `_compute_mods` private helper extracted to keep `_score_pipeline` at exactly 40 lines after black re-wrapped the modifier sum into 9 lines (R3 contract); somatic is asymmetric (tilt only penalizes) per prospect-theory loss aversion |
 | 2026-09-14 | Phase D — Extinction + context-tagged memory | New `brain/extinction.py` (ExtinctionTracker: context-gated inhibition via signature overlap; perf EWMA; regime renewal); `episodic.py` gains optional context tag on add/predict/modifier; orchestrator `_episodic_bias` returns net excitation−inhibition, reactivates on regime change; `_bounded_thinker()` helper to hold R3 at 40; `conf_bin_label`/`context_key` helpers; 27 tests; full suite 1085 passed | `fd71504` | Deviation: context tagging implemented inside `ExtinctionTracker` + `episodic` (not a parallel overlay); `_signature` uses coarse EPISODIC_KEYS rounding (1-dp) with shared-dim-overlap scaling, not exact k-NN inhibition; `_bounded_thinker()` consolidation to recover R3 when black wrapped the `_compute_mods` call to 3 lines |
 | 2026-09-14 | Phase E — Sleep replay scheduler | New `brain/sleep_scheduler.py` (SleepScheduler: idle/session-close trigger with cooldown; loser 3× weighting; interleaved historical traces); `neurons/sleep.py` flipped `WIN_BIAS` 2.0→1.0, added `LOSS_BIAS=3.0`, `replay_list` override param on `select_patterns`/`run_cycle`; `consolidation.py` wires `_sleeper` into `_cycle` + `stop()` with 5s short replay + `_sleep_patterns` from attractor memory; 22 tests; full suite 1107 passed | `71837ba` | Deviation: `_last_trigger` sentinel changed from `0.0` to `-inf` so synthetic-test timestamps don't spuriously hit the cooldown guard; engine merge-count starts at 0 (store=1 create, then 1+ additional), so tests store 3× to reach `trade_count≥2`; auto-replay runs 5s not 60s to avoid blocking the 30s S2 loop |
+| 2026-09-14 | Phase F — Metacognitive confidence-of-confidence | New `brain/metacog.py` (MetaMonitor: rolling calibration correlation `0.5+0.5·Pearson(bin,outcome)`, sizing_scalar shrink, surprise from episodic recall `1−mean top-k cosine`, curiosity_scale from surprise + pillar state); orchestrator wires `_meta_cog` into `_score_pipeline` (surprise in ctx), `_publish_meta` (state keys), `_scale_admitted_size` (sizing + curiosity), `_learn_from_real` (update), `reset_learning` (clear), `snapshot`; `_tag_ctx` helper keeps `_evaluate_fast` ≤40; 25 tests; full suite 1132 passed | `TBD` | Deviation: `update(conf, won)` bins internally (doc showed `conf_bin` int); `surprise(alpha, episodic)` drops the unused `regime` arg; `_score_pipeline` return dropped unused `advisor_delta`/`thinker_conf` entries to make R3 room for `surprise` (both unread downstream); curiosity gates sizing only (R1) instead of the entry threshold; persists to `runtime/juli_metacog.json` not `state.json` |
 
 ---
 

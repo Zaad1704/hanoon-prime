@@ -49,6 +49,7 @@ from .learning_config import CROSS_ASSET_MOD_BOUND, REGIME_MIN_TRADES
 from .memory import JuliMemory
 from .meta_label import MetaLabelModel
 from .meta_label import feature_vector as meta_features
+from .metacog import MetaMonitor
 from .neurons.bridge import NeuromorphicBridge
 from .neurons.sleep import SleepReplayEngine, SleepResult
 from .policy.governor import Governor
@@ -156,6 +157,7 @@ class NeuromorphicBrain:
         self._somatic = SomaticMarkerGenerator()
         self._extinction = ExtinctionTracker()
         self._extinction_last_regime: str = ""
+        self._meta_cog = MetaMonitor()
         self.genome = StrategyGenome(self)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -689,9 +691,8 @@ class NeuromorphicBrain:
         self.state.update(episodic_bias=eb)
         hm = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(hm or 0.0)))
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
-        ctx["horizon"] = horizon
-        ctx["horizon_reason"] = hz_reason
-        ctx["regime_canon"] = canon
+        self._tag_ctx(ctx, horizon, hz_reason, canon)
+        self._publish_meta(ctx)
         self._deliberation_coherence(ctx, _r, hm, eb, ticker)
         sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
         self._scale_admitted_size(ctx, sizing, canon, horizon, bars)
@@ -701,6 +702,28 @@ class NeuromorphicBrain:
             nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
         )
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    def _tag_ctx(
+        self, ctx: dict[str, Any], horizon: str, hz_reason: str, canon: str
+    ) -> None:
+        """Attach horizon + regime metadata to the decision context."""
+        ctx["horizon"] = horizon
+        ctx["horizon_reason"] = hz_reason
+        ctx["regime_canon"] = canon
+
+    def _publish_meta(self, ctx: dict[str, Any]) -> None:
+        """Publish metacognitive reliability + surprise to shared state."""
+        self.state.update(
+            meta_reliability=self._meta_cog.reliability(),
+            meta_surprise=float(ctx.get("surprise", 0.0)),
+        )
+
+    def _pillar_state(self) -> str:
+        """Pillar health label for curiosity gating (upright/warming stable)."""
+        pillar = self.state.get("pillar")
+        if not isinstance(pillar, dict):
+            return "upright"
+        return str(pillar.get("state", "upright"))
 
     def _extinction_tag(self, ticker: str, canon: str, horizon: str) -> str:
         """Context tag for the latest decision (regime, conf bucket, horizon)."""
@@ -750,6 +773,19 @@ class NeuromorphicBrain:
             ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
         )
         sizing.shares = max(1, int(sizing.shares * meta_scale))
+        # Metacognition: unreliable calibration shrinks size; curiosity
+        # (novel situation) explores when the pillar is stable, retreats
+        # when it is falling. Advisory — sizing only, never a verdict (R1).
+        sizing.shares = max(1, int(sizing.shares * self._meta_cog.sizing_scalar()))
+        sizing.shares = max(
+            1,
+            int(
+                sizing.shares
+                * self._meta_cog.curiosity_scale(
+                    float(ctx.get("surprise", 0.0)), self._pillar_state()
+                )
+            ),
+        )
 
     def note_eval_failure(self, ticker: str, err: Exception) -> None:
         """Count entry-eval failures (FIXES.md Class D): the pipeline
@@ -943,14 +979,13 @@ class NeuromorphicBrain:
             "nash_op": nash_op,
             "neuro_score": neuro_score,
             "confidence": max(0.05, min(0.95, base.confidence + thinker_conf)),
+            "surprise": self._meta_cog.surprise(alpha, self.episodic),
             "raw_score": raw,
             "stabilized": stabilized,
             "final_dir": final_dir,
             "dyn_reason": dyn_reason,
             "nash_win_prob": nash_pred.win_prob,
-            "advisor_delta": advisor_delta,
             "thinker_mod": thinker_mod,
-            "thinker_conf": thinker_conf,
         }
 
     def _deliberation_coherence(
@@ -1208,6 +1243,7 @@ class NeuromorphicBrain:
         self._apply_regime_weights(regime)
         self._realized.add_outcome(score, won, pnl_pct, direction)
         self._realized.add_confidence_outcome(self._last_conf.get(ticker, 0.5), won)
+        self._meta_cog.update(self._last_conf.get(ticker, 0.5), won)
         self.exits.adapt_from_realized(self._realized)
         self._advisor.record_outcome(won)
         # Apply any pending HALIM recommendations (fetched by consolidation)
@@ -1326,6 +1362,10 @@ class NeuromorphicBrain:
             "realized": self._realized.snapshot(),
             "episodic_size": self.episodic.size,
             "extinction_size": self._extinction.size,
+            "metacog": {
+                "reliability": self._meta_cog.reliability(),
+                "samples": self._meta_cog.size,
+            },
             "threshold": self.dynamics.threshold,
             "brain_state": self.state.snapshot(),
             "decision_count": self._decision_count,
@@ -1358,6 +1398,7 @@ class NeuromorphicBrain:
         # Episodic k-NN memory
         self.episodic.clear()
         self._extinction.clear()
+        self._meta_cog.clear()
         # Nash pattern brain
         self.nash = NashBrain()
         # Realized-EV stats (band/conf bins)
@@ -1377,7 +1418,6 @@ class NeuromorphicBrain:
 
         self.memory.set_weights(INDICATOR_WEIGHTS)
         self.cortex.set_weights(INDICATOR_WEIGHTS)
-        # Clear decision context
         self._last_alpha.clear()
         self._last_score.clear()
         self._last_conf.clear()

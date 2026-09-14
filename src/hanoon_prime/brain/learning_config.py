@@ -82,3 +82,14 @@ SLEEP_LOSS_WEIGHT: float = 3.0  # loser replay drive (3× winner)
 SLEEP_WIN_WEIGHT: float = 1.0  # winner replay drive (learn, don't soothe)
 SLEEP_INTERLEAVE_MAX: int = 6  # random historical traces per replay
 SLEEP_MIN_PATTERNS: int = 3  # consolidated patterns before replay makes sense
+
+# ── Metacognitive confidence-of-confidence (brain/metacog.py) ─────────
+METACOG_BINS: int = 5  # coarse confidence buckets for calibration
+METACOG_SAMPLES: int = 40  # rolling calibration window
+METACOG_MIN_SAMPLES: int = 8  # penalize reliability only after enough data
+METACOG_SHRINK_WEAK: float = 0.85  # sizing scalar at mildly unreliable
+METACOG_SHRINK_BAD: float = 0.70  # sizing scalar at unreliable calibration
+METACOG_SURPRISE_THRESHOLD: float = 0.55  # novelty floor that piques curiosity
+METACOG_CURIOUS_SCALE: float = 1.06  # explore: nudge size up (stable pillar)
+METACOG_RETREAT_SCALE: float = 0.80  # retreat: shrink size (falling pillar)
+METACOG_FILE: Path = STATE_DIR / "juli_metacog.json"
