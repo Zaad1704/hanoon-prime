@@ -4,7 +4,7 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done, Phase G (full-brain live monitor) done — commit hash pending (recorded on commit)
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done, Phase G (full-brain live monitor) done — backend `4b9abbd`, hanoon-dash `0b605cc`
 **Last updated:** 2026-09-15 — Phase G: A→Z webapp brain monitor + raw inspector shipped
 
 ---
@@ -473,7 +473,7 @@ class MetaMonitor:
 
 **Backend:** `src/hanoon_prime/brain/extinction.py` (snapshot), `brain/metacog.py` (snapshot), `brain/neurons/sleep.py` (last_replay + snapshot), `brain/orchestrator.py` (snapshot extension), `brain/telemetry_summaries.py` (new helper), `telemetry.py` (`_brain_state` pass-through)
 **Webapp:** hanoon-dash — BRAIN tab rebuilt A→Z
-**Status:** `done` — commit hash recorded on commit
+**Status:** `done` — backend `4b9abbd`, webapp `0b605cc`
 **Priority:** ops — the human needs to *see* every brain step live and detect breakage instantly
 
 **Acceptance Criteria:**
@@ -549,7 +549,7 @@ class MetaMonitor:
 - [x] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)* *(Phase G: hanoon-dash typecheck + build green)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E; `683c0a9` Phase F; Phase G backend + webapp recorded on commit)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E; `683c0a9` Phase F; Phase G backend `4b9abbd` + webapp `0b605cc`)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
 - [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)* *(Phase F: meta_reliability + meta_surprise published to state; metacog block in brain snapshot)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)* *(Phase D: net episodic bias flows through existing `episodic_bias` state key — no prompt edit)*
@@ -579,6 +579,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase D — Extinction + context-tagged memory | New `brain/extinction.py` (ExtinctionTracker: context-gated inhibition via signature overlap; perf EWMA; regime renewal); `episodic.py` gains optional context tag on add/predict/modifier; orchestrator `_episodic_bias` returns net excitation−inhibition, reactivates on regime change; `_bounded_thinker()` helper to hold R3 at 40; `conf_bin_label`/`context_key` helpers; 27 tests; full suite 1085 passed | `fd71504` | Deviation: context tagging implemented inside `ExtinctionTracker` + `episodic` (not a parallel overlay); `_signature` uses coarse EPISODIC_KEYS rounding (1-dp) with shared-dim-overlap scaling, not exact k-NN inhibition; `_bounded_thinker()` consolidation to recover R3 when black wrapped the `_compute_mods` call to 3 lines |
 | 2026-09-14 | Phase E — Sleep replay scheduler | New `brain/sleep_scheduler.py` (SleepScheduler: idle/session-close trigger with cooldown; loser 3× weighting; interleaved historical traces); `neurons/sleep.py` flipped `WIN_BIAS` 2.0→1.0, added `LOSS_BIAS=3.0`, `replay_list` override param on `select_patterns`/`run_cycle`; `consolidation.py` wires `_sleeper` into `_cycle` + `stop()` with 5s short replay + `_sleep_patterns` from attractor memory; 22 tests; full suite 1107 passed | `71837ba` | Deviation: `_last_trigger` sentinel changed from `0.0` to `-inf` so synthetic-test timestamps don't spuriously hit the cooldown guard; engine merge-count starts at 0 (store=1 create, then 1+ additional), so tests store 3× to reach `trade_count≥2`; auto-replay runs 5s not 60s to avoid blocking the 30s S2 loop |
 | 2026-09-14 | Phase F — Metacognitive confidence-of-confidence | New `brain/metacog.py` (MetaMonitor: rolling calibration correlation `0.5+0.5·Pearson(bin,outcome)`, sizing_scalar shrink, surprise from episodic recall `1−mean top-k cosine`, curiosity_scale from surprise + pillar state); orchestrator wires `_meta_cog` into `_score_pipeline` (surprise in ctx), `_publish_meta` (state keys), `_scale_admitted_size` (sizing + curiosity), `_learn_from_real` (update), `reset_learning` (clear), `snapshot`; `_tag_ctx` helper keeps `_evaluate_fast` ≤40; 25 tests; full suite 1132 passed | `683c0a9` | Deviation: `update(conf, won)` bins internally (doc showed `conf_bin` int); `surprise(alpha, episodic)` drops the unused `regime` arg; `_score_pipeline` return dropped unused `advisor_delta`/`thinker_conf` entries to make R3 room for `surprise` (both unread downstream); curiosity gates sizing only (R1) instead of the entry threshold; persists to `runtime/juli_metacog.json` not `state.json` |
+| 2026-09-15 | Phase G — Full-brain A→Z live monitor | Backend: `ExtinctionTracker`/`MetaMonitor`/`SleepReplayEngine` gain snapshot builders; new `brain/telemetry_summaries.py` holds `extinction_summary` (counts + top-16 cells); orchestrator snapshot ships `extinction`/`metacog`/enriched `sleep_engine`; telemetry `/brain` passes the blocks through. Webapp (hanoon-dash): BRAIN tab rebuilt — RpePanel, AllostasisPanel, SomaticPanel, ExtinctionPanel, SleepPanel, MetacogPanel, BrainSeriesChart sparklines (300-sample store buffer), BrainHealthStrip (live/stale/tripped/unknown), InsideManInspector (raw JSON tree + copy). Verified: full prime suite 1141 passed, R3/R3b green, dash typecheck+build green, Playwright live render with no console errors | `4b9abbd` (+ hanoon-dash `0b605cc`) | Deviation: extinction snapshot moved off the tracker into `telemetry_summaries.py` — the method pushed `extinction.py` to 218 lines and broke the R3b 200-line file contract; cell list capped at top-16 by inhibition then pattern mass. Runtime files `juli_metacog.json`/`juli_extinction.json` were transiently removed during a test-isolation check — in-memory bot state is authoritative and persisted on the next write |
 
 ---
 
