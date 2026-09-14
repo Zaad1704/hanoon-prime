@@ -473,18 +473,83 @@ until a paper run clears the confinement gate.
   on this 22-name panel, 5-session cross-sectional momentum does not predict
   next-session dispersion better than zero.
 
-## Phase 13 — next pre-registered hypothesis
-§12 is closed by its own kill-test; the `phase12.py` sandbox, the
-`monotonicity_profile` decile machine, and `phase12_bench.py` are reusable test
-rigs (the decile-monotonicity gate is a strong generic first-pass signal
-filter). Candidate next hypotheses, each to be written as its OWN §13 verdict
-spec (signal formula + frozen params + fail-fasts) before any bench:
-- **Cross-section in the OTHER direction**: short*term* reversal (1-session
-  persistence, not 5) — the d1..d10 profile shows zero 5-day rank carry, but
-  a same-session/1-day horizon may behave differently. Reuses the rig.
-- **Beta-adjusted rank** (regress out SPY over the return window first) — tests
-  whether raw cross-sectional rank is masked by market beta, before abandoning
-  momentum entirely.
-- **Earnings/event state factor** (the one microstructure feature with an
-  actual economic payday on this panel, per §9 earn-session work).
-No §13 code until its spec is committed — same protocol, same harness.
+## Phase 13 — Pre-Registered Verdict Spec: Beta-Adjusted Cross-Sectional Momentum (Option A)
+
+### 13.1 Hypothesis (single, falsifiable)
+> **The §12 NO-GO was caused by raw momentum being beta-masked: the 5-session
+> lag-1 signal ranked names by raw return, which is co-mingled with the SPY
+> factor on this panel. After stripping the market beta out of each name's
+> trailing return (cross-sectional residual vs SPY), the rank order of the
+> RESIDUAL predicts next-session O→C dispersion monotonically.**
+
+This is a *control-abandonment test*, not a new edge claim: Option A reuses the
+entire §12 machine with exactly one input change (raw trailing return →
+beta-residual trailing return). Its job is to answer "was momentum noise, or
+beta-masked?" — if the decile profile stays flat after beta-stripping, §12's
+verdict is *strengthened* to "momentum per se has no cross-sectional rank
+content on this panel", and we redirect effort to Options B/C without a bench.
+
+### 13.2 Panel constraints (verified 2026-09-13)
+Same as §12.2: 22 names + SPY × 125 RTH sessions, complete. SPY O→C holds and
+is the single market factor. Pre-market panel remains too thin to use.
+
+### 13.3 Pre-registered strategy (FROZEN — only the signal changes vs §12)
+- Universe: the 22 non-SPY tickers, identical set as §12.
+- **Modified candidate-picking function** (`_signal` → `_signal_beta`):
+  - Inputs per session s: each name's trailing 5-session return (as §12) and
+    SPY's trailing 5-session return.
+  - **Compute a single cross-sectional beta** β(ticker-sess) = rolling
+    OLS over the last 63 sessions of {name_5d_ret ~ SPY_5d_ret}, evaluated at
+    session s−1 close (no lookahead — the beta window ends before the trade
+    session opens).
+  - residual(t) = name_5d_ret − β × SPY_5d_ret. The book ranks by this residual.
+  - If fewer than 63 sessions are available, fall back to β=1 (pure momentum),
+    recorded as a coverage note (not a tunable).
+- Book construction: **identical** to §12.3 — long top-7 / short bottom-7 by
+  residual, dollar-neutral, entered at next-session open, exited same-session
+  close. K=7, lookback=5, hold=O→C. Every universe ticker in the book each
+  session → ~125 observations/ticker (MIN_TRADES=30 trivially met).
+- **No parameter search.** The 63-session beta window is pre-registered, not
+  tuned. If it fails, it fails as specified.
+
+### 13.4 Fail-fast diagnostics (BEFORE the bench; same two, same order)
+1. **Monotonicity (primary kill-test):** decile O→C return vs beta-residual
+   lag-1 signal must be monotonically increasing. Flat/non-monotone profile =
+   **NO-GO, stop now** (same gate & 5e-5 tolerance as §12.4.1).
+2. **Gross vs Net EV:** pooled spread EV must be > 0 gross AND net. Fee sign-flip
+   (if any) is recorded as an execution-cost conclusion, separate from signal
+   content.
+
+### 13.5 Decision gates (same engine surface as §12.5)
+Sequential gates identical to §12.5 — admissible ≥ MIN_TRADES=30, then
+`deflated_edge > 0` (hard), then `pooled_sharpe > 0` (hard), PBO reported
+(analyst override: PBO < 0.5 for "confident GO"). Universe PASS only if both
+hard gates hold. Any NO-GO at monotonicity means **the bench is not even
+run** — report the monotonicity FAIL and stop.
+
+### 13.6 Deliverables
+- `src/hanoon_prime/phase13.py`: reuses `phase12.load_daily/_session_books/` +
+  `fold_windows`, adds `_signal_beta` (rolling single-factor OLS residual).
+  Emissions stay `wfa.FoldResult` → identical `verdicts()` surface.
+- `scripts/phase13_bench.py`: mirrors `phase12_bench.py`, same two fail-fast
+  diagnostics, same report shape → `reports/phase13_bench_alpaca.{json,md}`.
+- This spec IS the pre-registration. Outcome paths:
+  - monotonicity FAIL or bench FAIL → **momentum is beta-masked→NO-GO total**,
+    redirect to Option B (reversal) or C (earnings).
+  - monotonicity PASS + bench PASS → beta-residual rank is a live candidate;
+    next phase = its own pre-registration (§14) with additional robustness.
+
+### 13.7 What a PASS would NOT mean (anti-overclaim)
+Same as §12.7: a PASS means beta-residual ranks carry across 5 sessions on this
+panel. It does NOT authorize live capital — `MicroLiveGuard` still requires a
+paper-run PASS before any production code touches the market. No shipped-engine
+mutations in §13; `phase13.py` is sandbox-only.
+
+## Phase 14+ — parked candidates (no code until spec)
+- **Option B**: 1-session cross-sectional reversal (contra-momentum) on
+  high-volume expansion sessions — tests the opposite causal direction.
+- **Option C**: earnings-state factor around announcement windows — the one
+  microstructure feature with an actual economic payday on this panel (§9),
+  needs clean earnings-date alignment, higher data-prep cost.
+- Both reuse the same decile-monotonicity + WFA bare-metal, each under its own
+  pre-registered verdict spec before any bench.
