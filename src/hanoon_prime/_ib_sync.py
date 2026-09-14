@@ -17,23 +17,33 @@ log = logging.getLogger(__name__)
 
 
 def get_ib_pnl(ib_client: Any, ticker: str, pos: Position) -> float:
-    """Get P&L from IB fills (source of truth), not local calculation."""
-    pnl = _pnl_from_trade(ib_client, ticker)
+    """Get P&L from IB fills (source of truth) as a return FRACTION.
+
+    ``pnl_pct`` is a fraction (0.006 == +0.6%) everywhere downstream; IB
+    reports ``t.pnl`` in dollars, so it is normalized by position notional.
+    """
+    pnl = _pnl_from_trade(ib_client, ticker, pos)
     if pnl != 0.0:
         return pnl
     return _pnl_from_fill_price(ib_client, ticker, pos)
 
 
-def _pnl_from_trade(ib_client: Any, ticker: str) -> float:
-    """Extract P&L from IB's completed trade objects."""
+def _pnl_from_trade(ib_client: Any, ticker: str, pos: Position) -> float:
+    """Extract P&L from IB's completed trades as a return fraction."""
     try:
         for t in ib_client.trades():
             sym = getattr(getattr(t, "contract", None), "symbol", "")
             if sym == ticker and t.isDone() and t.pnl:
-                return float(t.pnl)
+                return _dollars_to_fraction(float(t.pnl), pos)
     except Exception:
         pass
     return 0.0
+
+
+def _dollars_to_fraction(dollars: float, pos: Position) -> float:
+    """Normalize a dollar P&L to the position's return fraction."""
+    notional = abs(float(pos.entry_price)) * abs(float(pos.shares))
+    return dollars / notional if notional > 0 else dollars
 
 
 def _get_fill_price(trade: Any) -> float:

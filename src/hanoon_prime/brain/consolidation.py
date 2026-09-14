@@ -170,6 +170,7 @@ class ConsolidationEngine:
             self._evidence_learning_cycle()
         self._apply_halim_recommendations()
         self._update_policy()
+        self._update_pillar()
         self.news.maybe_refresh()
         self._persist_state()
         log.info(
@@ -192,6 +193,18 @@ class ConsolidationEngine:
             return max(-0.03, min(0.03, pol * 0.03))
         except Exception:
             return 0.0
+
+    def _update_pillar(self) -> None:
+        """Publish the win/loss pillar Juli must keep upright.
+
+        Edge-vs-break-even awareness from realized trades, written to shared
+        state so the fast path, the Inside Man, and the webapp all read the
+        same shape. Computation is cheap (folds the R:R ring), no network I/O.
+        """
+        from .pillar_awareness import compute_pillar_awareness
+
+        record = self._realized.win_loss_record() if self._realized else None
+        self.state.update(pillar=compute_pillar_awareness(record))
 
     def _update_regime(self) -> None:
         """Get regime classification from HALIM (local fallback if stale)."""
@@ -309,7 +322,12 @@ class ConsolidationEngine:
             reg = self.state.get("regime_label", "unknown")
             snapshot = self._realized.snapshot() if self._realized else None
             lines = read_eval_tail(str(EVAL_LOG_PATH), n=1000)
-            evidence = collect_evidence(lines, realized_snapshot=snapshot, regime=reg)
+            evidence = collect_evidence(
+                lines,
+                realized_snapshot=snapshot,
+                regime=reg,
+                pillar=self.state.get("pillar"),
+            )
             recs = fetch_evidence_recs(self.halim._base_url, evidence)
             if recs:
                 self.state.update(halim_recommendations=recs)

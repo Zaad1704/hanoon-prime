@@ -128,6 +128,14 @@ PILLAR_IMBALANCE_OK: float = 0.35  # |long-short|/(long+short) within band -> OK
 PILLAR_IMBALANCE_WARN: float = 0.60  # above this -> WARN, above FAIL
 PILLAR_VETO_SKEW_WARN: float = 2.0  # one side vetoed 2x the other -> WARN
 PILLAR_VETO_SKEW_FAIL: float = 3.0  # one side vetoed 3x the other -> FAIL
+
+# Win/loss pillar (edge vs break-even): the pole Juli must keep upright.
+# edge = win_rate - break_even_wr, where break_even_wr = 1/(1 + avg_win/avg_loss).
+# edge >= 0 -> upright (winning); any negative edge is a side-agnostic lean.
+# A lean shallower than PILLAR_EDGE_FALL is "tipping" (WARN); at/below it the
+# pillar has "fallen" (FAIL). Tilt saturates at PILLAR_EDGE_FALL.
+PILLAR_EDGE_FALL: float = -0.10
+PILLAR_MIN_TRADES: int = 10  # fewer closed trades -> pillar warming up
 TELEMETRY_AUTH_ENABLED: bool = True  # bearer gate on POST mutations
 
 # ── R:R and fees ──────────────────────────────────────────────────────

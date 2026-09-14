@@ -4,6 +4,7 @@ Feeds the 'why not winning' EVAL evidence to HALIM's /v1/complete CoT;
 recs route through the existing bounded applier (bounds + 300s cooldown
 + max 3). Byte-identical until HALIM_EVIDENCE_LEARNING is enabled.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,9 @@ from typing import Any, Callable
 
 from .config import STATE_DIR
 from .halim_adapter import _normalize_halim_json
+from .halim_evidence_prompt import build_evidence_prompt
 from .halim_recommendations import validate_recommendation
+from .pillar_awareness import pillar_fields
 
 log = logging.getLogger(__name__)
 
@@ -40,13 +43,10 @@ def read_eval_tail(path: str, n: int = _WINDOW) -> list[str]:
         return []
 
 
-def collect_evidence(
+def _tally_verdicts(
     log_lines: list[str],
-    realized_snapshot: dict[str, Any] | None = None,
-    regime: str = "unknown",
-    win_rate: float | None = None,
-) -> dict[str, Any]:
-    """Tally recent vetoes + direction_rejected conviction + conf-bin losses."""
+) -> tuple[dict[str, int], int, int, float]:
+    """Count VETOED reasons and direction_rejected conviction across EVAL lines."""
     by_reason: dict[str, int] = {}
     dir_scores: list[float] = []
     eval_lines = 0
@@ -62,7 +62,19 @@ def collect_evidence(
             if reason == "direction_rejected":
                 dir_scores.append(abs(float(m.group("score"))))
     dir_n = len(dir_scores)
-    mean_dir = (sum(dir_scores) / dir_n) if dir_scores else 0.0
+    mean = (sum(dir_scores) / dir_n) if dir_scores else 0.0
+    return by_reason, eval_lines, dir_n, mean
+
+
+def collect_evidence(
+    log_lines: list[str],
+    realized_snapshot: dict[str, Any] | None = None,
+    regime: str = "unknown",
+    win_rate: float | None = None,
+    pillar: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Tally recent vetoes + direction_rejected conviction + conf-bin losses."""
+    by_reason, eval_lines, dir_n, mean_dir = _tally_verdicts(log_lines)
     top = max(by_reason, key=by_reason.__getitem__) if by_reason else None
     return {
         "eval_lines": eval_lines,
@@ -75,6 +87,7 @@ def collect_evidence(
         "regime": regime,
         "win_rate": round(_resolve_win_rate(win_rate, realized_snapshot), 3),
         "worst_conf_bin_losses": _worst_conf_bin_losses(realized_snapshot),
+        **pillar_fields(pillar, realized_snapshot),
     }
 
 
@@ -100,35 +113,6 @@ def _worst_conf_bin_losses(snapshot: dict[str, Any] | None) -> int:
     if not isinstance(losses, list):
         return 0
     return max((int(x) for x in losses), default=0)
-
-
-def build_evidence_prompt(evidence: dict[str, Any]) -> str:
-    """Build a chain-of-thought prompt grounding HALIM's self-improvement."""
-    return (
-        "You are HALIM, the trading architect for Juli (a live trading brain).\n"
-        "You just closed a learning cycle. Analyze the EVAL evidence below and "
-        "reason step by step (chain of thought) about WHICH gate strangles "
-        "entries and whether the cortex had real conviction behind the "
-        "rejections. Then recommend bounded parameter adjustments to make Juli "
-        "better. Return EXACTLY this JSON, nothing else:\n"
-        '{"reasoning": "<your chain of thought: which gate dominates, why the '
-        'cortex is right/wrong, what to adjust>", "recommendations": ['
-        '{"action": "adjust_threshold", "param": "threshold", "value": <0.40-0.80>, '
-        '"reason": "<why>"}, {"action": "adjust_weight", "param": "<name>", '
-        '"value": <-2.0-2.0>, "reason": "<why>"}]}\n'
-        "EVIDENCE:\n"
-        f"- regime: {evidence['regime']}\n"
-        f"- eval_lines_checked: {evidence['eval_lines']}\n"
-        f"- total_vetoes: {evidence['vetoes']}\n"
-        f"- vetoes_by_reason: {evidence['by_reason']}\n"
-        f"- top_veto_reason: {evidence['top_veto_reason']}\n"
-        f"- direction_rejected_count: {evidence['direction_rejected']}\n"
-        f"- direction_rejected_mean_abs_score: "
-        f"{evidence['direction_rejected_mean_abs_score']}\n"
-        f"- real_conviction_discarded: {evidence['real_conviction_discarded']}\n"
-        f"- win_rate: {evidence['win_rate']}\n"
-        f"- worst_conf_bin_losses: {evidence['worst_conf_bin_losses']}\n"
-    )
 
 
 def _parse_recs(text: str) -> list[dict[str, Any]]:

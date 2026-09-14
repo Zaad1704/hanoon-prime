@@ -117,6 +117,15 @@ def _warm_evidence(eval_lines: int) -> dict[str, Any]:
         "imbalance_ratio": 0.0,
         "veto_skew": 0.0,
         "band": list(_BAND),
+        "pillar_state": "warming",
+        "upright": False,
+        "tilt": 0.0,
+        "edge": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "trades": 0,
+        "win_loss_record": "0W-0L",
+        "net_pnl": 0.0,
     }
 
 

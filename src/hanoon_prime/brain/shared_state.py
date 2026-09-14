@@ -56,6 +56,7 @@ class BrainState:
             "panic_mode": False,
             "policy_state": dict(DEFAULT_POLICY_STATE),
             "policy_exits": [],
+            "pillar": {},
             "account_feed": {},
             "consecutive_losses": 0,
             "positions_open": 0,

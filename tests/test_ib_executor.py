@@ -159,7 +159,9 @@ class TestRecordExit:
         exc._record_exit("TSLA", streamer)
         exc.brain.record_trade.assert_called_once()
         kwargs = exc.brain.record_trade.call_args.kwargs
-        assert kwargs["pnl_pct"] == pytest.approx(500.0)
+        # IB's $500 on a $1000 notional (10 sh @ $100) is a +0.5 return
+        # fraction — never 500.0 (dollars-as-percent leak).
+        assert kwargs["pnl_pct"] == pytest.approx(0.5)
 
     def test_returns_zero_pnl_when_no_ib_trades(self):
         """When IB has no completed trades, pnl defaults to 0.0."""
@@ -399,7 +401,8 @@ class TestGetIbPnl:
         fake_ib.trades.return_value = [trade]
         pos = make_pos(direction=1, shares=10, entry_price=100.0)
         pnl = get_ib_pnl(fake_ib, "TSLA", pos)
-        assert pnl == 500.0
+        # $500 on a $1000 notional normalizes to a +0.5 return fraction.
+        assert pnl == pytest.approx(0.5)
 
     def test_falls_back_to_fill_price(self):
         fake_ib = MagicMock()

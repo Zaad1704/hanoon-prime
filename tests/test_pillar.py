@@ -1,34 +1,31 @@
-"""tests/test_pillar — directional conviction balance (the learning 'pillar').
+"""tests/test_pillar — the win/loss pillar (edge vs break-even).
 
-Verifies inside_man.pillar_balance: the tipped-pillar signature (one direction
-dominating vetoes/conviction — today's 34k SHORT direction_rejected @ 0.675)
-vs the upright balanced state the webapp renders as a see-saw.
+Verifies inside_man.pillar_balance: the upright (edge >= 0) success state vs
+the side-agnostic lean that tips/falls the pillar. Juli's awareness is
+published in ``brain_state.pillar``; the check reads it, or derives it from
+the persisted realized ``rr_samples`` when the live pulse is absent.
 """
 
 from __future__ import annotations
 
-import datetime
+import json
 from pathlib import Path
 
 import pytest
 
 import hanoon_prime.inspection.pillar as pillar
+from hanoon_prime.brain.pillar_awareness import (
+    compute_pillar_awareness,
+    win_loss_record,
+)
 from hanoon_prime.inspection.checks import FAIL, OK, WARN, CheckResult
 from hanoon_prime.inspection.ctx import InspectionContext
 from hanoon_prime.inspection.pillar import pillar_balance
 
 
 @pytest.fixture(autouse=True)
-def _direction_mode_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default direction_mode to 'both' so short-skew FAIL tests stay honest.
-
-    The policy-aware downgrade only fires for policy-blocked sides
-    (direction_mode != "both"); the existing FAIL tests must still FAIL.
-    """
-    monkeypatch.setattr(
-        pillar.TRADING_CONFIG, "direction_mode", "both"
-    )  # allow: monkeypatch TRADING_CONFIG
-    # Mock snapshot() so tests don't depend on a running bot's telemetry.
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No live telemetry in unit tests — pin direction_mode to 'both'."""
     monkeypatch.setattr(
         pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "both"}}
     )
@@ -38,109 +35,160 @@ def _ctx(tmp_path: Path) -> InspectionContext:
     return InspectionContext(base_dir=tmp_path)
 
 
-def _write_log(ctx: InspectionContext, *lines: str) -> None:
-    ctx.logs_dir.mkdir(parents=True, exist_ok=True)
-    ctx.log_path.write_text("".join(lines))
+def _record(wins: int, losses: int, win: float = 0.02, loss: float = 0.01) -> dict:
+    """Realized record with a 2:1 payoff (break-even win rate = 1/3)."""
+    return win_loss_record([(1, win, 1)] * wins + [(0, -loss, 1)] * losses)
 
 
-def _eval(token: str) -> str:
-    """One EVAL log line carrying a single verdict token (live bot format).
-
-    Token shape: TICKER:ACTION(score,side)[stage:reason] — balanced parens here
-    on purpose so the fixture never masks a real tokenizer bug.
-    """
-    ts = datetime.datetime.now().strftime("%H:%M:%S") + ".000"
-    return f"{ts} INFO juli EVAL {token}\n"
+def _pillar(wins: int, losses: int, **kw: float) -> dict:
+    return compute_pillar_awareness(_record(wins, losses, **kw))
 
 
-def test_pillar_ok_balanced(tmp_path: Path) -> None:
-    """Equal long/short conviction -> ratio 0 -> pillar upright."""
+def _write_state(
+    ctx: InspectionContext,
+    *,
+    brain_state: dict | None = None,
+    realized: dict | None = None,
+) -> None:
+    ctx.runtime.mkdir(parents=True, exist_ok=True)
+    data: dict = {}
+    if brain_state is not None:
+        data["brain_state"] = brain_state
+    if realized is not None:
+        data["realized"] = realized
+    ctx.state_path.write_text(json.dumps(data))
+
+
+# ── status mapping (edge vs break-even) ───────────────────────────────
+
+
+def test_pillar_upright_is_ok(tmp_path: Path) -> None:
+    """5W-7L at 2:1 payoff: win rate .417 clears break-even .333 -> upright."""
     ctx = _ctx(tmp_path)
-    _write_log(
-        ctx,
-        _eval("AAPL:HOLD(0.600,L)[trading_policy:enter]"),
-        _eval("TSLA:SELL(-0.600,S)[trading_policy:exit]"),
-    )
+    _write_state(ctx, brain_state={"pillar": _pillar(5, 7)})
     r = pillar_balance(ctx)
     assert r.status == OK
-    assert r.evidence["imbalance_ratio"] == 0.0
-    assert r.evidence["long_conviction"] == 0.6
-    assert r.evidence["short_conviction"] == 0.6
+    assert r.evidence["pillar_state"] == "upright"
+    assert r.evidence["upright"] is True
+    assert r.evidence["edge"] > 0
+    assert r.evidence["tilt"] == 0.0
 
 
-def test_pillar_ok_warmup_no_lines(tmp_path: Path) -> None:
-    """No EVAL lines yet -> warming up, not a failure."""
+def test_pillar_exactly_break_even_is_upright(tmp_path: Path) -> None:
+    """4W-8L: win rate == break-even -> edge 0 -> still upright."""
+    ctx = _ctx(tmp_path)
+    _write_state(ctx, brain_state={"pillar": _pillar(4, 8)})
+    r = pillar_balance(ctx)
+    assert r.status == OK
+    assert r.evidence["edge"] == 0.0
+
+
+def test_pillar_tipping_is_warn(tmp_path: Path) -> None:
+    """3W-9L: edge -.083 (> -0.10) -> tipping, not yet fallen."""
+    ctx = _ctx(tmp_path)
+    _write_state(ctx, brain_state={"pillar": _pillar(3, 9)})
+    r = pillar_balance(ctx)
+    assert r.status == WARN
+    assert r.evidence["pillar_state"] == "tipping"
+
+
+def test_pillar_fallen_is_fail(tmp_path: Path) -> None:
+    """2W-10L: edge -.167 <= -0.10 -> pillar fallen."""
+    ctx = _ctx(tmp_path)
+    _write_state(ctx, brain_state={"pillar": _pillar(2, 10)})
+    r = pillar_balance(ctx)
+    assert r.status == FAIL
+    assert r.evidence["pillar_state"] == "fallen"
+    assert r.evidence["tilt"] == 1.0
+
+
+def test_pillar_all_losses_falls(tmp_path: Path) -> None:
+    """0W-12L: break-even 1.0 -> edge -1.0 -> fallen, not a false upright."""
+    ctx = _ctx(tmp_path)
+    _write_state(ctx, brain_state={"pillar": _pillar(0, 12)})
+    r = pillar_balance(ctx)
+    assert r.status == FAIL
+    assert r.evidence["edge"] == -1.0
+
+
+def test_pillar_no_state_is_warming(tmp_path: Path) -> None:
     r = pillar_balance(_ctx(tmp_path))
     assert r.status == OK
     assert "warming up" in r.detail
+    assert r.evidence["pillar_state"] == "warming"
 
 
-def test_pillar_warn_no_scored_verdicts(tmp_path: Path) -> None:
-    """EVAL lines exist but no signed conviction -> tipped data, not balance."""
+def test_pillar_few_trades_is_warming(tmp_path: Path) -> None:
+    """Below PILLAR_MIN_TRADES the pillar is still warming up."""
     ctx = _ctx(tmp_path)
-    _write_log(ctx, _eval("AAPL:VETOED(0.000,-)[validity:no_data]"))
+    _write_state(ctx, brain_state={"pillar": _pillar(1, 1)})
     r = pillar_balance(ctx)
-    assert r.status == WARN
-    assert "no scored verdicts" in r.detail
+    assert r.status == OK
+    assert r.evidence["pillar_state"] == "warming"
 
 
-def test_pillar_warn_tipping(tmp_path: Path) -> None:
-    """Mild skew (ratio 0.4) -> WARN tipping."""
+def test_pillar_winning_record_is_upright(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    _write_log(
-        ctx,
-        _eval("AAPL:HOLD(0.600,L)[trading_policy:enter]"),
-        _eval("TSLA:VETOED(-0.700,S)[trading_policy:direction_rejected]"),
-        _eval("NVDA:VETOED(-0.700,S)[trading_policy:direction_rejected]"),
-    )
-    assert pillar_balance(ctx).status == WARN
-
-
-def test_pillar_fail_short_dominated(tmp_path: Path) -> None:
-    """5 SHORT vetoes vs 1 LONG -> ratio 0.707 -> pillar fallen."""
-    ctx = _ctx(tmp_path)
-    lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
-    for _ in range(5):
-        lines.append(_eval("TSLA:VETOED(-0.700,S)[trading_policy:direction_rejected]"))
-    _write_log(ctx, *lines)
+    _write_state(ctx, brain_state={"pillar": _pillar(9, 3)})
     r = pillar_balance(ctx)
-    assert r.status == FAIL
-    assert "SHORT" in r.detail
-    assert r.evidence["imbalance_ratio"] > 0.6
-    assert r.evidence["vetoes_short"] == 5
+    assert r.status == OK
+    assert r.evidence["edge"] > 0
+    assert r.evidence["win_loss_record"] == "9W-3L"
 
 
-def test_pillar_fail_veto_skew(tmp_path: Path) -> None:
-    """Even modest conviction but 3x veto skew -> FAIL."""
+# ── derivation + evidence shape ───────────────────────────────────────
+
+
+def test_pillar_derives_from_realized_snapshot(tmp_path: Path) -> None:
+    """Without a live pulse, the check folds the persisted rr_samples."""
     ctx = _ctx(tmp_path)
-    # long=1.8 (3 buys), short=1.5 (3 sells) -> ratio 0.1 -> OK on geometry,
-    # but vetoes 3 short vs 1 long (>3x skew) -> FAIL.
-    lines = [
-        _eval("AAPL:BUY(0.600,L)[trading_policy:enter]"),
-        _eval("MSFT:BUY(0.600,L)[trading_policy:enter]"),
-        _eval("GOOG:BUY(0.600,L)[trading_policy:enter]"),
-        _eval("AAPL:VETOED(-0.500,S)[trading_policy:direction_rejected]"),
-        _eval("MSFT:VETOED(-0.500,S)[trading_policy:direction_rejected]"),
-        _eval("GOOG:VETOED(-0.500,S)[trading_policy:direction_rejected]"),
-    ]
-    _write_log(ctx, *lines)
+    samples = [[1, 0.02, 1]] * 5 + [[0, -0.01, 1]] * 7
+    _write_state(ctx, realized={"rr_samples": samples})
     r = pillar_balance(ctx)
-    assert r.status == FAIL
-    assert r.evidence["veto_skew"] >= 3.0
+    assert r.status == OK
+    assert r.evidence["win_loss_record"] == "5W-7L"
+    assert r.evidence["wins"] == 5
+    assert r.evidence["losses"] == 7
 
 
-def test_pillar_evidence_has_learning_fields(tmp_path: Path) -> None:
-    """Webapp feed carries the learning-context fields for correlation."""
+def test_pillar_evidence_has_all_fields(tmp_path: Path) -> None:
+    """Webapp feed carries win/loss awareness + learning context."""
     ctx = _ctx(tmp_path)
-    _write_log(
-        ctx,
-        _eval("AAPL:HOLD(0.600,L)[trading_policy:enter]"),
-        _eval("TSLA:SELL(-0.600,S)[trading_policy:exit]"),
-    )
+    _write_state(ctx, brain_state={"pillar": _pillar(5, 7)})
     r = pillar_balance(ctx)
     assert isinstance(r, CheckResult)
-    for key in ("halim_modifier", "learning_active", "band", "net"):
+    for key in (
+        "pillar_state",
+        "upright",
+        "tilt",
+        "edge",
+        "win_rate",
+        "break_even_wr",
+        "wins",
+        "losses",
+        "trades",
+        "win_loss_record",
+        "net_pnl",
+        "r_r",
+        "halim_modifier",
+        "learning_active",
+        "band",
+        "imbalance_ratio",
+    ):
         assert key in r.evidence
+
+
+def test_pillar_keeps_directional_secondary_evidence(tmp_path: Path) -> None:
+    """Directional conviction/veto geometry is retained as context."""
+    ctx = _ctx(tmp_path)
+    _write_state(ctx, brain_state={"pillar": _pillar(5, 7)})
+    ctx.logs_dir.mkdir(parents=True, exist_ok=True)
+    ctx.log_path.write_text(
+        "10:00:00.000 INFO juli EVAL AAPL:HOLD(0.600,L)[trading_policy:enter]\n"
+    )
+    r = pillar_balance(ctx)
+    assert r.evidence["long_conviction"] == 0.6
+    assert r.status == OK
 
 
 def test_pillar_joint_is_inside_man() -> None:
@@ -150,47 +198,3 @@ def test_pillar_joint_is_inside_man() -> None:
     spec = next(s for s in SPECS if s.name == "pillar_balance")
     assert spec.joint == "inside_man"
     assert spec.report is True
-
-
-def test_pillar_long_only_short_skew_is_policy_warn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """shorts blocked (long_only): SHORT veto skew is configured, not a defect."""
-    monkeypatch.setattr(
-        pillar.TRADING_CONFIG, "direction_mode", "long_only"
-    )  # allow: monkeypatch TRADING_CONFIG
-    monkeypatch.setattr(
-        pillar, "snapshot", lambda _ctx: {"config": {"direction_mode": "long_only"}}
-    )
-    ctx = _ctx(tmp_path)
-    lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
-    for _ in range(5):
-        lines.append(_eval("TSLA:VETOED(-0.700,S)[trading_policy:direction_rejected]"))
-    _write_log(ctx, *lines)
-    r = pillar_balance(ctx)
-    assert r.status == WARN  # NOT FAIL — shorts intentionally disabled
-    assert "long_only" in r.detail
-    assert r.evidence["direction_mode"] == "long_only"
-
-
-def test_pillar_both_mode_low_penny_score_short_is_policy_warn(
-    tmp_path: Path,
-) -> None:
-    """low_penny_score SHORT vetoes under direction_mode='both' -> WARN.
-
-    The reason-aware check recognises that low_penny_score is a trading-policy
-    gate that blocks both directions equally (penny-bar confidence floor),
-    so the SHORT veto skew is configured policy, not a cortex defect — even
-    when direction_mode='both' would have allowed shorts.
-    """
-    ctx = _ctx(tmp_path)
-    lines = [_eval("AAPL:HOLD(0.600,L)[trading_policy:enter]")]
-    for _ in range(5):
-        lines.append(_eval("TSLA:VETOED(-0.700,S)[trading_policy:low_penny_score]"))
-    _write_log(ctx, *lines)
-    r = pillar_balance(ctx)
-    assert r.status == WARN  # policy-gated, not a brain defect
-    assert "policy-gated" in r.detail
-    assert r.evidence["policy_vetoes_short"] == 5
-    assert r.evidence["vetoes_short"] == 5
-    assert r.evidence["direction_mode"] == "both"

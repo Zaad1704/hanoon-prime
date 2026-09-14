@@ -190,6 +190,19 @@ class RealizedStats:
         wins = sum(1 for f, _p, _d in samples if f)
         return wins / len(samples), len(samples)
 
+    def win_loss_record(self) -> dict[str, Any]:
+        """Win/loss geometry for the pillar awareness (cold-safe).
+
+        Folds the realized-R:R ring into counts, gross/avg P&L per side, win
+        rate, payoff ratio, and the break-even win rate implied by that
+        payoff. See ``brain.pillar_awareness`` for the upright/lean mapping.
+        """
+        from .pillar_awareness import win_loss_record
+
+        with self._lock:
+            samples = list(self._rr)
+        return win_loss_record(samples)
+
     def losing_conf_bins(self) -> list[tuple[int, int, int]]:
         """Return bins with 0 wins and >= CONF_LOSS_STREAK_WARN losses.
 
@@ -277,6 +290,12 @@ class RealizedStats:
             )
             self._band_losses = defaultdict(
                 int, {int(k): v for k, v in data.get("band_losses", {}).items()}
+            )
+            self._conf_wins = defaultdict(
+                int, {int(k): v for k, v in data.get("conf_wins", {}).items()}
+            )
+            self._conf_losses = defaultdict(
+                int, {int(k): v for k, v in data.get("conf_losses", {}).items()}
             )
             self._rr = deque(
                 ((int(w), float(p), int(d)) for w, p, d in data.get("rr_samples", [])),

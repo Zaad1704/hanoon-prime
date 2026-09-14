@@ -132,12 +132,12 @@ def lifecycle_stream(ctx: InspectionContext) -> CheckResult:
         return _stage_result(
             "stream", False, "no live tick objects", {}, warn_only=True
         )
-    now_ms = time.time() * 1000
+    now_s = time.time()
     fresh, quoted = 0, 0
     oldest_s = 0.0
     for tk in tickers:
         t = tk.get("time") or 0
-        age = max(0.0, (now_ms - t) / 1000.0) if t else None
+        age = max(0.0, now_s - t) if t else None
         if age is not None:
             oldest_s = max(oldest_s, age)
             if age <= STREAM_STALE_S:
