@@ -173,6 +173,28 @@ class TestEngineReplayList:
         result = self._engine().run_cycle(duration_sec=0.1)
         assert result.patterns_replayed == 0
 
+    def test_run_cycle_records_last_replay(self):
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        e = self._engine()
+        result = e.run_cycle(duration_sec=0.1, replay_list=override)
+        assert e.last_replay is result
+        assert e.last_replay is not None and e.last_replay.patterns_replayed == 1
+
+    def test_snapshot_includes_last_replay(self):
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        e = self._engine()
+        e.run_cycle(duration_sec=0.1, replay_list=override)
+        snap = e.snapshot()
+        assert snap["initialized"] is True
+        assert snap["cycle_count"] == 1
+        assert snap["last_replay"] is not None
+        assert snap["last_replay"]["patterns_replayed"] == 1
+
+    def test_snapshot_before_any_cycle(self):
+        snap = self._engine().snapshot()
+        assert snap["cycle_count"] == 0
+        assert snap["last_replay"] is None
+
     def test_truncates_large_replay_list(self):
         big = [(_pat(i % 3), SLEEP_WIN_WEIGHT) for i in range(150)]
         e = self._engine()

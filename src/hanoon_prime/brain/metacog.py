@@ -139,6 +139,16 @@ class MetaMonitor:
         tmp.write_text(payload)
         tmp.replace(self._path)
 
+    def snapshot(self) -> dict[str, Any]:
+        """Compact telemetry summary of the calibration state."""
+        return {
+            "reliability": self.reliability(),
+            "samples": self.size,
+            "sizing_scalar": self.sizing_scalar(),
+            "window": METACOG_SAMPLES,
+            "bins": METACOG_BINS,
+        }
+
     @property
     def size(self) -> int:
         """Number of recorded calibration pairs."""

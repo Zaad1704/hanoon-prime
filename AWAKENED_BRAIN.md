@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done — commit hash pending (recorded on commit)
-**Last updated:** 2026-09-14 — Phase F implementation complete
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done, Phase G (full-brain live monitor) done — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-15 — Phase G: A→Z webapp brain monitor + raw inspector shipped
 
 ---
 
@@ -469,6 +469,29 @@ class MetaMonitor:
 
 ---
 
+### Phase G: Full-Brain Live Monitor (A→Z)
+
+**Backend:** `src/hanoon_prime/brain/extinction.py` (snapshot), `brain/metacog.py` (snapshot), `brain/neurons/sleep.py` (last_replay + snapshot), `brain/orchestrator.py` (snapshot extension), `brain/telemetry_summaries.py` (new helper), `telemetry.py` (`_brain_state` pass-through)
+**Webapp:** hanoon-dash — BRAIN tab rebuilt A→Z
+**Status:** `done` — commit hash recorded on commit
+**Priority:** ops — the human needs to *see* every brain step live and detect breakage instantly
+
+**Acceptance Criteria:**
+- [x] Every Phase A–F signal has its own live panel (RPE, Somatic, Allostasis, Extinction, Sleep, Metacog)
+- [x] "Anything broken" detectable in one glance (BrainHealthStrip: live/stale/tripped/unknown + NaN/∞/missing)
+- [x] Human can validate the raw brain output (Inside-Man raw JSON tree + copy-JSON)
+- [x] Extinction/sleep/metacog telemetry shipped over `/brain` (requires bot restart to appear live)
+- [x] hanoon-dash typecheck + build green; Playwright live-render verified (all panels + no console errors)
+
+**Design Decisions:**
+1. **Snapshot builders stay out of the 200-line ceiling** — `ExtinctionTracker` was at 218 lines after adding a method; moved the summary into `brain/telemetry_summaries.extinction_summary(cells)` so the R3b file-length contract holds while telemetry keeps a rich extinction block.
+2. **Ring-buffer history in the dash store, not the backend** — `brainSeriesBuf` (300 samples) feeds sparklines; the backend `/stream` already ships the full snapshot every ~1s, so the dash derives time-series locally.
+3. **Health strip judges per module, keyed on freshness + shape** — each module gets `live / stale / tripped / unknown` via `assessBrainHealth` (missing key → unknown, old timestamp → stale, NaN/∞ → tripped, else live); whole-brain verdict is the worst module. No module can silently vanish from view.
+4. **Inside-Man inspector renders raw `brain`/`system2` recursively** — security + validation: the human sees exactly what the strategy reads, not a filtered summary; copy-JSON exports it.
+5. **Extinction telemetry capped at top-16 cells** by inhibition then pattern mass — full signature map is too big for a stream; strongest interventions are what degradations and re-entries hinge on.
+
+---
+
 ## 4. Module Contracts Summary
 
 | Module | Input | Output | Wired Into | Persisted |
@@ -510,6 +533,9 @@ class MetaMonitor:
 | 2026-09-14 | Curiosity gates sizing only, never a verdict | Keeps R1 single-decision path; explore/retreat expressed as advisory share nudges (±6%/−20%) | Lowering/raising the entry threshold — violates R1 decision path |
 | 2026-09-14 | `METACOG_MIN_SAMPLES=8` guard before reliability affects sizing | A brain with 3 trades has no calibration signal; penalizing it would be superstitious | Immediate participation — swings sizing on noise |
 | 2026-09-14 | Metacog file at `runtime/juli_metacog.json` | Learned calibration is a brain asset, persisted like allostasis/extinction | `state.json` (planned) — mixes runtime BrainState with persistent learning |
+| 2026-09-15 | Snapshot aggregation in `brain/telemetry_summaries.py`, not method on every tracker | Every tracker stays under the R3b 200-line cap while `/brain` ships rich blocks | Method on `ExtinctionTracker` — pushed file to 218 lines, broke contract |
+| 2026-09-15 | Dash derives A→Z history from `/stream` ring buffer, backend stays stateless about the web | One push source, no extra HTTP; sparklines are a view concern | Backend timestamps/streams — another moving part for data already pushed |
+| 2026-09-15 | Health strip computes per-module verdicts from freshness + shape, whole-brain = worst module | "Is the brain broken" collapses to one glance; NaN/∞/missing/tripped each mapped | Single global healthy flag — masks which module broke |
 
 ---
 
@@ -520,22 +546,22 @@ class MetaMonitor:
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
 - [x] Full suite passing: `pytest --no-cov -q` (1132 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
-- [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
+- [x] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)* *(Phase G: hanoon-dash typecheck + build green)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E; `683c0a9` Phase F)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; `fd71504` Phase D; `71837ba` Phase E; `683c0a9` Phase F; Phase G backend + webapp recorded on commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
 - [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)* *(Phase F: meta_reliability + meta_surprise published to state; metacog block in brain snapshot)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)* *(Phase D: net episodic bias flows through existing `episodic_bias` state key — no prompt edit)*
-- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)* *(Phase F: no webapp change — meta_reliability/meta_surprise published via shared state; dash reads brain snapshot keys)*
-- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D, 6 under Phase E, 7 under Phase F)*
-- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py; Phase E: `_last_trigger` sentinel changed to `-inf`; auto-replay capped at 5s to avoid blocking S2; `sleep_patterns` builds attractor centers with `{alpha_i: v}` wrapper; Phase F: `update(conf, won)` bins internally, `surprise(alpha, episodic)` drops regime arg, `_score_pipeline` dropped unused `advisor_delta`/`thinker_conf` entries, curiosity gates sizing not thresholds)*
+- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)* *(Phase F: no webapp change — meta_reliability/meta_surprise published via shared state; dash reads brain snapshot keys)* *(Phase G: full-brain monitor — BrainSVG → BrainHealthStrip → per-module live panels (RPE, Somatic, Allostasis, Extinction, Sleep, Metacog) + Inside-Man raw inspector, hanoon-dash)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D, 6 under Phase E, 7 under Phase F, 5 under Phase G)*
+- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py; Phase E: `_last_trigger` sentinel changed to `-inf`; auto-replay capped at 5s to avoid blocking S2; `sleep_patterns` builds attractor centers with `{alpha_i: v}` wrapper; Phase F: `update(conf, won)` bins internally, `surprise(alpha, episodic)` drops regime arg, `_score_pipeline` dropped unused `advisor_delta`/`thinker_conf` entries, curiosity gates sizing not thresholds; Phase G: extinction snapshot moved to `brain/telemetry_summaries.py` to hold the R3b 200-line cap, cell list capped at top-16 by inhibition)*
 
 ### Final Verification (All Phases)
 - [x] All 6 modules implemented and wired *(rpe, allostasis, somatic, extinction, sleep_scheduler, metacog — each announced in Module Contracts)*
 - [x] All 6 test files passing *(test_rpe, test_allostasis, test_somatic, test_extinction, test_sleep_scheduler, test_metacog)*
 - [x] Full suite green *(1132 passed)*
-- [x] Webapp shows all new surfaces *(existing pillar / snapshot panels inherit keys; hanoon-dash reads shared state — no new components needed)*
+- [x] Webapp shows all new surfaces *(Phase G: A→Z panels — RpePanel (phasic/tonic/meta/surprise sparklines), AllostasisPanel (regime/setpoint/deviation/dyshomeostatic/violations), SomaticPanel (marker/precision), ExtinctionPanel (size/contexts/inhibited + top cells), SleepPanel (engine on/cycle_count/last_replay), MetacogPanel (reliability/samples/sizing/window), BrainHealthStrip (live/stale/tripped/unknown per module), InsideManInspector (raw JSON tree + copy))*
 - [x] HALIM prompt includes all biological signals *(pillar_fields `_decorate` emits setpoint/deviation/below_setpoint; no halim_evidence.py edit required)*
 - [x] No regressions in existing pillar/learning behavior *(all prior 1085 tests retained and green)*
 

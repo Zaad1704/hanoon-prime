@@ -20,6 +20,7 @@ from hanoon_prime.brain.learning_config import (
     EXTINCT_MIN_PATTERNS,
     EXTINCT_STEP,
 )
+from hanoon_prime.brain.telemetry_summaries import extinction_summary
 
 REGIME = "trend"
 CONF = 0.8
@@ -257,3 +258,35 @@ class TestEpisodicContextTags:
             mem.add(_alpha(), -0.03, "range|low|swing")
         assert mem.modifier(_alpha(), "trend|high|scalp") > 0.0
         assert mem.modifier(_alpha(), "range|low|swing") < 0.0
+
+
+# ── Telemetry snapshot ────────────────────────────────────────────────
+class TestSnapshot:
+    def _snap(self) -> dict:
+        return extinction_summary(_fresh().save().get("cells", []))
+
+    def test_empty_tracker_snapshot(self):
+        snap = self._snap()
+        assert snap["size"] == 0
+        assert snap["contexts"] == 0
+        assert snap["inhibited"] == 0
+        assert snap["total_patterns"] == 0
+        assert snap["cells"] == []
+
+    def test_snapshot_counts_and_sorts_cells(self):
+        t = _fresh()
+        _lose(t)
+        t.record(_alpha([(1, 0.2)]), 0.02, REGIME, CONF, HORIZON)  # untouched cell
+        snap = extinction_summary(t.save().get("cells", []))
+        assert snap["size"] == 2
+        assert snap["contexts"] == 1
+        assert snap["inhibited"] == 1
+        assert snap["total_patterns"] == EXTINCT_MIN_PATTERNS + 1
+        # Strongest-active cell (highest inhibition) lands first.
+        assert len(snap["cells"]) == 2
+        assert snap["cells"][0]["inhibition"] >= snap["cells"][1]["inhibition"]
+
+    def test_snapshot_is_json_serializable(self):
+        t = _fresh()
+        _lose(t)
+        json.dumps(extinction_summary(t.save().get("cells", [])))  # must not raise

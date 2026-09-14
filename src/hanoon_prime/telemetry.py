@@ -900,6 +900,8 @@ class _H(BaseHTTPRequestHandler):
             "learned_exit": s.get("learned_exit", {}),
             "genome": s.get("genome", {}),
             "sleep_engine": s.get("sleep_engine", {}),
+            "extinction": s.get("extinction", {}),
+            "metacog": s.get("metacog", {}),
         }
 
     def _system2_state(self) -> dict[str, Any]:

@@ -66,6 +66,7 @@ from .rpe import MultiTimescaleRPE
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .somatic import SomaticMarkerGenerator
 from .strategy_genome import StrategyGenome
+from .telemetry_summaries import extinction_summary
 from .thinker import TOTAL_MOD_BOUND
 
 log = logging.getLogger(__name__)
@@ -1362,10 +1363,8 @@ class NeuromorphicBrain:
             "realized": self._realized.snapshot(),
             "episodic_size": self.episodic.size,
             "extinction_size": self._extinction.size,
-            "metacog": {
-                "reliability": self._meta_cog.reliability(),
-                "samples": self._meta_cog.size,
-            },
+            "extinction": extinction_summary(self._extinction.save().get("cells", [])),
+            "metacog": self._meta_cog.snapshot(),
             "threshold": self.dynamics.threshold,
             "brain_state": self.state.snapshot(),
             "decision_count": self._decision_count,
@@ -1380,10 +1379,7 @@ class NeuromorphicBrain:
             "genome": self.genome.get_genome(),
         }
         if self._sleep_engine is not None:
-            result["sleep_engine"] = {
-                "initialized": True,
-                "cycle_count": self._sleep_engine._cycle_count,
-            }
+            result["sleep_engine"] = self._sleep_engine.snapshot()
         return result
 
     def reset_learning(self) -> None:

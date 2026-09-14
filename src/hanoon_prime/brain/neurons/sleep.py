@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from .attractor import Attractor, AttractorMemory
 from .network import LIFNetwork
@@ -50,6 +50,7 @@ class SleepReplayEngine:
         self._stdp = stdp
         self._memory = memory
         self._cycle_count: int = 0
+        self.last_replay: SleepResult | None = None
 
     def should_run(self, is_market_open: bool) -> bool:
         """Should sleep consolidation run? Only when market is closed."""
@@ -105,7 +106,9 @@ class SleepReplayEngine:
 
         patterns = self.select_patterns(replay_list)
         if not patterns:
-            return SleepResult(duration_ms=(time.time() - start) * 1000)
+            result = SleepResult(duration_ms=(time.time() - start) * 1000)
+            self.last_replay = result
+            return result
 
         spikes_generated = 0
         weights_updated = 0
@@ -121,7 +124,7 @@ class SleepReplayEngine:
 
         self._cycle_count += 1
 
-        return SleepResult(
+        result = SleepResult(
             patterns_replayed=len(patterns[: self.REPLAY_BATCH]),
             spikes_generated=spikes_generated,
             weights_updated=weights_updated,
@@ -129,6 +132,25 @@ class SleepReplayEngine:
             / max(1, len(patterns[: self.REPLAY_BATCH])),
             duration_ms=(time.time() - start) * 1000,
         )
+        self.last_replay = result
+        return result
+
+    def snapshot(self) -> dict[str, Any]:
+        """Telemetry summary of the sleep engine and its last cycle."""
+        last = self.last_replay
+        return {
+            "initialized": True,
+            "cycle_count": self._cycle_count,
+            "last_replay": None
+            if last is None
+            else {
+                "patterns_replayed": last.patterns_replayed,
+                "spikes_generated": last.spikes_generated,
+                "weights_updated": last.weights_updated,
+                "mean_weight_change": last.mean_weight_change,
+                "duration_ms": last.duration_ms,
+            },
+        }
 
     def _replay_pattern(
         self,

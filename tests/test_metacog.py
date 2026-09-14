@@ -17,6 +17,7 @@ from hanoon_prime.brain.learning_config import (
     METACOG_CURIOUS_SCALE,
     METACOG_MIN_SAMPLES,
     METACOG_RETREAT_SCALE,
+    METACOG_SAMPLES,
     METACOG_SHRINK_BAD,
     METACOG_SHRINK_WEAK,
     METACOG_SURPRISE_THRESHOLD,
@@ -221,3 +222,27 @@ class TestOrchestratorWiring:
         )
         assert b._meta_cog.size == before + 1
         b._meta_cog.clear()
+
+
+# ── Telemetry snapshot ────────────────────────────────────────────────
+class TestSnapshot:
+    def test_snapshot_empty_monitor(self):
+        snap = _m().snapshot()
+        assert snap["reliability"] == 1.0
+        assert snap["samples"] == 0
+        assert snap["window"] == METACOG_SAMPLES
+        assert snap["bins"] == METACOG_BINS
+
+    def test_snapshot_reflects_calibration_state(self):
+        m = _m()
+        for bin_idx in range(METACOG_BINS):
+            for _ in range(3):
+                m.update(conf=(bin_idx + 0.5) / METACOG_BINS, won=bin_idx >= 3)
+        snap = m.snapshot()
+        assert snap["samples"] == m.size
+        assert snap["reliability"] == m.reliability()
+        assert snap["sizing_scalar"] == m.sizing_scalar()
+
+    def test_snapshot_is_json_serializable(self):
+        _m().snapshot()  # must be a plain dict (no deque/deque internals)
+        assert isinstance(_m().snapshot(), dict)
