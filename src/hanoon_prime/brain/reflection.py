@@ -23,6 +23,7 @@ from .config import (
 )
 from .episodic import EpisodicMemory
 from .memory import JuliMemory
+from .rpe import lr_modulator
 
 
 @dataclass
@@ -36,6 +37,7 @@ class TradeClose:
     alpha: dict[str, float]
     predicted_score: float = 0.0
     regime: str = "unknown"
+    rpe_surprise: float = 0.0
 
 
 class Reflector:
@@ -53,7 +55,7 @@ class Reflector:
         direction = trade.direction
         alpha = trade.alpha
         predicted_score = trade.predicted_score
-        self._adapt_weights(won, direction, alpha)
+        self._adapt_weights(won, direction, alpha, trade.rpe_surprise)
         outcome = pnl_pct if direction > 0 else -pnl_pct
         # NOTE: episodic k-NN is written once by the orchestrator (the
         # single writer for per-close episodes) — do not add here too,
@@ -78,14 +80,24 @@ class Reflector:
             )
 
     def _adapt_weights(
-        self, won: bool, direction: int, alpha: dict[str, float]
+        self,
+        won: bool,
+        direction: int,
+        alpha: dict[str, float],
+        rpe_surprise: float = 0.0,
     ) -> None:
-        """Asymmetric weight update from trade outcome."""
+        """Asymmetric weight update from trade outcome.
+
+        ``rpe_surprise`` (|phasic|) modulates the learning rate so the
+        brain learns harder from surprise and barely moves when the world
+        behaves as expected — a curiosity-gated update (bounded by RPE_LR_MIN/MAX).
+        """
         weights = self._memory.get_weights()
+        lr = LEARNING_RATE * lr_modulator(rpe_surprise)
         factor = REWARD_SCALE if won else -PENALTY_SCALE
         for key in weights:
             signal_val = alpha.get(key, 0.0)
-            delta = LEARNING_RATE * factor * signal_val * direction
+            delta = lr * factor * signal_val * direction
             weights[key] = max(WEIGHT_MIN, min(WEIGHT_MAX, weights[key] + delta))
         for key in weights:
             weights[key] *= WEIGHT_DECAY

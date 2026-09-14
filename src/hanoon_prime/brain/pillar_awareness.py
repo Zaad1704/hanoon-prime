@@ -131,12 +131,17 @@ def _apply_state(base: dict[str, Any]) -> None:
     base["tilt"] = round(min(1.0, max(0.0, -edge / span)), 4)
 
 
-def compute_pillar_awareness(record: dict[str, Any] | None) -> dict[str, Any]:
+def compute_pillar_awareness(
+    record: dict[str, Any] | None, rpe: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Map a win/loss record to the pillar state, tilt, and edge.
 
     ``tilt`` is 0.0 at the upright (break-even-or-better) state and grows to
     1.0 as the edge falls to ``PILLAR_EDGE_FALL``. ``state`` is one of
-    ``upright`` / ``tipping`` / ``fallen`` / ``warming``.
+    ``upright`` / ``tipping`` / ``fallen`` / ``warming``. ``rpe`` (the
+    multi-timescale dopamine channels) is surfaced alongside the geometric
+    state so the mood the brain feels is visible next to the pillar it must
+    keep upright.
     """
     base = _defaults()
     if not isinstance(record, dict):
@@ -144,8 +149,29 @@ def compute_pillar_awareness(record: dict[str, Any] | None) -> dict[str, Any]:
     _merge(base, record)
     trades = int(base["trades"] or 0)
     if trades <= 0 or trades < PILLAR_MIN_TRADES:
-        return base
+        return _with_rpe(base, rpe)
     _apply_state(base)
+    return _with_rpe(base, rpe)
+
+
+def _with_rpe(base: dict[str, Any], rpe: dict[str, Any] | None) -> dict[str, Any]:
+    """Attach the dopamine channels to the pillar awareness shape."""
+    if not isinstance(rpe, dict):
+        return base
+
+    def _num(key: str, alt: str) -> float:
+        """Read one numeric RPE field, falling back to the alternative key."""
+        raw = rpe.get(key)
+        if not isinstance(raw, (int, float)):
+            raw = rpe.get(alt)
+        if not isinstance(raw, (int, float)):
+            raw = 0.0
+        return round(float(raw), 4)
+
+    base["rpe_phasic"] = _num("phasic", "phasic_rpe")
+    base["rpe_tonic"] = _num("tonic", "tonic_rpe")
+    meta = rpe.get("meta") or rpe.get("v_meta")
+    base["rpe_meta"] = dict(meta) if isinstance(meta, dict) else {}
     return base
 
 

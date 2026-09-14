@@ -35,3 +35,14 @@ BANDIT_FILE: Path = STATE_DIR / "juli_horizon_bandit.json"
 # ── Per-regime weight vectors (brain/regime_weights.py) ───────────────
 REGIME_MIN_TRADES: int = 15  # closes in a regime before its vector applies
 REGIME_FILE: Path = STATE_DIR / "juli_regime_weights.json"
+
+# ── Multi-timescale dopamine RPE (brain/rpe.py) ───────────────────────
+# Three value channels with distinct timescales (Masset et al. 2025):
+# fast ≈ 3-trade surprise, slow ≈ 50-trade tone, meta per-regime.
+RPE_ALPHA_FAST: float = 0.33  # phasic channel learning rate
+RPE_ALPHA_SLOW: float = 0.02  # tonic channel learning rate
+RPE_ALPHA_META: float = 0.05  # per-regime expectation learning rate
+RPE_LR_GAIN: float = 1.5  # surprise → learning-rate lift (× base LR)
+RPE_LR_MIN: float = 0.5  # modulator floor (never stops learning)
+RPE_LR_MAX: float = 2.0  # modulator ceiling (never over-learns)
+RPE_FILE: Path = STATE_DIR / "juli_rpe.json"

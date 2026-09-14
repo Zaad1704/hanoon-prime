@@ -121,21 +121,21 @@ Position closes
 
 ### Phase A: Multi-Timescale RPE
 
-**File:** `src/hanoon_prime/brain/rpe.py` (new, ~120 lines)
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/rpe.py` (new, ~190 lines)
+**Status:** `done` — implemented, wired, tested (17 tests, all green)
 **Priority:** 1st — touches every learning organ
 **Effort:** ~300 lines total (module + wiring + tests)
 **Timeline:** Week 1-2
 
 **Acceptance Criteria:**
-- [ ] `MultiTimescaleRPE` class with three channels: phasic (τ≈3), tonic (τ≈50), meta (regime-specific)
-- [ ] Updated on every real close via `brain.on_trade_close`
-- [ ] `Reflector._adapt_weights` uses phasic RPE to modulate per-trade LR
-- [ ] `consolidation._update_pillar` reads tonic RPE as mood signal
-- [ ] `cognitive/emotion.py` uses tonic RPE for fear/greed instead of raw streak count
-- [ ] Published to shared state as `rpe_phasic`, `rpe_tonic`, `rpe_meta`
-- [ ] Tests: `tests/test_rpe.py` — phasic/tonic separation, regime conditioning, persistence
-- [ ] Pre-commit hooks pass
+- [x] `MultiTimescaleRPE` class with three channels: phasic (τ≈3), tonic (τ≈50), meta (regime-specific)
+- [x] Updated on every real close via `brain.on_trade_close`
+- [x] `Reflector._adapt_weights` uses phasic RPE to modulate per-trade LR
+- [x] `consolidation._update_pillar` reads tonic RPE as mood signal
+- [x] `cognitive/emotion.py` uses tonic RPE for fear/greed instead of raw streak count
+- [x] Published to shared state as `rpe_phasic`, `rpe_tonic`, `rpe_meta`
+- [x] Tests: `tests/test_rpe.py` — phasic/tonic separation, regime conditioning, persistence
+- [x] Pre-commit hooks pass
 
 **Biological Basis:** Masset et al. 2025 (Nature 642:682), Garud & Morris 2026, Nature Neuroscience 2024 policy-IG
 
@@ -150,28 +150,37 @@ class MultiTimescaleRPE:
     meta_rpe:    regime-conditioned expectation per regime key
     """
 
-    def update(self, predicted_wr: float, actual_wr: float, regime: str) -> dict:
+    def update(self, pred_win_prob: float, won: bool, regime: str) -> dict:
+        # pred_win_prob seeds the phasic/tonic channels on the FIRST trade
+        # only (the brain's own calibrated prior, from score_to_win_prob);
+        # afterwards V moves toward outcomes: V += α * (r - V).
         ...
 
     def phasic(self) -> float: ...
     def tonic(self) -> float: ...
-    def meta(self, regime: str) -> float: ...
 
     def save(self) -> dict: ...
     def load(self, data: dict) -> None: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/rpe.py` with `MultiTimescaleRPE`
-2. Wire update in `orchestrator.on_trade_close` after `dynamics.adapt_threshold`
-3. Wire phasic into `reflection.py:Reflector._adapt_weights` as LR modulator
-4. Wire tonic into `pillar_awareness.py` and `consolidation._update_pillar`
-5. Wire tonic into `cognitive/emotion.py` replacing streak-based fear/greed
-6. Publish all three to `shared_state.py` BrainState
-7. Write `tests/test_rpe.py`
-8. Update this doc with commit hash
+1. ✅ Write `brain/rpe.py` with `MultiTimescaleRPE`
+2. ✅ Wire update in `orchestrator.on_trade_close` after `dynamics.adapt_threshold` (extracted to `_update_rpe`; `_adapt_threshold` helper keeps on_trade_close ≤40 lines for the R3 contract test)
+3. ✅ Wire phasic into `reflection.py:Reflector._adapt_weights` as LR modulator
+4. ✅ Wire tonic into `pillar_awareness.py` and `consolidation._update_pillar`
+5. ✅ Wire tonic into `cognitive/emotion.py` replacing streak-based fear/greed
+6. ✅ Publish all three to `shared_state.py` BrainState (+ `rpe_surprise` used by reflector LR)
+7. ✅ Write `tests/test_rpe.py` (17 tests)
+8. ⏳ Update this doc with commit hash (done on commit)
 
-**Design Decisions:** (none yet — to be filled during implementation)
+**Design Decisions:**
+- **Value channels are self-referential** (`V += α·(r−V)`, `r = 1 win / 0 loss`), NOT driven by `score_to_win_prob` per trade — the brain's own prediction is only used to **seed** the fast/slow channels on the first trade (calibrated prior). Chosen over using prediction every trade because (a) surprise must fade after ~3 consistent trades (a curiosity signal), (b) signed score-vs-outcome calibration already lives in `JuliMemory.pred_error_ema` — duplicating it would double-count the same signal.
+- **RPE errors are computed BEFORE the V update** (error/response precedes assimilation), then V moves toward `r`.
+- **`lr_modulator(surprise)` maps |phasic| to a bounded LR multiplier** `clamp(1 + 1.5·s, 0.5, 2.0)`; surprise 0 → 1.0 (identical to today's LR, zero-behavior-change safety), full surprise → 2.0 (learn harder), floor 0.5 is a hard safety only.
+- **Tonic RPE blended 50/50 with the win-rate streak** in `EmotionState.confidence_mod` (streak is retained so affect isn't purely dopamine); fear remains loss-magnitude-driven.
+- **Pillar geometry NOT tilted by mood** — RPE channels are surfaced *alongside* the pillar (`rpe_phasic/tonic/meta` keys) so the webapp/Inside Man see feel next to geometry, but `state/upright/tilt/edge` stay purely edge-vs-break-even (decision semantics unchanged; this preserves the just-fixed pillar contract).
+- **Persistence** to `runtime/juli_rpe.json` (atomic tmp+replace, `HANOO_RPE_FILE` override hermetic in tests). Only value estimates + count persist; the last-error fields are in-memory-only by design.
+- **R3 contract**: `R3 no-function>40-lines` pytest test does NOT skip orchestrator.py, so `on_trade_close`/`_learn_from_real` were refactored into helpers (`_adapt_threshold`, `_update_rpe`, `_reflect_close`) to stay ≤40 lines.
 
 ---
 
@@ -433,7 +442,7 @@ class MetaMonitor:
 
 | Module | Input | Output | Wired Into | Persisted |
 |---|---|---|---|---|
-| `rpe.py` | predicted_wr, actual_wr, regime | {phasic, tonic, meta} | reflection, consolidation, emotion | `state.json` |
+| `rpe.py` | predicted_win_prob, won, regime | {phasic, tonic, meta, surprise, v_fast, v_slow, v_meta} | `_adapt_weights` (LR mod), `_update_pillar` (mood), `emotion.py` (tonic affect), `shared_state` | `runtime/juli_rpe.json` |
 | `allostasis.py` | pillar, regime, recent_trades | {setpoint, deviation, is_dyshomeostatic} | pillar_awareness, dynamics, HALIM prompt | `state.json` |
 | `somatic.py` | alpha, regime, pillar, rpe, allostatic | float (±0.10) | _score_pipeline | shared_state |
 | `extinction.py` | alpha, outcome, context | inhibition weight | episodic.modifier | `juli_state.json` |
@@ -458,20 +467,20 @@ class MetaMonitor:
 ## 6. Verification Checklist
 
 ### Pre-Implementation (Per Phase)
-- [ ] AWAKENED_BRAIN.md updated with design decisions
-- [ ] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [ ] Full suite passing: `pytest --no-cov -q` (1003+ tests)
-- [ ] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
-- [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build`
+- [x] AWAKENED_BRAIN.md updated with design decisions
+- [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
+- [x] Full suite passing: `pytest --no-cov -q` (1020+ tests)
+- [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
+- [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [ ] Commit hash recorded in this doc under the relevant phase
-- [ ] Module appears in `brain/__init__.py` exports
-- [ ] Shared state keys documented in `brain/shared_state.py`
-- [ ] HALIM evidence prompt updated (if applicable)
-- [ ] Webapp panel updated (if applicable)
-- [ ] Design decisions logged
-- [ ] This document updated with any deviations from plan
+- [ ] Commit hash recorded in this doc under the relevant phase *(fill on commit)*
+- [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
+- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise added to _state)*
+- [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state)*
+- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys)*
+- [x] Design decisions logged *(6 design decisions documented under Phase A)*
+- [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
 
 ### Final Verification (All Phases)
 - [ ] All 6 modules implemented and wired
@@ -487,7 +496,8 @@ class MetaMonitor:
 
 | Date | Session | What Changed | Commit | Notes |
 |---|---|---|---|---|
-| 2026-09-14 | Analysis & design | Full brain mapping, 6 biological gaps identified, 6-phase proposal | — | Research: dopamine RPE, CLS, allostasis, somatic markers, extinction, metacognition |
+| 2026-09-14 | Analysis & design | Full brain mapping, 6 biological gaps identified, 6-phase proposal | `d630f56` | Research: dopamine RPE, CLS, allostasis, somatic markers, extinction, metacognition |
+| 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract | *pending* | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
 
 ---
 

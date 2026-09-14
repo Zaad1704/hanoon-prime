@@ -199,12 +199,22 @@ class ConsolidationEngine:
 
         Edge-vs-break-even awareness from realized trades, written to shared
         state so the fast path, the Inside Man, and the webapp all read the
-        same shape. Computation is cheap (folds the R:R ring), no network I/O.
+        same shape. The multi-timescale dopamine channels ride along as the
+        mood signal so the webapp sees the feel next to the geometry.
         """
         from .pillar_awareness import compute_pillar_awareness
 
         record = self._realized.win_loss_record() if self._realized else None
-        self.state.update(pillar=compute_pillar_awareness(record))
+        self.state.update(
+            pillar=compute_pillar_awareness(
+                record,
+                rpe={
+                    "phasic": self.state.get("rpe_phasic", 0.0),
+                    "tonic": self.state.get("rpe_tonic", 0.0),
+                    "meta": self.state.get("rpe_meta", {}),
+                },
+            )
+        )
 
     def _update_regime(self) -> None:
         """Get regime classification from HALIM (local fallback if stale)."""
@@ -381,7 +391,12 @@ class ConsolidationEngine:
 
         alpha = self._get_latest_alpha() or {}
         self.thinker.episodic.add(alpha, won, pnl_pct)
-        self.thinker.emotion.update(won, pnl_pct)
+        tonic = self.state.get("rpe_tonic")
+        self.thinker.emotion.update(
+            won,
+            pnl_pct,
+            tonic_rpe=float(tonic) if isinstance(tonic, float) else None,
+        )
         self.state.set_refractory(2.0)
         side = BUY if direction > 0 else SELL
         qty = fill.qty if fill is not None else 0.0

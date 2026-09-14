@@ -59,6 +59,7 @@ from .reflection import Reflector, TradeClose
 from .regime import RegimeDetector
 from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
+from .rpe import MultiTimescaleRPE
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .strategy_genome import StrategyGenome
 from .thinker import TOTAL_MOD_BOUND
@@ -148,6 +149,7 @@ class NeuromorphicBrain:
         self._bandit = HorizonBandit()
         self._regime_weights = RegimeWeights()
         self._learned_exit = LearnedExitPolicy()
+        self.rpe = MultiTimescaleRPE()
         self.genome = StrategyGenome(self)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -1017,17 +1019,10 @@ class NeuromorphicBrain:
         IRONYCLADE: ONLY real IB fills feed the learning system.
         """
         canon = regime or self._last_regime.get(ticker, "unknown")
-        hz = horizon or self._last_horizon.get(ticker, "scalp")
-        vp = self._last_vol_pct.get(ticker, vol_pct)
         if not self._ironclade_gate(ticker, source):
             return
-        self.dynamics.adapt_threshold(
-            self.memory.pred_error,
-            losing_bins=len(self._realized.losing_conf_bins()),
-        )
-        self.memory.threshold = (
-            self.dynamics.threshold
-        )  # persist adapted threshold → survives restart
+        self._adapt_threshold()
+        self._update_rpe(ticker, won, canon)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
         self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)
@@ -1035,10 +1030,32 @@ class NeuromorphicBrain:
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
         if self._neuromorphic is not None:
             self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
+        hz = horizon or self._last_horizon.get(ticker, "scalp")
+        vp = self._last_vol_pct.get(ticker, vol_pct)
         self._learn_strategy_organs(ticker, won, pnl_pct, direction, canon, hz, vp)
         if exit_triggers is not None:
             self._learned_exit.record(0.0, exit_triggers, won)
-        self._learn_from_real(ticker, won, pnl_pct, direction, canon)
+        self._learn_from_real(ticker, won, pnl_pct, direction, canon, self.rpe.surprise)
+
+    def _adapt_threshold(self) -> None:
+        """Adapt the entry threshold from prediction error and losing bins."""
+        self.dynamics.adapt_threshold(
+            self.memory.pred_error,
+            losing_bins=len(self._realized.losing_conf_bins()),
+        )
+        self.memory.threshold = self.dynamics.threshold  # survives restart
+
+    def _update_rpe(self, ticker: str, won: bool, canon: str) -> None:
+        """Fold one real close into the multi-timescale dopamine channels."""
+        rpe = self.rpe.update(
+            score_to_win_prob(self._last_score.get(ticker, 0.0)), won, canon
+        )
+        self.state.update(
+            rpe_phasic=round(rpe["phasic"], 4),
+            rpe_tonic=round(rpe["tonic"], 4),
+            rpe_meta={k: round(float(v), 4) for k, v in rpe["v_meta"].items()},
+            rpe_surprise=round(rpe["surprise"], 4),
+        )
 
     def _ironclade_gate(self, ticker: str, source: str) -> bool:
         """Block non-IB sources from feeding the learning system."""
@@ -1080,21 +1097,45 @@ class NeuromorphicBrain:
         )
 
     def _learn_from_real(
-        self, ticker: str, won: bool, pnl_pct: float, direction: int, regime: str
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int,
+        regime: str,
+        rpe_surprise: float = 0.0,
     ) -> None:
         """The closed learning loop — runs once per REAL trade close.
 
-        (a) Weight gradient over ALL 27 indicators (loss-aversion 1.2x via
-        Reflector — the single writer for weights/episodes/calibration).
-        (b) Hot-swap learned weights into the cortex so the very next tick
-        scores with the updated brain; per-regime vector blended when its
-        regime is trained (REGIME_MIN_TRADES real closes).
-        (c) Realized band/RR/conf-bins + calibration (the realized-EV gate).
-        (d) Learned exits + gate advisor retune from the new sample.
+        Reflector owns the weight gradient / episodes / calibration
+        (single-writer); _realized, advisor, and exits write their own
+        stores from the same close.
         """
-        conf = self._last_conf.get(ticker, 0.5)
         score = self._last_score.get(ticker, 0.0)
-        # predicted_score is score_to_win_prob (win-prob), not sizing confidence (was: conf).
+        self._reflect_close(
+            ticker, won, pnl_pct, direction, regime, score, rpe_surprise
+        )
+        weights = self._weights_for(regime)
+        self._wversion += 1
+        self._apply_regime_weights(regime)
+        self._realized.add_outcome(score, won, pnl_pct, direction)
+        self._realized.add_confidence_outcome(self._last_conf.get(ticker, 0.5), won)
+        self.exits.adapt_from_realized(self._realized)
+        self._advisor.record_outcome(won)
+        # Apply any pending HALIM recommendations (fetched by consolidation)
+        self._apply_halim_recommendations()
+
+    def _reflect_close(
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int,
+        regime: str,
+        score: float,
+        rpe_surprise: float,
+    ) -> None:
+        """Run the Reflector single-writer over one real close."""
         self._reflector.on_trade_close(
             TradeClose(
                 ticker=ticker,
@@ -1104,20 +1145,9 @@ class NeuromorphicBrain:
                 alpha=self._last_alpha.get(ticker, {}),
                 predicted_score=score_to_win_prob(score),
                 regime=regime,
+                rpe_surprise=rpe_surprise,
             )
         )
-        weights = self._weights_for(regime)
-        self._wversion += 1
-        self._apply_regime_weights(regime)
-        # memory.record_outcome + update_pred_error are owned by the
-        # Reflector above (single-writer); _realized/advisor/exits write
-        # their own stores below.
-        self._realized.add_outcome(score, won, pnl_pct, direction)
-        self._realized.add_confidence_outcome(conf, won)
-        self.exits.adapt_from_realized(self._realized)
-        self._advisor.record_outcome(won)
-        # Apply any pending HALIM recommendations (fetched by consolidation)
-        self._apply_halim_recommendations()
 
     def _apply_halim_recommendations(self) -> None:
         """Apply pending HALIM recommendations to Juli parameters."""

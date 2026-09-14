@@ -22,18 +22,29 @@ class EmotionState:
     def __init__(self) -> None:
         self._outcomes: deque[bool] = deque(maxlen=LOOKBACK)
         self._pnl_history: deque[float] = deque(maxlen=LOOKBACK)
+        self._tonic: deque[float] = deque(maxlen=LOOKBACK)
 
-    def update(self, won: bool, pnl_pct: float) -> None:
-        """Record a trade outcome."""
+    def update(self, won: bool, pnl_pct: float, tonic_rpe: float | None = None) -> None:
+        """Record a trade outcome; optionally blend the tonic RPE drift."""
         self._outcomes.append(won)
         self._pnl_history.append(pnl_pct)
+        if tonic_rpe is not None:
+            self._tonic.append(float(tonic_rpe))
 
     def confidence_mod(self) -> float:
-        """Bounded confidence nudge from affect [-CONF_BOUND, +CONF_BOUND]."""
+        """Bounded confidence nudge from affect [-CONF_BOUND, +CONF_BOUND].
+
+        Mood blends the recent win-rate streak with the slow dopamine tone
+        (tonic RPE): a steady drift of surprise — even with a flat streak —
+        moves how confident the brain feels about the next setup.
+        """
         if len(self._outcomes) < MIN_SAMPLES:
             return 0.0
         recent_wr = sum(list(self._outcomes)[-5:]) / min(5, len(self._outcomes))
         mood = recent_wr - 0.5
+        if self._tonic:
+            tone = sum(list(self._tonic)[-5:]) / min(5, len(self._tonic))
+            mood = 0.5 * mood + 0.5 * tone
         return max(-CONF_BOUND, min(CONF_BOUND, mood * 0.1))
 
     def risk_scalar(self) -> float:
