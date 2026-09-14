@@ -61,6 +61,7 @@ from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
 from .rpe import MultiTimescaleRPE
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
+from .somatic import SomaticMarkerGenerator
 from .strategy_genome import StrategyGenome
 from .thinker import TOTAL_MOD_BOUND
 
@@ -150,6 +151,7 @@ class NeuromorphicBrain:
         self._regime_weights = RegimeWeights()
         self._learned_exit = LearnedExitPolicy()
         self.rpe = MultiTimescaleRPE()
+        self._somatic = SomaticMarkerGenerator()
         self.genome = StrategyGenome(self)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -836,6 +838,50 @@ class NeuromorphicBrain:
         # A disabled classification snaps to the closest ACTIVE rung.
         return horizons.get_horizon_manager().active(classified)
 
+    def _somatic_context(self) -> tuple[float, float]:
+        """Gut-feel bias from pillar + RPE + allostatic state (Damasio).
+
+        Assembles the brain's own body-state signals into a bounded marker
+        and its precision factor, publishes both to shared state, and
+        returns them for the raw-score blend in the fast path.
+        """
+        rpe = {
+            "phasic": self.state.get("rpe_phasic", 0.0),
+            "tonic": self.state.get("rpe_tonic", 0.0),
+            "meta": self.state.get("rpe_meta", {}),
+        }
+        pillar = self.state.get("pillar")
+        if not isinstance(pillar, dict):
+            pillar = {}
+        allostatic = self.state.get("allostatic")
+        if not isinstance(allostatic, dict):
+            allostatic = {}
+        marker = self._somatic.generate(pillar, rpe, allostatic)
+        precision = self._somatic.precision_weight(marker)
+        self.state.update(somatic_marker=marker, somatic_precision=precision)
+        return marker, precision
+
+    def _compute_mods(
+        self,
+        halim: float,
+        episodic: float,
+        nash_op: float,
+        ticker: str,
+        cross: float,
+        advisor_delta: float,
+        thinker_mod: float,
+    ) -> float:
+        """Sum all non-regime modifiers (somatic is separate, added in raw)."""
+        return (
+            halim
+            + episodic
+            + nash_op
+            + self._news_bias(ticker)
+            + cross
+            - advisor_delta
+            + thinker_mod
+        )
+
     def _score_pipeline(
         self,
         ticker: str,
@@ -846,6 +892,7 @@ class NeuromorphicBrain:
         cross: float = 0.0,
     ) -> dict[str, Any]:
         """Compute the blended stabilized score and decision intermediates."""
+        somatic, precision = self._somatic_context()
         thinker_mod = self._bounded_thinker_modifier()
         thinker_conf = self._bounded_thinker_confidence()
         self.cortex._threshold = self.dynamics.threshold
@@ -856,9 +903,10 @@ class NeuromorphicBrain:
         cal_adj = self._calibration_nudge(base.score)
         blended = (1 - NEURO_BLEND) * (base.score + cal_adj) + NEURO_BLEND * neuro_score
         advisor_delta = self._advisor.threshold_delta()
-        news_bias = self._news_bias(ticker)
-        raw = blended * regime_mul + halim + episodic + nash_op
-        raw += news_bias + cross - advisor_delta + thinker_mod
+        mods = self._compute_mods(
+            halim, episodic, nash_op, ticker, cross, advisor_delta, thinker_mod
+        )
+        raw = blended * regime_mul + somatic + precision * mods
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
         confidence = max(0.05, min(0.95, base.confidence + thinker_conf))
         return {

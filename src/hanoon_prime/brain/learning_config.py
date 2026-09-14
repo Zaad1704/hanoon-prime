@@ -54,3 +54,12 @@ ALLOS_MARGIN: float = 0.05  # |deviation| beyond which state is strained
 ALLOS_VIOLATION_MIN: int = 5  # sustained deviations → dyshomeostasis
 ALLOS_TIGHTEN_STEP: float = 0.02  # extra threshold raise while dyshomeostatic
 ALLOS_FILE: Path = STATE_DIR / "juli_allostasis.json"
+
+# ── Somatic markers (brain/somatic.py) ────────────────────────────────
+SOMATIC_MAX: float = 0.10  # marker bound (vmPFC-style bias, advisory)
+SOMATIC_TILT_GAIN: float = 0.05  # pillar lean → negative pressure
+SOMATIC_TONIC_GAIN: float = 0.05  # RPE mood magnitude
+SOMATIC_PHASIC_GAIN: float = 0.03  # per-trade surprise magnitude
+SOMATIC_DYS_PENALTY: float = -0.04  # allostatic alarm
+SOMATIC_PRECISION_DAMP: float = 2.0  # negative marker → modifier dampen
+SOMATIC_PRECISION_LOOR: float = 0.6  # never zero the modifiers' voice

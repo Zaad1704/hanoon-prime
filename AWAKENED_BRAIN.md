@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B implemented — commit hash pending (recorded on commit)
-**Last updated:** 2026-09-14 — Phase B implementation complete
+**Status:** Phase A done, Phase B done, Phase C done — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-14 — Phase C implementation complete
 
 ---
 
@@ -246,23 +246,22 @@ class AllostaticController:
 
 ### Phase C: Somatic Markers
 
-**File:** `src/hanoon_prime/brain/somatic.py` (new, ~100 lines)
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/somatic.py` (new, ~130 lines)
+**Status:** `done` — implemented, wired, tested (18 tests, all green)
 **Priority:** 3rd — rapid pre-scoring bias
-**Effort:** ~250 lines total
+**Effort:** ~300 lines total (module + wiring + tests)
 **Timeline:** Week 3-4
 
 **Acceptance Criteria:**
-- [ ] `SomaticMarkerGenerator` class producing per-decision bias from full outcome trajectory
-- [ ] Inputs: pillar state, RPE channels, allostatic state, episodic recall
-- [ ] Output: single bounded bias (±0.10)
-- [ ] Applied in `_score_pipeline` as `somatic_marker` modifier BEFORE detailed scoring
-- [ ] When marker is negative, other modifiers are precision-dampened
-- [ ] Published to shared state for webapp visualization
-- [ ] Tests: `tests/test_somatic.py`
-- [ ] Pre-commit hooks pass
+- [x] `SomaticMarkerGenerator` class producing per-decision bias from full outcome trajectory
+- [x] Inputs: pillar tilt, RPE channels (phasic/tonic), allostatic alarm (dyshomeostasis)
+- [x] Output: single bounded bias (`±SOMATIC_MAX = ±0.10`) applied to raw score
+- [x] Applied in `_score_pipeline` as `somatic` bias; precision-dampens all non-regime modifiers when negative (scaled by `precision_weight(marker)`)
+- [x] Published to shared state as `somatic_marker` / `somatic_precision`
+- [x] Tests: `tests/test_somatic.py` — lean, RPE mood, allostatic alarm, precision dampening, bounds, snapshot
+- [x] Pre-commit hooks pass
 
-**Biological Basis:** Damasio 1994 (somatic marker hypothesis), Bechara et al. 1996 (Iowa Gambling Task), Damasio 1996 (vmPFC + body loop / as-if body loop)
+**Biological Basis:** Damasio 1994, 1996 (somatic marker hypothesis), Bechara et al. 1996 (Iowa Gambling Task)
 
 **Design:**
 
@@ -270,30 +269,34 @@ class AllostaticController:
 class SomaticMarkerGenerator:
     """Gut-feel bias from the entire recent outcome trajectory.
 
-    Combines pillar body-state, RPE mood, allostatic alarm, and
-    episodic recall into a single rapid bias signal applied BEFORE
-    detailed scoring — like Damasio's vmPFC markers that prune the
-    search space before conscious reasoning.
+    Combines pillar body-state, RPE mood, and allostatic alarm into a
+    single bounded bias signal added to the raw score BEFORE stabilization
+    — Damasio's vmPFC markers that prune the decision space before the
+    deliberative system kicks in. A negative marker also precision-dampens
+    all the learned modifiers (HALIM, episodic, Nash, etc.), scaling them
+    toward zero like a gut-level "pay extra attention, reduce noise".
     """
 
-    def generate(self, alpha: dict, regime: str, pillar: dict,
-                 rpe: dict, allostatic: dict) -> float:
-        ...
-
-    def precision_weight(self, marker: float) -> float:
-        """Dampen other modifiers when marker is negative."""
-        ...
+    def generate(self, pillar: dict, rpe: dict, allostatic: dict) -> float: ...
+    def precision_weight(self, marker: float) -> float: ...
+    def snapshot(self) -> dict[str, float]: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/somatic.py`
-2. Wire into `orchestrator._score_pipeline` after regime weights, before threshold
-3. Wire precision dampening into modifier application
-4. Publish to shared state
-5. Write `tests/test_somatic.py`
-6. Update this doc with commit hash
+1. ✅ Write `brain/somatic.py` with `SomaticMarkerGenerator` (~130 lines, all funcs ≤40)
+2. ✅ Wire into `orchestrator._score_pipeline` via `_somatic_context()` helper; somatic bias added to `raw`, precision scales all non-regime modifiers in `_compute_mods()`
+3. ✅ Publish `somatic_marker` and `somatic_precision` to `shared_state`
+4. ✅ Add `somatic_marker`, `somatic_precision`, `allostatic` defaults to `brain/shared_state.py`
+5. ✅ Write `tests/test_somatic.py` (18 tests)
+6. ⏳ Update this doc with commit hash (done on commit)
 
-**Design Decisions:** (none yet)
+**Design Decisions:**
+- **Pillar tilt drives a one-way negative pressure** — a leaning pillar always hurts the marker (never helps). Tilt ∈ [0,1] maps linearly to `[-SOMATIC_TILT_GAIN, 0]`. The brain's body language (pillar) is a loss signal only; wins don't produce a euphoric somatic marker (the reflex is asymmetric, matching prospect theory).
+- **RPE mood is signed** — tonic and phasic channels map along their sign (negative = worse than expected → lower marker; positive = better → lift). This gives the somatic marker a *directional* mood signal, not just a "danger" flag.
+- **Dyshomeostasis is a one-shot penalty** — when the alarm fires, the somatic marker takes an explicit `SOMATIC_DYS_PENALTY` hit, independent of the other signals. This prevents a high tonic RPE (which could temporarily mask the allostatic alarm) from fully canceling the stress signal.
+- **Precision dampening is linear and floored** — `precision = 1 + 2*marker` for negative markers, floored at 0.6. The modifiers can shrink to 60% of their voice, never fully silenced (the deliberative cortex must still weigh them, even when the gut says be cautious).
+- **No persistence** — the somatic marker is assembled fresh each tick from the current body state; it has no history. The marker's *temporal integration* happens naturally via the pillar tilt history and RPE tonic channel (both of which are persistent).
+- **`_compute_mods` extraction** — the non-regime modifier sum was pulled into a private helper to keep `_score_pipeline` at exactly 40 lines (R3). This also makes the modifier inventory explicit: `halim + episodic + nash_op + news_bias + cross − advisor_delta + thinker_mod`.
 
 ---
 
@@ -448,7 +451,7 @@ class MetaMonitor:
 |---|---|---|---|---|
 | `rpe.py` | predicted_win_prob, won, regime | {phasic, tonic, meta, surprise, v_fast, v_slow, v_meta} | `_adapt_weights` (LR mod), `_update_pillar` (mood), `emotion.py` (tonic affect), `shared_state` | `runtime/juli_rpe.json` |
 | `allostasis.py` | win_loss_record, regime | {setpoint, deviation, dyshomeostatic, violations, trades} | `_update_pillar` (dynamic fallen line), `dynamics.adapt_threshold` (tighten on dyshomeostasis), `shared_state` (`allostatic`), HALIM via `pillar_setpoint` | `runtime/juli_allostasis.json` |
-| `somatic.py` | alpha, regime, pillar, rpe, allostatic | float (±0.10) | _score_pipeline | shared_state |
+| `somatic.py` | pillar tilt, rpe.phasic/tonic, allostatic.dyshomeostatic | {marker ±0.10, precision ∈ [0.6, 1.0]} | `_score_pipeline` (raw bias + modifier dampen), `shared_state` (somatic_marker, somatic_precision) | state-only (in-memory snapshot) |
 | `extinction.py` | alpha, outcome, context | inhibition weight | episodic.modifier | `juli_state.json` |
 | `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation | — |
 | `metacog.py` | conf_bin, outcome, alpha, regime | reliability, surprise, sizing_scalar | _score_pipeline, risk | `state.json` |
@@ -464,6 +467,7 @@ class MetaMonitor:
 | 2026-09-14 | Setpoint EMA gated by `ALLOS_MIN_TRADES`, fallen line never looser than structural `PILLAR_EDGE_FALL` | Fresh norms must not swing the pillar; allostasis may only tighten discipline, never loosen it | Un-gated EMA — first-trade noise moves the norm; unbounded dynamic threshold — could overturn the -0.10 safety floor |
 | 2026-09-14 | Dyshomeostasis transient: violations reset when the EMA catches up to a persistent edge | A recurring negative edge becomes the *new normal* (Sterling) — the durable response is the tightened fallen line, not a permanent alarm | Permanent alarm on adapted norm — false distress; hysteresis-latched alarm — complexity without payoff |
 | 2026-09-14 | Allostatic state published as its own shared-state dict, not merged into `pillar` | Pillar semantics stay realized-data-driven; telemetry readable by HALIM/webapp via separate keys | Merging into pillar — conflates geometry with bodily state; pillar-only reporting — loses dyshomeostasis to dynamics |
+| 2026-09-14 | Somatic marker is asymmetric: pillar lean penalizes, tonic RPE mood is signed | A wounded pillar shouldn't produce "excitement"; RPE mood provides the bidirectional direction | Symmetric marker (same in both directions) — loses the loss-aversion asymmetry that Damasio's data requires |
 | 2026-09-14 | Somatic marker bounded ±0.10 | Consistent with existing modulator bounds; prevents single module from dominating | Larger bound — risk of runaway; no bound — dangerous in live system |
 | 2026-09-14 | Extinction via separate inhibition weights, not weight decay modification | Preserves original excitatory weight (CLS: extinction ≠ forgetting); allows reactivation | Increasing decay rate — loses memory; zeroing weights — destroys without context |
 | 2026-09-14 | Sleep replay 3× loser weighting | Prevents overconfidence from replaying winners; matches biological "replay to learn" not "replay to enjoy" | Equal weighting — misses learning opportunity; loser-only — loses winner patterns |
@@ -476,17 +480,17 @@ class MetaMonitor:
 ### Pre-Implementation (Per Phase)
 - [x] AWAKENED_BRAIN.md updated with design decisions
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [x] Full suite passing: `pytest --no-cov -q` (1040 tests)
+- [x] Full suite passing: `pytest --no-cov -q` (1058 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
 - [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; Phase B pending this commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
-- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic added to _state)*
+- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)*
 - [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)*
 - [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)*
-- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C)*
 - [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
 
 ### Final Verification (All Phases)
@@ -507,6 +511,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract; full suite 1020 passed | `9d11592` | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
 | 2026-09-14 | Phase B — Homeostatic setpoint + interoception | New `brain/allostasis.py` (AllostaticController, per-regime setpoint EMA, dyshomeostasis, atomic persistence); `pillar_awareness.py` dynamic fallen line + `_decorate` (setpoint keys for HALIM); `dynamics.adapt_threshold` gains dyshomeostatic tightening; `consolidation._update_pillar` publishes `allostatic`; orchestrator isinstance-guard (Class C watchdog); 21 tests; full suite 1040 passed | `145e600` | Deviation: 2 allostasis tests initially asserted non-transient dyshomeostasis — corrected to the transient-alarm design (violations reset as the EMA absorbs a persistent edge); `or {}` rejected for Class C compliance |
 | 2026-09-14 | Phase B — webapp + inspection evidence | `inspection/pillar.py` emits `pillar_setpoint`/`pillar_deviation`/`below_setpoint` on the `pillar_balance` evidence (helper `_pillar_evidence` keeps `pillar_balance` ≤40 lines); PillarBalancePanel shows the allostatic setpoint line + dyshomeostasis chip; webapp typecheck + build green | `689f9b6` (+ hanoon-dash `a837644`) | Deviation: `pillar_balance` hit 43 lines after evidence addition — extracted `_pillar_evidence` helper to restore R3 compliance |
+| 2026-09-14 | Phase C — Somatic markers | New `brain/somatic.py` (SomaticMarkerGenerator: bounded ±0.10 gut-feel bias from pillar lean + RPE mood + allostatic alarm; negative marker precision-dampens all learned modifiers, floored 0.6); wired via `_somatic_context` into `_score_pipeline` (raw bias + `_compute_mods` precision scale); published `somatic_marker`/`somatic_precision`; 18 tests; full suite 1058 passed | `TBD` | Deviation: `_compute_mods` private helper extracted to keep `_score_pipeline` at exactly 40 lines after black re-wrapped the modifier sum into 9 lines (R3 contract); somatic is asymmetric (tilt only penalizes) per prospect-theory loss aversion |
 
 ---
 
