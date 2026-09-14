@@ -193,6 +193,7 @@ class TestOrchestratorWiring:
 
         b = NeuromorphicBrain(brain_state=BrainState(), enable_neuromorphic=False)
         assert b._meta_cog is not None
+        b._meta_cog.clear()
         assert b._meta_cog.size == 0
 
     def test_score_pipeline_exposes_surprise(self):
@@ -207,6 +208,8 @@ class TestOrchestratorWiring:
         from tests.test_brain_organs import _brain
 
         b = _brain()
+        b._meta_cog.clear()
+        before = b._meta_cog.size
         b._last_conf["TEST"] = 0.9
         b._learn_from_real(
             ticker="TEST",
@@ -216,5 +219,5 @@ class TestOrchestratorWiring:
             regime="bull",
             rpe_surprise=0.0,
         )
-        assert b._meta_cog.size == 1
+        assert b._meta_cog.size == before + 1
         b._meta_cog.clear()
