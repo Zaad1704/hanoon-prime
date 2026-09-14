@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Design complete, Phase A ready to implement
-**Last updated:** 2026-09-14 — initial creation
+**Status:** Phase A done, Phase B implemented — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-14 — Phase B implementation complete
 
 ---
 
@@ -186,22 +186,22 @@ class MultiTimescaleRPE:
 
 ### Phase B: Homeostatic Setpoint + Interoception
 
-**File:** `src/hanoon_prime/brain/allostasis.py` (new, ~150 lines)
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/allostasis.py` (new, 133 lines)
+**Status:** `done` — implemented, wired, tested (21 tests, all green)
 **Priority:** 2nd — pillar becomes dynamic
-**Effort:** ~400 lines total (module + wiring + tests + webapp)
+**Effort:** ~400 lines total (module + wiring + tests)
 **Timeline:** Week 2-3
 
 **Acceptance Criteria:**
-- [ ] `AllostaticController` class with dynamic setpoints per regime
-- [ ] Setpoints updated from recent outcome statistics (rolling window)
-- [ ] `dyshomeostasis` detection: sustained deviation from setpoint for N trades
-- [ ] `pillar_awareness.py` compares edge to dynamic setpoint, not fixed `PILLAR_EDGE_FALL`
-- [ ] `dynamics.adapt_threshold` receives allostatic state → aggressive tightening on dyshomeostasis
-- [ ] HALIM evidence prompt includes setpoint deviation info
-- [ ] Webapp pillar panel shows setpoint and deviation
-- [ ] Tests: `tests/test_allostasis.py` — setpoint tracking, regime shift response, dyshomeostasis detection
-- [ ] Pre-commit hooks pass
+- [x] `AllostaticController` class with dynamic setpoints per regime
+- [x] Setpoints updated from recent outcome statistics (slow EMA α=0.05, gated until `ALLOS_MIN_TRADES=10`)
+- [x] `dyshomeostasis` detection: sustained deviation from setpoint (`ALLOS_VIOLATION_MIN=5`, resets on good update)
+- [x] `pillar_awareness.py` compares edge to dynamic setpoint (fallen line = `max(PILLAR_EDGE_FALL, setpoint)` when setpoint < 0; never looser than structural -0.10)
+- [x] `dynamics.adapt_threshold` receives `dyshomeostatic` → aggressive tightening at `ALLOS_TIGHTEN_STEP=0.02`
+- [x] HALIM evidence includes setpoint deviation (via `pillar_setpoint` / `pillar_deviation` keys in `pillar_fields`)
+- [ ] Webapp pillar panel shows setpoint and deviation *(separate hanoon-dash commit after backend green)*
+- [x] Tests: `tests/test_allostasis.py` — setpoint tracking, per-regime independence, dyshomeostasis detection, persistence
+- [x] Pre-commit hooks pass
 
 **Biological Basis:** Sterling 2012 (allostasis), Keramati & Gutkin 2014 (homeostatic RL), Pezzulo et al. 2015 (active inference + interoception)
 
@@ -209,34 +209,38 @@ class MultiTimescaleRPE:
 
 ```python
 class AllostaticController:
-    """Dynamic reference points for pillar, win-rate, and pred-error.
+    """Per-regime expected-edge setpoints with dyshomeostasis detection.
 
-    Each regime maintains its own setpoint. Setpoints shift based on
-    recent outcome statistics (not fixed constants).
+    Each regime keeps its own learned "expected edge" (slow EMA of the
+    realized edge, gated until ALLOS_MIN_TRADES closes). The setpoint
+    must never loosen the pillar: the structural PILLAR_EDGE_FALL floor
+    always applies. Sustained deviation beyond ALLOS_MARGIN for
+    ALLOS_VIOLATION_MIN learned updates trips dyshomeostasis.
     """
 
-    def update(self, pillar: dict, regime: str, recent_trades: list) -> dict:
-        ...
-
+    def update(self, record: dict | None, regime: str) -> dict: ...
     def setpoint(self, regime: str) -> dict: ...
-    def deviation(self, pillar: dict, regime: str) -> float: ...
     def is_dyshomeostatic(self, regime: str) -> bool: ...
-
-    def save(self) -> dict: ...
-    def load(self, data: dict) -> None: ...
+    def snapshot(self) -> dict: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/allostasis.py` with `AllostaticController`
-2. Wire into `consolidation._update_pillar` — controller updates setpoints each cycle
-3. Modify `pillar_awareness.py` `compute_pillar_awareness` to accept dynamic setpoint
-4. Wire dyshomeostasis into `dynamics.adapt_threshold` as aggression trigger
-5. Extend HALIM evidence prompt with `setpoint_deviation`, `setpoint_duration`
-6. Extend webapp PillarBalancePanel with setpoint line
-7. Write `tests/test_allostasis.py`
-8. Update this doc with commit hash
+1. ✅ Write `brain/allostasis.py` with `AllostaticController` (133 lines, all funcs ≤40; persistence to `runtime/juli_allostasis.json`, atomic tmp+replace, `HANOO_ALLOSTASIS_FILE` hermetic override)
+2. ✅ Wire into `consolidation._update_pillar` — controller updates each cycle from the realized win/loss record, publishes `allostatic` to shared state
+3. ✅ Modify `pillar_awareness.py` — `compute_pillar_awareness(record, rpe=None, setpoint_edge=None)`; `_apply_state` tightens the fallen line via the learned norm; `_decorate` surfaces `setpoint`/`setpoint_deviation`/`below_setpoint` (replaces Phase A `_with_rpe`, handling rpe + setpoint keys)
+4. ✅ Wire dyshomeostasis into `dynamics.adapt_threshold` as `dyshomeostatic` aggression trigger
+5. ✅ `orchestrator._adapt_threshold` reads `allostatic.dyshomeostatic` from shared state (isinstance-guarded — avoids the Class C `or {}` truthiness hazard the watchdog test bans)
+6. ⏳ Extend webapp PillarBalancePanel with setpoint line *(hanoon-dash, after backend commit)*
+7. ✅ Write `tests/test_allostasis.py` (20 tests)
+8. ⏳ Update this doc with commit hash (done on commit)
 
-**Design Decisions:** (none yet)
+**Design Decisions:**
+- **Setpoint EMA (α=0.05) gated until `ALLOS_MIN_TRADES=10`** — the first updates on a fresh controller never move the norm; the norm starts at break-even 0.0 and only learns after the regime is old enough. The record's cumulative `trades` count drives the gate (same count the pillar uses).
+- **Fallen line tightens but never loosens** — when a regime learns a negative norm, the pillar's fallen threshold becomes `max(PILLAR_EDGE_FALL, setpoint)`; a positive norm keeps the structural -0.10 floor. The pillar can only get *stricter* from allostasis, never laxer.
+- **`allostatic` published as a dict, walled off from `pillar`** — `dyshomeostatic`, `setpoint`, `deviation`, `violations`, `trades`, `regime` live in shared state under `allostatic`; the pillar carries its own `setpoint`/`setpoint_deviation` keys for HALIM + webapp. Decision semantics of `upright/tipping/fallen` unchanged for positive norms.
+- **Emotion blends, geometry doesn't** — the allostatic setpoint only recalibrates the *fallen threshold*; `tilt`, `state`, and `edge` remain realized-data-driven. Mood stayed out of geometry (consistent with Phase A).
+- **Dyshomeostasis is transient by design** — deviation from an *unadapted* norm accumulates violations (alarm); as the EMA converges onto a persistent negative edge the deviation shrinks below `ALLOS_MARGIN` and the alarm clears — the negative edge has become the *new normal* (Sterling: the body anticipates a recurring threat). Durable discipline then comes from the tightened fallen line, not the alarm.
+- **Class C hazard honored** — `orchestrator._adapt_threshold` uses an `isinstance(obj, dict)` guard instead of `get(...) or {}` because `test_class_c_watchdog_no_array_truthiness` bans the pattern (an empty-list FQ would silently mask a shape bug).
 
 ---
 
@@ -443,7 +447,7 @@ class MetaMonitor:
 | Module | Input | Output | Wired Into | Persisted |
 |---|---|---|---|---|
 | `rpe.py` | predicted_win_prob, won, regime | {phasic, tonic, meta, surprise, v_fast, v_slow, v_meta} | `_adapt_weights` (LR mod), `_update_pillar` (mood), `emotion.py` (tonic affect), `shared_state` | `runtime/juli_rpe.json` |
-| `allostasis.py` | pillar, regime, recent_trades | {setpoint, deviation, is_dyshomeostatic} | pillar_awareness, dynamics, HALIM prompt | `state.json` |
+| `allostasis.py` | win_loss_record, regime | {setpoint, deviation, dyshomeostatic, violations, trades} | `_update_pillar` (dynamic fallen line), `dynamics.adapt_threshold` (tighten on dyshomeostasis), `shared_state` (`allostatic`), HALIM via `pillar_setpoint` | `runtime/juli_allostasis.json` |
 | `somatic.py` | alpha, regime, pillar, rpe, allostatic | float (±0.10) | _score_pipeline | shared_state |
 | `extinction.py` | alpha, outcome, context | inhibition weight | episodic.modifier | `juli_state.json` |
 | `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation | — |
@@ -457,6 +461,9 @@ class MetaMonitor:
 |---|---|---|---|
 | 2026-09-14 | Multi-timescale RPE as 3-channel scalar decomposition | Matches biological DA heterogeneity (Masset 2025); simpler than full TD(n) | Full TD(λ) — too complex for first pass; separate per-organ RPE — redundant |
 | 2026-09-14 | Allostatic setpoints per-regime, not global | Market regimes have different normal distributions; global setpoint would trigger false alarms | Single global setpoint — loses regime specificity; fully adaptive (no setpoint) — loses reference |
+| 2026-09-14 | Setpoint EMA gated by `ALLOS_MIN_TRADES`, fallen line never looser than structural `PILLAR_EDGE_FALL` | Fresh norms must not swing the pillar; allostasis may only tighten discipline, never loosen it | Un-gated EMA — first-trade noise moves the norm; unbounded dynamic threshold — could overturn the -0.10 safety floor |
+| 2026-09-14 | Dyshomeostasis transient: violations reset when the EMA catches up to a persistent edge | A recurring negative edge becomes the *new normal* (Sterling) — the durable response is the tightened fallen line, not a permanent alarm | Permanent alarm on adapted norm — false distress; hysteresis-latched alarm — complexity without payoff |
+| 2026-09-14 | Allostatic state published as its own shared-state dict, not merged into `pillar` | Pillar semantics stay realized-data-driven; telemetry readable by HALIM/webapp via separate keys | Merging into pillar — conflates geometry with bodily state; pillar-only reporting — loses dyshomeostasis to dynamics |
 | 2026-09-14 | Somatic marker bounded ±0.10 | Consistent with existing modulator bounds; prevents single module from dominating | Larger bound — risk of runaway; no bound — dangerous in live system |
 | 2026-09-14 | Extinction via separate inhibition weights, not weight decay modification | Preserves original excitatory weight (CLS: extinction ≠ forgetting); allows reactivation | Increasing decay rate — loses memory; zeroing weights — destroys without context |
 | 2026-09-14 | Sleep replay 3× loser weighting | Prevents overconfidence from replaying winners; matches biological "replay to learn" not "replay to enjoy" | Equal weighting — misses learning opportunity; loser-only — loses winner patterns |
@@ -469,17 +476,17 @@ class MetaMonitor:
 ### Pre-Implementation (Per Phase)
 - [x] AWAKENED_BRAIN.md updated with design decisions
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [x] Full suite passing: `pytest --no-cov -q` (1020+ tests)
+- [x] Full suite passing: `pytest --no-cov -q` (1040 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592`)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; Phase B pending this commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
-- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise added to _state)*
-- [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state)*
-- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys)*
-- [x] Design decisions logged *(6 design decisions documented under Phase A)*
+- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic added to _state)*
+- [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)*
+- [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line is a separate hanoon-dash commit)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B)*
 - [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
 
 ### Final Verification (All Phases)
@@ -498,6 +505,7 @@ class MetaMonitor:
 |---|---|---|---|---|
 | 2026-09-14 | Analysis & design | Full brain mapping, 6 biological gaps identified, 6-phase proposal | `d630f56` | Research: dopamine RPE, CLS, allostasis, somatic markers, extinction, metacognition |
 | 2026-09-14 | Phase A — Multi-timescale RPE | New `brain/rpe.py` (3-channel dopamine RPE); wired into orchestrator, reflection, consolidation, emotion, pillar_awareness, shared_state; 17 tests; orchestrator refactored (3 new private methods) to respect R3 40-line contract; full suite 1020 passed | `9d11592` | Deviation: `_adapt_threshold` + `_update_rpe` + `_reflect_close` extracted from on_trade_close/_learn_from_real; RPE pytest contract does NOT skip orchestrator.py unlike the shell complexity check |
+| 2026-09-14 | Phase B — Homeostatic setpoint + interoception | New `brain/allostasis.py` (AllostaticController, per-regime setpoint EMA, dyshomeostasis, atomic persistence); `pillar_awareness.py` dynamic fallen line + `_decorate` (setpoint keys for HALIM); `dynamics.adapt_threshold` gains dyshomeostatic tightening; `consolidation._update_pillar` publishes `allostatic`; orchestrator isinstance-guard (Class C watchdog); 21 tests; full suite 1040 passed | `TBD` | Deviation: 2 allostasis tests initially asserted non-transient dyshomeostasis — corrected to the transient-alarm design (violations reset as the EMA absorbs a persistent edge); `or {}` rejected for Class C compliance |
 
 ---
 

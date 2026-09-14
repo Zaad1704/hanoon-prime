@@ -1,14 +1,7 @@
 """brain.pillar_awareness — the win/loss pillar Juli must keep upright.
 
-Edge-vs-break-even geometry: the pillar stands at 90 degrees (success) when
-the realized win rate clears the break-even rate implied by the realized
-payoff ratio ``avg_win / avg_loss``. Any negative edge is a lean, and a lean
-is failure regardless of which side (long or short) produced it — the same
-objective as the RL cart-pole task, where staying upright is rewarded and any
-tilt past the threshold is terminal.
-
-The brain reads this from :meth:`RealizedStats.win_loss_record`; the Inside
-Man and webapp read the identical shape from the persisted ``brain_state``.
+Realized edge-vs-break-even state (upright/tipping/fallen/warming) with
+dynamic allostatic setpoint threshold, RPE mood, and HALIM evidence keys.
 """
 
 from __future__ import annotations
@@ -22,22 +15,10 @@ STATE_TIPPING = "tipping"
 STATE_FALLEN = "fallen"
 STATE_WARMING = "warming"
 
-__all__ = [
-    "STATE_FALLEN",
-    "STATE_TIPPING",
-    "STATE_UPRIGHT",
-    "STATE_WARMING",
-    "compute_pillar_awareness",
-    "pillar_fields",
-    "resolve_pillar",
-    "win_loss_record",
-]
-
 
 def _tally(
     samples: Iterable[tuple[int, float, int]],
 ) -> tuple[list[float], list[float]]:
-    """Split realized ``(won, abs_pnl, direction)`` rows into win/loss values."""
     wins: list[float] = []
     losses: list[float] = []
     for row in samples or []:
@@ -83,7 +64,6 @@ def win_loss_record(samples: Iterable[tuple[int, float, int]]) -> dict[str, Any]
 
 
 def _defaults() -> dict[str, Any]:
-    """Warming/empty pillar awareness shape."""
     return {
         "state": STATE_WARMING,
         "upright": True,
@@ -101,7 +81,6 @@ def _defaults() -> dict[str, Any]:
 
 
 def _merge(base: dict[str, Any], record: dict[str, Any]) -> None:
-    """Copy the record's numeric/record fields into ``base``."""
     for key in (
         "trades",
         "wins",
@@ -116,63 +95,74 @@ def _merge(base: dict[str, Any], record: dict[str, Any]) -> None:
     base["record"] = record.get("record", base["record"])
 
 
-def _apply_state(base: dict[str, Any]) -> None:
-    """Classify edge -> state/tilt on an already-merged record."""
+def _apply_state(base: dict[str, Any], setpoint_edge: float | None = None) -> None:
+    """Classify edge -> state/tilt; fallen line matches the learned norm.
+
+    When a regime has learned a negative setpoint (a stress norm), the
+    fallen line tightens to the setpoint (never looser than
+    ``PILLAR_EDGE_FALL``); a positive norm keeps the structural floor.
+    """
     edge = float(base["edge"] or 0.0)
+    norm = PILLAR_EDGE_FALL
+    if setpoint_edge is not None and float(setpoint_edge) < 0.0:
+        norm = max(PILLAR_EDGE_FALL, float(setpoint_edge))
     if edge >= 0.0:
         state = STATE_UPRIGHT
-    elif edge > PILLAR_EDGE_FALL:
+    elif edge > norm:
         state = STATE_TIPPING
     else:
         state = STATE_FALLEN
-    span = abs(PILLAR_EDGE_FALL) or 1.0
     base["state"] = state
     base["upright"] = state == STATE_UPRIGHT
-    base["tilt"] = round(min(1.0, max(0.0, -edge / span)), 4)
+    base["tilt"] = round(min(1.0, max(0.0, -edge / (abs(norm) or 1.0))), 4)
 
 
 def compute_pillar_awareness(
-    record: dict[str, Any] | None, rpe: dict[str, Any] | None = None
+    record: dict[str, Any] | None,
+    rpe: dict[str, Any] | None = None,
+    setpoint_edge: float | None = None,
 ) -> dict[str, Any]:
     """Map a win/loss record to the pillar state, tilt, and edge.
 
-    ``tilt`` is 0.0 at the upright (break-even-or-better) state and grows to
-    1.0 as the edge falls to ``PILLAR_EDGE_FALL``. ``state`` is one of
-    ``upright`` / ``tipping`` / ``fallen`` / ``warming``. ``rpe`` (the
-    multi-timescale dopamine channels) is surfaced alongside the geometric
-    state so the mood the brain feels is visible next to the pillar it must
-    keep upright.
+    ``tilt`` is 0.0 at the upright state and grows to 1.0 as the edge
+    falls to the fallen threshold (structural or allostatic setpoint).
+    ``state`` is one of ``upright`` / ``tipping`` / ``fallen`` / ``warming``.
+    ``rpe`` (dopamine channels) and ``setpoint_edge`` (allostatic norm)
+    are surfaced alongside the geometry so the mood + norm are visible.
     """
     base = _defaults()
-    if not isinstance(record, dict):
-        return base
-    _merge(base, record)
-    trades = int(base["trades"] or 0)
-    if trades <= 0 or trades < PILLAR_MIN_TRADES:
-        return _with_rpe(base, rpe)
-    _apply_state(base)
-    return _with_rpe(base, rpe)
+    if isinstance(record, dict):
+        _merge(base, record)
+        trades = int(base["trades"] or 0)
+        if trades > 0 and trades >= PILLAR_MIN_TRADES:
+            _apply_state(base, setpoint_edge)
+    return _decorate(base, rpe, setpoint_edge)
 
 
-def _with_rpe(base: dict[str, Any], rpe: dict[str, Any] | None) -> dict[str, Any]:
-    """Attach the dopamine channels to the pillar awareness shape."""
-    if not isinstance(rpe, dict):
-        return base
-
-    def _num(key: str, alt: str) -> float:
-        """Read one numeric RPE field, falling back to the alternative key."""
-        raw = rpe.get(key)
-        if not isinstance(raw, (int, float)):
-            raw = rpe.get(alt)
-        if not isinstance(raw, (int, float)):
-            raw = 0.0
-        return round(float(raw), 4)
-
-    base["rpe_phasic"] = _num("phasic", "phasic_rpe")
-    base["rpe_tonic"] = _num("tonic", "tonic_rpe")
-    meta = rpe.get("meta") or rpe.get("v_meta")
-    base["rpe_meta"] = dict(meta) if isinstance(meta, dict) else {}
+def _decorate(
+    base: dict[str, Any],
+    rpe: dict[str, Any] | None,
+    setpoint_edge: float | None = None,
+) -> dict[str, Any]:
+    """Attach the dopamine channels and allostatic setpoint to the shape."""
+    if isinstance(rpe, dict):
+        base["rpe_phasic"] = _num(rpe, "phasic")
+        base["rpe_tonic"] = _num(rpe, "tonic")
+        meta = rpe.get("meta") or rpe.get("v_meta")
+        base["rpe_meta"] = dict(meta) if isinstance(meta, dict) else {}
+    edge = float(base.get("edge", 0.0) or 0.0)
+    setpoint = float(setpoint_edge or 0.0)
+    base["setpoint"] = round(setpoint, 4)
+    base["setpoint_deviation"] = round(edge - setpoint, 4)
+    base["below_setpoint"] = bool(setpoint_edge is not None and edge < setpoint)
     return base
+
+
+def _num(rpe: dict[str, Any], key: str) -> float:
+    raw = rpe.get(key)
+    if not isinstance(raw, (int, float)):
+        raw = 0.0
+    return round(float(raw), 4)
 
 
 def resolve_pillar(
@@ -195,6 +185,8 @@ def pillar_fields(
         "pillar_upright": p["upright"],
         "pillar_edge": p["edge"],
         "pillar_tilt": p["tilt"],
+        "pillar_setpoint": p.get("setpoint", 0.0),
+        "pillar_deviation": p.get("setpoint_deviation", 0.0),
         "win_loss_record": p["record"],
         "win_loss_net": p["net"],
     }

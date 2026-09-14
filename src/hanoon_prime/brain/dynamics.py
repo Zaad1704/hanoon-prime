@@ -18,6 +18,7 @@ from .config import (
     THRESHOLD_MAX,
     THRESHOLD_MIN,
 )
+from .learning_config import ALLOS_TIGHTEN_STEP
 from .realized_ev import CONF_LOSS_AGGRESSIVE_MAX, CONF_LOSS_AGGRESSIVE_STEP
 
 # Rolling quintile constants (from rebuild's adaptive_threshold.py)
@@ -82,7 +83,12 @@ class Dynamics:
         """Current dynamic entry threshold."""
         return self._threshold
 
-    def adapt_threshold(self, prediction_error: float, losing_bins: int = 0) -> None:
+    def adapt_threshold(
+        self,
+        prediction_error: float,
+        losing_bins: int = 0,
+        dyshomeostatic: bool = False,
+    ) -> None:
         """Raise threshold when errors are high, lower when low.
 
         Bounded win-probability predictions (score_to_win_prob) make
@@ -96,7 +102,9 @@ class Dynamics:
         by CONF_LOSS_AGGRESSIVE_STEP per bin — capped at
         CONF_LOSS_AGGRESSIVE_MAX per trade-close. This accelerates
         adaptation from proven-losing regions instead of waiting for the
-        full CONF_MIN_SAMPLES to accumulate.
+        full CONF_MIN_SAMPLES to accumulate. Allostatic dyshomeostasis
+        (Phase B: sustained deviation from the regime setpoint) triggers
+        the same urgency, applied at the smaller ALLOS_TIGHTEN_STEP.
         """
         if prediction_error >= 0.50:
             self._threshold = min(THRESHOLD_MAX, self._threshold + 0.01)
@@ -107,6 +115,8 @@ class Dynamics:
                 CONF_LOSS_AGGRESSIVE_MAX, losing_bins * CONF_LOSS_AGGRESSIVE_STEP
             )
             self._threshold = min(THRESHOLD_MAX, self._threshold + step)
+        elif dyshomeostatic:
+            self._threshold = min(THRESHOLD_MAX, self._threshold + ALLOS_TIGHTEN_STEP)
 
     def set_refractory(self, duration: float = 2.0) -> None:
         """Set refractory period after trade event (neuronal hyperpolarization)."""

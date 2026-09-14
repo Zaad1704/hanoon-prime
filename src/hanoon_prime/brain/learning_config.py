@@ -46,3 +46,11 @@ RPE_LR_GAIN: float = 1.5  # surprise → learning-rate lift (× base LR)
 RPE_LR_MIN: float = 0.5  # modulator floor (never stops learning)
 RPE_LR_MAX: float = 2.0  # modulator ceiling (never over-learns)
 RPE_FILE: Path = STATE_DIR / "juli_rpe.json"
+
+# ── Homeostatic setpoint / interoception (brain/allostasis.py) ────────
+ALLOS_MIN_TRADES: int = 10  # closes in a regime before its setpoint acts
+ALLOS_ALPHA: float = 0.05  # setpoint adaptation (rolling norm, slow)
+ALLOS_MARGIN: float = 0.05  # |deviation| beyond which state is strained
+ALLOS_VIOLATION_MIN: int = 5  # sustained deviations → dyshomeostasis
+ALLOS_TIGHTEN_STEP: float = 0.02  # extra threshold raise while dyshomeostatic
+ALLOS_FILE: Path = STATE_DIR / "juli_allostasis.json"

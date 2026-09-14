@@ -19,6 +19,7 @@ from ..immune import HALIM_EVIDENCE_LEARNING
 from ..reflection.buffer import Fill, Trade, TradeBuffer
 from ..reflection.supervisor import LearningSupervisor
 from ..types import BarSeries, FillInfo
+from .allostasis import AllostaticController
 from .config import HALIM_MOD_BOUND
 from .halim_adapter import HalimAdapter
 from .memory import JuliMemory
@@ -64,6 +65,7 @@ class ConsolidationEngine:
         # Local regime fallback: classifies from shared prices when HALIM
         # is unreachable, so the label never stays "unknown" for long.
         self._detector = RegimeDetector()
+        self._allostasis = AllostaticController()
         self._sleep_engine = sleep_engine
         self.portfolio_risk = PortfolioRiskManager()
         self.safety = SafetyProducer()
@@ -200,11 +202,14 @@ class ConsolidationEngine:
         Edge-vs-break-even awareness from realized trades, written to shared
         state so the fast path, the Inside Man, and the webapp all read the
         same shape. The multi-timescale dopamine channels ride along as the
-        mood signal so the webapp sees the feel next to the geometry.
+        mood signal; the allostatic controller tightens the fallen line when
+        a regime has learned a negative expected-edge norm.
         """
         from .pillar_awareness import compute_pillar_awareness
 
         record = self._realized.win_loss_record() if self._realized else None
+        regime = str(self.state.get("regime_label", "unknown"))
+        allostatic = self._allostasis.update(record, regime)
         self.state.update(
             pillar=compute_pillar_awareness(
                 record,
@@ -213,7 +218,9 @@ class ConsolidationEngine:
                     "tonic": self.state.get("rpe_tonic", 0.0),
                     "meta": self.state.get("rpe_meta", {}),
                 },
-            )
+                setpoint_edge=allostatic["setpoint"],
+            ),
+            allostatic=allostatic,
         )
 
     def _update_regime(self) -> None:

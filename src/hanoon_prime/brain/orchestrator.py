@@ -1039,9 +1039,16 @@ class NeuromorphicBrain:
 
     def _adapt_threshold(self) -> None:
         """Adapt the entry threshold from prediction error and losing bins."""
+        allostatic = self.state.get("allostatic")
+        dys = (
+            bool(allostatic.get("dyshomeostatic"))
+            if isinstance(allostatic, dict)
+            else False
+        )
         self.dynamics.adapt_threshold(
             self.memory.pred_error,
             losing_bins=len(self._realized.losing_conf_bins()),
+            dyshomeostatic=dys,
         )
         self.memory.threshold = self.dynamics.threshold  # survives restart
 
