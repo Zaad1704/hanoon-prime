@@ -1,0 +1,59 @@
+{
+  "data": "data/research/alpaca_180d",
+  "pre_registered": {
+    "entry_from": "10:00",
+    "entry_to": "11:30",
+    "session_close": "15:50",
+    "sweep_max_bars": 10,
+    "stop_cushion_mult": 0.25,
+    "min_rr": 1.0,
+    "fee_r": 0.02,
+    "frozen": "protocols/sweep_reclaim_protocol.md \u00a76"
+  },
+  "spy_veto": true,
+  "min_trades_for_admissible": 30,
+  "diagnostics": {
+    "rvol": {
+      "rvol_gt_1_2_ev": -0.03665471973641832,
+      "rvol_gt_1_2_trades": 185.0,
+      "rvol_le_1_2_ev": -0.19810369022347973,
+      "rvol_le_1_2_trades": 252.0
+    },
+    "long_short": {
+      "long_ev": -0.1792231121856953,
+      "long_trades": 209.0,
+      "short_ev": -0.08539242620517945,
+      "short_trades": 228.0,
+      "pre_1030_ev": -0.10378897774822471,
+      "pre_1030_trades": 235.0,
+      "post_1030_ev": -0.16272948571538765,
+      "post_1030_trades": 202.0
+    }
+  },
+  "pool": {
+    "ev": -0.1042,
+    "wr": 0.4469,
+    "trades": 273.0,
+    "rr": 1.0045,
+    "n_win": 122,
+    "n_loss": 151
+  },
+  "net_pool": {
+    "ev": -0.1257,
+    "wr": 0.4469,
+    "trades": 273.0,
+    "rr": 0.9564,
+    "n_win": 122,
+    "n_loss": 151
+  },
+  "wfa": {
+    "verdict": "INSUFFICIENT",
+    "pooled_sharpe": 0.0,
+    "deflated_edge": 0.0,
+    "pbo": 0.3125,
+    "admissible": 0,
+    "adm_ev": 0.0,
+    "adm_trades": 0.0,
+    "detail": "No ticker reached the OOS min-trade floor \u2014 needs more data."
+  }
+}

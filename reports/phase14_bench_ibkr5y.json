@@ -1,0 +1,59 @@
+{
+  "data": "data/research/ibkr_5y_rth",
+  "pre_registered": {
+    "entry_from": "10:00",
+    "entry_to": "11:30",
+    "session_close": "15:50",
+    "sweep_max_bars": 10,
+    "stop_cushion_mult": 0.25,
+    "min_rr": 1.0,
+    "fee_r": 0.02,
+    "frozen": "protocols/sweep_reclaim_protocol.md \u00a76"
+  },
+  "spy_veto": false,
+  "min_trades_for_admissible": 30,
+  "diagnostics": {
+    "rvol": {
+      "rvol_gt_1_2_ev": -0.08553213939429877,
+      "rvol_gt_1_2_trades": 409.0,
+      "rvol_le_1_2_ev": -0.13492700309940758,
+      "rvol_le_1_2_trades": 729.0
+    },
+    "long_short": {
+      "long_ev": -0.0481942470515499,
+      "long_trades": 538.0,
+      "short_ev": -0.18284162176390423,
+      "short_trades": 600.0,
+      "pre_1030_ev": -0.13107090320249032,
+      "pre_1030_trades": 677.0,
+      "post_1030_ev": -0.09559735986551571,
+      "post_1030_trades": 461.0
+    }
+  },
+  "pool": {
+    "ev": -0.099,
+    "wr": 0.4409,
+    "trades": 1100.0,
+    "rr": 1.0435,
+    "n_win": 485,
+    "n_loss": 615
+  },
+  "net_pool": {
+    "ev": -0.1204,
+    "wr": 0.4373,
+    "trades": 1100.0,
+    "rr": 1.0115,
+    "n_win": 481,
+    "n_loss": 619
+  },
+  "wfa": {
+    "verdict": "FAIL",
+    "pooled_sharpe": -0.087,
+    "deflated_edge": -0.1703,
+    "pbo": 0.5,
+    "admissible": 3,
+    "adm_ev": -0.099,
+    "adm_trades": 1100.0,
+    "detail": "Deflated OOS Sharpe -0.170 <= 0 after 18 trials."
+  }
+}
