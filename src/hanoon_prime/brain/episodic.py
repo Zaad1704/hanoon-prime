@@ -28,6 +28,7 @@ class EpisodicMemory:
         self._capacity = capacity
         self._memory = np.zeros((capacity, len(EPISODIC_KEYS)), dtype=np.float32)
         self._outcomes = np.zeros(capacity, dtype=np.float32)
+        self._contexts = ["" for _ in range(capacity)]
         self._size = 0
         self._pointer = 0
 
@@ -35,24 +36,34 @@ class EpisodicMemory:
         """Reset memory to empty (ironclade cleanup)."""
         self._memory = np.zeros((self._capacity, len(EPISODIC_KEYS)), dtype=np.float32)
         self._outcomes = np.zeros(self._capacity, dtype=np.float32)
+        self._contexts = ["" for _ in range(self._capacity)]
         self._size = 0
         self._pointer = 0
 
-    def add(self, alpha: dict[str, float], outcome: float) -> None:
-        """Store a pattern and its trade outcome."""
+    def add(self, alpha: dict[str, float], outcome: float, context: str = "") -> None:
+        """Store a pattern, its trade outcome, and the context it was learned in."""
         vec = self._build_vector(alpha)
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
         self._memory[self._pointer] = vec
         self._outcomes[self._pointer] = outcome
+        self._contexts[self._pointer] = context
         self._pointer = (self._pointer + 1) % self._capacity
         self._size = min(self._size + 1, self._capacity)
 
     def predict(
-        self, alpha: dict[str, float], k: int = EPISODIC_K
+        self,
+        alpha: dict[str, float],
+        k: int = EPISODIC_K,
+        context: str = "",
     ) -> tuple[float, float]:
-        """Query: return (expected_return, confidence) for this situation."""
+        """Query: return (expected_return, confidence) for this situation.
+
+        When ``context`` matches at least ``EPISODIC_MIN_SAMPLES`` tags, the
+        neighbors are restricted to that context (context-gated recall);
+        otherwise it falls back to the full buffer.
+        """
         if self._size < EPISODIC_MIN_SAMPLES:
             return 0.0, 0.0
         query = self._build_vector(alpha)
@@ -61,20 +72,26 @@ class EpisodicMemory:
             return 0.0, 0.0
         query = query / norm
         active = self._memory[: self._size]
+        outcomes = self._outcomes[: self._size]
+        if context:
+            sel = np.flatnonzero(np.array(self._contexts[: self._size]) == context)
+            if len(sel) >= EPISODIC_MIN_SAMPLES:
+                active = active[sel]
+                outcomes = self._outcomes[sel]
         similarities = np.dot(active, query)
-        k = min(k, self._size)
+        k = min(k, len(active))
         top_idx = np.argpartition(similarities, -k)[-k:]
         top_sims = similarities[top_idx]
-        top_outcomes = self._outcomes[top_idx]
+        top_outcomes = outcomes[top_idx]
         weights = np.exp(top_sims - np.max(top_sims))
         weights = weights / (np.sum(weights) + 1e-12)
         expected_return = float(np.sum(weights * top_outcomes))
         confidence = float(np.mean(top_sims))
         return expected_return, confidence
 
-    def modifier(self, alpha: dict[str, float]) -> float:
-        """Return bounded modifier in [-BOUND, +BOUND]."""
-        exp_ret, confidence = self.predict(alpha)
+    def modifier(self, alpha: dict[str, float], context: str = "") -> float:
+        """Return bounded modifier in [-BOUND, +BOUND], context-gated."""
+        exp_ret, confidence = self.predict(alpha, context=context)
         if confidence < 0.3:
             return 0.0
         raw = exp_ret * confidence

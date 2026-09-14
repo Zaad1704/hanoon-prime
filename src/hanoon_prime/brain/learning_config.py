@@ -63,3 +63,14 @@ SOMATIC_PHASIC_GAIN: float = 0.03  # per-trade surprise magnitude
 SOMATIC_DYS_PENALTY: float = -0.04  # allostatic alarm
 SOMATIC_PRECISION_DAMP: float = 2.0  # negative marker → modifier dampen
 SOMATIC_PRECISION_LOOR: float = 0.6  # never zero the modifiers' voice
+
+# ── Context-dependent extinction (brain/extinction.py) ────────────────
+EXTINCT_MAX: float = 0.10  # inhibition bound (can cancel EPISODIC_MOD_BOUND)
+EXTINCT_MIN_PATTERNS: int = 5  # shares in a context before it can inhibit
+EXTINCT_PERF_ALPHA: float = 0.3  # performance EWMA weight on latest outcome
+EXTINCT_LOSS_BELOW: float = -0.02  # perf below this → grow the inhibition
+EXTINCT_STEP: float = 0.01  # inhibition growth per degraded share
+EXTINCT_DECAY: float = 0.005  # recovery per healthy share
+EXTINCT_OVERLAP: int = 2  # shared signature dims for neighbor inhibition
+EXTINCT_CELLS_MAX: int = 4096  # guard against unbounded signature map
+EXTINCT_FILE: Path = STATE_DIR / "juli_extinction.json"

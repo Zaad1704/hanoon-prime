@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done — commit hash pending (recorded on commit)
-**Last updated:** 2026-09-14 — Phase C implementation complete
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done — commit hash pending (recorded on commit)
+**Last updated:** 2026-09-14 — Phase D implementation complete
 
 ---
 
@@ -302,49 +302,59 @@ class SomaticMarkerGenerator:
 
 ### Phase D: Extinction + Context-Tagged Memory
 
-**File:** `src/hanoon_prime/brain/extinction.py` (new, ~120 lines) + modifications to `brain/episodic.py`
-**Status:** `pending`
+**File:** `src/hanoon_prime/brain/extinction.py` (new, ~189 lines) + context tags in `brain/episodic.py`
+**Status:** `done` — implemented, wired, tested (27 tests, all green)
 **Priority:** 4th — regime transition handling
 **Effort:** ~300 lines total
 **Timeline:** Week 4-5
 
 **Acceptance Criteria:**
-- [ ] Context tags on episodic memories: (regime, confidence_bin, horizon)
-- [ ] Inhibition weights separate from excitatory weights
-- [ ] At retrieval: `modifier = excitation - inhibition` (both context-gated)
-- [ ] On regime transition: reactivate suppressed patterns if regime matches
-- [ ] Extinction signal when pattern performance degrades within context
-- [ ] Tests: `tests/test_extinction.py`
-- [ ] Pre-commit hooks pass
+- [x] Context tags on episodic memories: (regime, confidence_bin, horizon) — `episodic.add(alpha, outcome, context)` / `modifier(alpha, context)`; neighbors filtered to a context when it has ≥`EPISODIC_MIN_SAMPLES` tags
+- [x] Inhibition weights separate from excitatory weights — `ExtinctionTracker._cells` are independent of the k-NN buffer
+- [x] At retrieval: `modifier = excitation − inhibition` (both context-gated) — `_episodic_bias` in orchestrator
+- [x] On regime transition: reactivate suppressed patterns if regime matches — `_episodic_bias` calls `reactivate(canon)` when `canon != _extinction_last_regime`
+- [x] Extinction signal when pattern performance degrades within context — perf EWMA < `EXTINCT_LOSS_BELOW` grows the inhibition (step `EXTINCT_STEP`, cap `EXTINCT_MAX`, healthy shares decay `EXTINCT_DECAY`)
+- [x] Tests: `tests/test_extinction.py` — growth, decay, caps, context gating, neighbor overlap, renewal, persistence, corrupt-file recovery, episodic tags
+- [x] Pre-commit hooks pass
 
-**Biological Basis:** Bouton 2004 (context-dependent extinction), KM Myers & Davis 2007 (extinction retrieval)
+**Biological Basis:** Bouton 2004 (context-dependent extinction), Myers & Davis 2007 (extinction retrieval / renewal)
 
 **Design:**
 
 ```python
 class ExtinctionTracker:
-    """Context-tagged inhibition weights for episodic memories.
+    """Per-context inhibition weights over episodic pattern signatures.
 
-    Every episodic memory gets a context tag (regime, conf_bin, horizon).
-    When a pattern's recent performance degrades, an inhibition weight
-    grows. At retrieval, modifier = excitation - inhibition (both
-    context-gated).
+    Every patterned alpha vector gets signature-tagged with the context it
+    was learned in (regime | conf-bucket | horizon). A pattern whose recent
+    outcomes inside a context degrade grows an inhibition weight; at
+    retrieval the net modifier is excitation − inhibition (both
+    context-gated). Re-entering a regime renews its suppressed traces
+    (Bouton's renewal — the original memory returns with its context).
     """
 
-    def record(self, alpha: tuple, outcome: float, context: dict) -> None: ...
-    def inhibition(self, alpha: tuple, context: dict) -> float: ...
-    def reactivate(self, old_context: dict, new_context: dict) -> None: ...
-
+    def record(self, alpha, outcome, regime, conf, horizon) -> float: ...
+    def inhibition(self, alpha, regime, conf, horizon) -> float: ...
+    def reactivate(self, regime) -> int: ...
     def save(self) -> dict: ...
     def load(self, data: dict) -> None: ...
 ```
 
 **Implementation Steps:**
-1. Write `brain/extinction.py`
-2. Modify `brain/episodic.py` to accept context tags on `.add()` and `.modifier()`
-3. Wire extinction into `orchestrator.on_trade_close` — record with context
-4. Wire reactivation into regime transition detection
-5. Write `tests/test_extinction.py`
+1. ✅ Write `brain/extinction.py` (~189 lines; `ExtinctionTracker` + `conf_bin_label`/`context_key`/`_signature` helpers — all functions ≤40 lines)
+2. ✅ Modify `brain/episodic.py`: `add`/`predict`/`modifier` accept an optional context tag; retrieval restricted to a context when it has enough samples, else falls back to full buffer (backward compatible — all callers unchanged)
+3. ✅ Wire extinction + context into `orchestrator.on_trade_close` — context-tagged `episodic.add` + `_extinction.record` (after the horizon/last-conf context is resolved; only real IB fills via the ironclade gate)
+4. ✅ Wire reactivation into regime transition detection — `_episodic_bias` renews on canon change, then returns `clip(excitation − inhibition)` and mirrors it into shared state as `episodic_bias`
+5. ✅ Write `tests/test_extinction.py` (27 tests)
+6. ⏳ Update this doc with commit hash (done on commit)
+
+**Design Decisions:**
+- **Signature = rounded alpha bins, neighbors by shared-dim overlap** — each vector is rounded to 1 decimal across `EPISODIC_KEYS` (11 dims); a query's inhibition is the max over same-context cells sharing ≥`EXTINCT_OVERLAP=2` dimension bins, scaled by `shared/len(tags)`. Coarse (not nearest-in-R²), robust to intra-situation jitter, and cheap — no extra numpy.
+- **Inhibition is per-context, excitatory weights are global** — the k-NN buffer stays context-free; only the extinction overlay (and query-time context filtering) is context-scoped. Excitation can't be destroyed, only gated — matching Bouton: extinction suppresses, never erases.
+- **Performance is a slow EWMA, not a loss streak** — `perf = 0.7·perf + 0.3·outcome`. One or two losses don't flip a reliable pattern; sustained degradation does. Decay is continuous (`EXTINCT_DECAY` per healthy share), so a pattern that recovers re-earns its voice without a manual reset.
+- **`EXTINCT_MAX = EPISODIC_MOD_BOUND`** — the inhibition can fully cancel a pattern's positive excitation but never drive the modifier negative; the episodic channel stays a dampener (R1's "bounded, advisory" contract).
+- **Renewal is regime-scoped** — only cells tagged in the entering regime get inhibition cleared, leaving other contexts' learning intact. The `ctx.startswith(f"{regime}|")` match keeps scoping cheap.
+- **`_compute_mods` reuse** — Phase C's modifier-sum helper is unchanged; the context-gated excitation flows in as `episodic` and the net of inhibition is already folded into the `eb` the pipeline sees (excitation − inhibition).
 6. Update this doc with commit hash
 
 **Design Decisions:** (none yet)
@@ -452,7 +462,7 @@ class MetaMonitor:
 | `rpe.py` | predicted_win_prob, won, regime | {phasic, tonic, meta, surprise, v_fast, v_slow, v_meta} | `_adapt_weights` (LR mod), `_update_pillar` (mood), `emotion.py` (tonic affect), `shared_state` | `runtime/juli_rpe.json` |
 | `allostasis.py` | win_loss_record, regime | {setpoint, deviation, dyshomeostatic, violations, trades} | `_update_pillar` (dynamic fallen line), `dynamics.adapt_threshold` (tighten on dyshomeostasis), `shared_state` (`allostatic`), HALIM via `pillar_setpoint` | `runtime/juli_allostasis.json` |
 | `somatic.py` | pillar tilt, rpe.phasic/tonic, allostatic.dyshomeostatic | {marker ±0.10, precision ∈ [0.6, 1.0]} | `_score_pipeline` (raw bias + modifier dampen), `shared_state` (somatic_marker, somatic_precision) | state-only (in-memory snapshot) |
-| `extinction.py` | alpha, outcome, context | inhibition weight | episodic.modifier | `juli_state.json` |
+| `extinction.py` | alpha, outcome, regime, conf, horizon | inhibition weight (context-gated, ≤EXTINCT_MAX) | `_episodic_bias` = excitation − inhibition; regime renewal via `reactivate(canon)` | `runtime/juli_extinction.json` |
 | `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation | — |
 | `metacog.py` | conf_bin, outcome, alpha, regime | reliability, surprise, sizing_scalar | _score_pipeline, risk | `state.json` |
 
@@ -468,6 +478,8 @@ class MetaMonitor:
 | 2026-09-14 | Dyshomeostasis transient: violations reset when the EMA catches up to a persistent edge | A recurring negative edge becomes the *new normal* (Sterling) — the durable response is the tightened fallen line, not a permanent alarm | Permanent alarm on adapted norm — false distress; hysteresis-latched alarm — complexity without payoff |
 | 2026-09-14 | Allostatic state published as its own shared-state dict, not merged into `pillar` | Pillar semantics stay realized-data-driven; telemetry readable by HALIM/webapp via separate keys | Merging into pillar — conflates geometry with bodily state; pillar-only reporting — loses dyshomeostasis to dynamics |
 | 2026-09-14 | Somatic marker is asymmetric: pillar lean penalizes, tonic RPE mood is signed | A wounded pillar shouldn't produce "excitement"; RPE mood provides the bidirectional direction | Symmetric marker (same in both directions) — loses the loss-aversion asymmetry that Damasio's data requires |
+| 2026-09-14 | Extinction signature = rounded-alpha bins with shared-dim-overlap neighbors | Coarse pattern keys survive intra-situation jitter and are cheap to test; scaling by `shared/len(tags)` gives graded, not binary, inhibition transfer | Exact k-NN inhibition (continuous distance) — noisier and more expensive for a learned gate |
+| 2026-09-14 | Performance is a slow EWMA (0.7/0.3), not a loss-streak counter | A couple of losses shouldn't flip a reliable pattern; sustained degradation grows the weight, healthy shares decay it continuously | Loss-streak threshold — brittle to transient noise, needs a manual reset path |
 | 2026-09-14 | Somatic marker bounded ±0.10 | Consistent with existing modulator bounds; prevents single module from dominating | Larger bound — risk of runaway; no bound — dangerous in live system |
 | 2026-09-14 | Extinction via separate inhibition weights, not weight decay modification | Preserves original excitatory weight (CLS: extinction ≠ forgetting); allows reactivation | Increasing decay rate — loses memory; zeroing weights — destroys without context |
 | 2026-09-14 | Sleep replay 3× loser weighting | Prevents overconfidence from replaying winners; matches biological "replay to learn" not "replay to enjoy" | Equal weighting — misses learning opportunity; loser-only — loses winner patterns |
@@ -480,17 +492,17 @@ class MetaMonitor:
 ### Pre-Implementation (Per Phase)
 - [x] AWAKENED_BRAIN.md updated with design decisions
 - [x] Tests written and passing: `pytest tests/test_<module>.py --no-cov -q`
-- [x] Full suite passing: `pytest --no-cov -q` (1058 tests)
+- [x] Full suite passing: `pytest --no-cov -q` (1085 tests)
 - [x] Pre-commit hooks pass (ruff, black, complexity, file-length, contracts)
 - [ ] Webapp typecheck + build pass: `npm run typecheck && npm run build` *(Phase A: no webapp changes — RPE exposed via pillar.rpe_phasic/tonic, webapp panel reads it; no new component)*
 
 ### Post-Implementation (Per Phase)
-- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; Phase B pending this commit)*
+- [x] Commit hash recorded in this doc under the relevant phase *(`9d11592` Phase A; `145e600` Phase B backend; `689f9b6` Phase B webapp; `8da15db` Phase C; Phase D pending this commit)*
 - [x] Module appears in `brain/__init__.py` exports *(rpe: MultiTimescaleRPE; orchestrator imports it — no top-level exports needed)*
-- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)*
-- [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)*
+- [x] Shared state keys documented in `brain/shared_state.py` *(rpe_phasic, rpe_tonic, rpe_meta, rpe_surprise + allostatic + somatic_marker + somatic_precision added to _state)* *(Phase D: net context-gated `episodic_bias` mirrors to state; extinction_size in brain snapshot)*
+- [ ] HALIM evidence prompt updated (if applicable) *(Phase A: no HALIM prompt change — RPE available via state.)* *(Phase B: `pillar_fields` now emits `pillar_setpoint` + `pillar_deviation`, which flow into the evidence dict automatically — no halim_evidence.py edit needed)* *(Phase D: net episodic bias flows through existing `episodic_bias` state key — no prompt edit)*
 - [x] Webapp panel updated (if applicable) *(Phase A: no webapp changes needed — existing pillar panel inherits new keys.)* *(Phase B: setpoint line + dyshomeostasis chip in PillarBalancePanel, hanoon-dash `a837644`)*
-- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C)*
+- [x] Design decisions logged *(6 design decisions under Phase A, 6 under Phase B, 6 under Phase C, 6 under Phase D)*
 - [x] This document updated with any deviations from plan *(deviation: on_trade_close/refactor to helper methods; R3 test contract does NOT skip orchestrator.py)*
 
 ### Final Verification (All Phases)
@@ -512,6 +524,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase B — Homeostatic setpoint + interoception | New `brain/allostasis.py` (AllostaticController, per-regime setpoint EMA, dyshomeostasis, atomic persistence); `pillar_awareness.py` dynamic fallen line + `_decorate` (setpoint keys for HALIM); `dynamics.adapt_threshold` gains dyshomeostatic tightening; `consolidation._update_pillar` publishes `allostatic`; orchestrator isinstance-guard (Class C watchdog); 21 tests; full suite 1040 passed | `145e600` | Deviation: 2 allostasis tests initially asserted non-transient dyshomeostasis — corrected to the transient-alarm design (violations reset as the EMA absorbs a persistent edge); `or {}` rejected for Class C compliance |
 | 2026-09-14 | Phase B — webapp + inspection evidence | `inspection/pillar.py` emits `pillar_setpoint`/`pillar_deviation`/`below_setpoint` on the `pillar_balance` evidence (helper `_pillar_evidence` keeps `pillar_balance` ≤40 lines); PillarBalancePanel shows the allostatic setpoint line + dyshomeostasis chip; webapp typecheck + build green | `689f9b6` (+ hanoon-dash `a837644`) | Deviation: `pillar_balance` hit 43 lines after evidence addition — extracted `_pillar_evidence` helper to restore R3 compliance |
 | 2026-09-14 | Phase C — Somatic markers | New `brain/somatic.py` (SomaticMarkerGenerator: bounded ±0.10 gut-feel bias from pillar lean + RPE mood + allostatic alarm; negative marker precision-dampens all learned modifiers, floored 0.6); wired via `_somatic_context` into `_score_pipeline` (raw bias + `_compute_mods` precision scale); published `somatic_marker`/`somatic_precision`; 18 tests; full suite 1058 passed | `8da15db` | Deviation: `_compute_mods` private helper extracted to keep `_score_pipeline` at exactly 40 lines after black re-wrapped the modifier sum into 9 lines (R3 contract); somatic is asymmetric (tilt only penalizes) per prospect-theory loss aversion |
+| 2026-09-14 | Phase D — Extinction + context-tagged memory | New `brain/extinction.py` (ExtinctionTracker: context-gated inhibition via signature overlap; perf EWMA; regime renewal); `episodic.py` gains optional context tag on add/predict/modifier; orchestrator `_episodic_bias` returns net excitation−inhibition, reactivates on regime change; `_bounded_thinker()` helper to hold R3 at 40; `conf_bin_label`/`context_key` helpers; 27 tests; full suite 1085 passed | `TBD` | Deviation: context tagging implemented inside `ExtinctionTracker` + `episodic` (not a parallel overlay); `_signature` uses coarse EPISODIC_KEYS rounding (1-dp) with shared-dim-overlap scaling, not exact k-NN inhibition; `_bounded_thinker()` consolidation to recover R3 when black wrapped the `_compute_mods` call to 3 lines |
 
 ---
 

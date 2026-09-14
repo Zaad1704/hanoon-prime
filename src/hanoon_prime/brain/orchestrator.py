@@ -26,6 +26,7 @@ from .cognitive.nash import NashBrain, NashPrediction
 from .config import (
     _IRONYCLADE,
     DEFAULT_WEIGHTS,
+    EPISODIC_MOD_BOUND,
     GATE_CLOSED_SIZE_SCALAR,
     HALIM_MOD_BOUND,
     NASH_PENALTY_MAX,
@@ -40,6 +41,7 @@ from .episodic import EpisodicMemory
 from .exit_checks import ExitSignal
 from .exit_ladder import ExitLadder
 from .exits import ExitPolicy
+from .extinction import ExtinctionTracker, context_key
 from .gate_advisor import GateAdvisor
 from .horizon_bandit import HorizonBandit
 from .learned_exit import LearnedExitPolicy
@@ -152,6 +154,8 @@ class NeuromorphicBrain:
         self._learned_exit = LearnedExitPolicy()
         self.rpe = MultiTimescaleRPE()
         self._somatic = SomaticMarkerGenerator()
+        self._extinction = ExtinctionTracker()
+        self._extinction_last_regime: str = ""
         self.genome = StrategyGenome(self)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -680,8 +684,8 @@ class NeuromorphicBrain:
         horizon = self._classify_horizon(bars)
         horizon, hz_reason = self._bandit.select(canon, horizon)
         self._apply_regime_weights(canon)
-        # Episodic k-NN modifier queried LIVE (bounded ±EPISODIC_MOD_BOUND).
-        eb = self.episodic.modifier(alpha)
+        # Episodic k-NN modifier queried LIVE (excitation − inhibition).
+        eb = self._episodic_bias(alpha, canon, horizon, ticker)
         self.state.update(episodic_bias=eb)
         hm = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(hm or 0.0)))
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
@@ -697,6 +701,28 @@ class NeuromorphicBrain:
             nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
         )
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    def _extinction_tag(self, ticker: str, canon: str, horizon: str) -> str:
+        """Context tag for the latest decision (regime, conf bucket, horizon)."""
+        conf = self._last_conf.get(ticker, 0.6)
+        return context_key(canon, conf, horizon)
+
+    def _episodic_bias(
+        self,
+        alpha: dict[str, float],
+        canon: str,
+        horizon: str,
+        ticker: str,
+    ) -> float:
+        """Net episodic modifier: excitation minus context-gated inhibition."""
+        if canon != self._extinction_last_regime:
+            self._extinction.reactivate(canon)
+            self._extinction_last_regime = canon
+        tag = self._extinction_tag(ticker, canon, horizon)
+        conf = self._last_conf.get(ticker, 0.6)
+        exc = self.episodic.modifier(alpha, tag)
+        inh = self._extinction.inhibition(alpha, canon, conf, horizon)
+        return float(max(-EPISODIC_MOD_BOUND, min(EPISODIC_MOD_BOUND, exc - inh)))
 
     def _scale_admitted_size(
         self,
@@ -799,6 +825,10 @@ class NeuromorphicBrain:
             return 0.0
         return max(-CONF_BOUND, min(CONF_BOUND, mod))
 
+    def _bounded_thinker(self) -> tuple[float, float]:
+        """Slow-path thinker outputs: (modifier, confidence) — both bounded."""
+        return self._bounded_thinker_modifier(), self._bounded_thinker_confidence()
+
     def _bounded_thinker_risk_scalar(self) -> float:
         """Affective (fear/greed) position-size multiplier from the S2 path."""
         try:
@@ -893,8 +923,7 @@ class NeuromorphicBrain:
     ) -> dict[str, Any]:
         """Compute the blended stabilized score and decision intermediates."""
         somatic, precision = self._somatic_context()
-        thinker_mod = self._bounded_thinker_modifier()
-        thinker_conf = self._bounded_thinker_confidence()
+        thinker_mod, thinker_conf = self._bounded_thinker()
         self.cortex._threshold = self.dynamics.threshold
         base = self.cortex.evaluate(alpha, prior_top=self._realized.dynamic_prior_top())
         nash_pred = self.nash.predict(alpha, base.score, base.direction)
@@ -908,13 +937,12 @@ class NeuromorphicBrain:
         )
         raw = blended * regime_mul + somatic + precision * mods
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
-        confidence = max(0.05, min(0.95, base.confidence + thinker_conf))
         return {
             "base": base,
             "nash_pred": nash_pred,
             "nash_op": nash_op,
             "neuro_score": neuro_score,
-            "confidence": confidence,
+            "confidence": max(0.05, min(0.95, base.confidence + thinker_conf)),
             "raw_score": raw,
             "stabilized": stabilized,
             "final_dir": final_dir,
@@ -1073,13 +1101,18 @@ class NeuromorphicBrain:
         self._update_rpe(ticker, won, canon)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
-        self.episodic.add(self._last_alpha.get(ticker, {}), pnl_pct)
         if self._last_alpha.get(ticker):
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
         if self._neuromorphic is not None:
             self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
         hz = horizon or self._last_horizon.get(ticker, "scalp")
         vp = self._last_vol_pct.get(ticker, vol_pct)
+        last_alpha = self._last_alpha.get(ticker, {})
+        tag = self._extinction_tag(ticker, canon, hz)
+        self.episodic.add(last_alpha, pnl_pct, tag)
+        self._extinction.record(
+            last_alpha, pnl_pct, canon, self._last_conf.get(ticker, 0.6), hz
+        )
         self._learn_strategy_organs(ticker, won, pnl_pct, direction, canon, hz, vp)
         if exit_triggers is not None:
             self._learned_exit.record(0.0, exit_triggers, won)
@@ -1292,6 +1325,7 @@ class NeuromorphicBrain:
             "memory": self.memory.snapshot(),
             "realized": self._realized.snapshot(),
             "episodic_size": self.episodic.size,
+            "extinction_size": self._extinction.size,
             "threshold": self.dynamics.threshold,
             "brain_state": self.state.snapshot(),
             "decision_count": self._decision_count,
@@ -1323,6 +1357,7 @@ class NeuromorphicBrain:
         log.warning("IRONCLADE: resetting all learning state (poisoned data cleanup)")
         # Episodic k-NN memory
         self.episodic.clear()
+        self._extinction.clear()
         # Nash pattern brain
         self.nash = NashBrain()
         # Realized-EV stats (band/conf bins)
