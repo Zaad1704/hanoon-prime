@@ -66,6 +66,29 @@ def _detail(pil: dict[str, Any]) -> str:
     return f"pillar fallen — edge {edge:+.3f} ({record})"
 
 
+def _pillar_evidence(pil: dict[str, Any], mode: str) -> dict[str, Any]:
+    """Map pillar awareness keys to inspection evidence values."""
+    return {
+        "direction_mode": mode,
+        "pillar_state": pil.get("state"),
+        "upright": bool(pil.get("upright", False)),
+        "tilt": pil.get("tilt", 0.0),
+        "edge": pil.get("edge", 0.0),
+        "win_rate": pil.get("win_rate", 0.0),
+        "break_even_wr": pil.get("break_even_wr", 0.0),
+        "wins": pil.get("wins", 0),
+        "losses": pil.get("losses", 0),
+        "trades": pil.get("trades", 0),
+        "win_loss_record": pil.get("record", "0W-0L"),
+        "net_pnl": pil.get("net", 0.0),
+        "r_r": pil.get("r_r", 0.0),
+        "edge_bands": [0.0, PILLAR_EDGE_FALL],
+        "pillar_setpoint": pil.get("setpoint", 0.0),
+        "pillar_deviation": pil.get("setpoint_deviation", 0.0),
+        "below_setpoint": bool(pil.get("below_setpoint", False)),
+    }
+
+
 def pillar_balance(ctx: InspectionContext) -> CheckResult:
     """Win/loss edge pillar — upright means winning, any lean means failing."""
     lc, sc, vl, vs, el, pvl, pvs = _parse_eval_lines(ctx)
@@ -87,24 +110,7 @@ def pillar_balance(ctx: InspectionContext) -> CheckResult:
     mode = cfg.get("direction_mode", TRADING_CONFIG.direction_mode)
     status = _STATE_STATUS.get(str(pil.get("state")), WARN)
     ev = _full_evidence(lc, sc, vl, vs, pvl, pvs, ratio, skew, hm, el)
-    ev.update(
-        {
-            "direction_mode": mode,
-            "pillar_state": pil.get("state"),
-            "upright": bool(pil.get("upright", False)),
-            "tilt": pil.get("tilt", 0.0),
-            "edge": pil.get("edge", 0.0),
-            "win_rate": pil.get("win_rate", 0.0),
-            "break_even_wr": pil.get("break_even_wr", 0.0),
-            "wins": pil.get("wins", 0),
-            "losses": pil.get("losses", 0),
-            "trades": pil.get("trades", 0),
-            "win_loss_record": pil.get("record", "0W-0L"),
-            "net_pnl": pil.get("net", 0.0),
-            "r_r": pil.get("r_r", 0.0),
-            "edge_bands": [0.0, PILLAR_EDGE_FALL],
-        }
-    )
+    ev.update(_pillar_evidence(pil, mode))
     return _cr("pillar_balance", status, _detail(pil), **ev)
 
 
