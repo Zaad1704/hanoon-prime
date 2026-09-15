@@ -50,6 +50,8 @@ class IBExecutor:
         self._closed_trades: list[dict[str, Any]] = []
         self.last_thoughts: dict[str, Any] = {}
         self.on_fill_confirmed: Callable[[str, float], None] | None = None
+        # Mirror IB fills into the brain's consolidation trade buffer.
+        self.on_fill_mirrored: Callable[[dict[str, Any]], None] | None = None
         # IB account context mirrored from ib_cycle each cycle (IB source).
         self._account_feed: dict[str, Any] = {}
         self._winrate_provider: Callable[[], tuple[float, int]] | None = None
@@ -287,6 +289,46 @@ class IBExecutor:
                 "source": "reconciled_exit" if is_synthetic else "ib_fill",
             }
         )
+        if not is_synthetic:
+            self._mirror_fill(
+                ticker, -pos.direction, pos.shares,
+                self._ib_exit_price(ticker) or float(pos.entry_price or 0.0),
+            )
+
+    def _ib_exit_price(self, ticker: str) -> float:
+        """Recover the latest IB exit fill price (child stop/target price)."""
+        try:
+            trades = list(self.ib.trades())
+        except Exception as exc:
+            log.debug("exit price fallback failed for %s: %s", ticker, exc)
+            trades = []
+        for t in reversed(trades):
+            if not t.isDone():
+                continue
+            contract = getattr(t, "contract", None)
+            if not contract or (contract.symbol or "") != ticker:
+                continue
+            px = float(t.order.auxPrice or t.order.lmtPrice or 0.0)
+            if px > 0:
+                return px
+        return 0.0
+
+    def _mirror_fill(self, ticker: str, direction: int, qty: float, price: float) -> None:
+        """Mirror an IB fill into the consolidation trade buffer (sleep replay)."""
+        if self.on_fill_mirrored is None:
+            return
+        try:
+            self.on_fill_mirrored(
+                {
+                    "ticker": ticker,
+                    "direction": direction,
+                    "qty": abs(qty),
+                    "price": price,
+                    "fees": 0.0,
+                }
+            )
+        except Exception as exc:
+            log.debug("buffer mirror failed for %s: %s", ticker, exc)
 
     def _close_summary(self) -> str:
         """Enrich close notifications with IB account + realized context."""
@@ -329,6 +371,8 @@ class IBExecutor:
                 ExitLevels(stop=float(stop or 0.0), target=float(target or 0.0)),
             )
             self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
+            self._mirror_fill(sym, pos.direction, pos.shares,
+                              float(pos.entry_price or 0.0))
 
     def monitor_orders(self, ib_positions: dict[str, Any], streamer: Any) -> None:
         """Monitor ALL parent orders — cancel orphans, trail both."""
@@ -376,6 +420,8 @@ class IBExecutor:
                     ExitLevels(stop=stop, target=target),
                 )
                 self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
+                self._mirror_fill(sym, pos.direction, abs(pos.shares),
+                                  float(pos.entry_price or 0.0))
             else:
                 return
         elif sym not in ib_positions:

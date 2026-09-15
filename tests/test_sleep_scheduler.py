@@ -237,3 +237,86 @@ class TestConsolidationWiring:
         result = eng.run_sleep_replay(replay_list=weighted, duration_sec=0.1)
         assert isinstance(result, SleepResult)
         assert result.patterns_replayed == 1
+
+
+# ── Live feeding (regression: attractors must be populated on close) ──
+class TestLiveFeeding:
+    def test_closes_populate_replayable_attractors(self):
+        """Every REAL close feeds the neuromorphic attractor memory.
+
+        Phase E shipped the scheduler + engine but nothing stored outcomes
+        into AttractorMemory, so _sleep_patterns was always empty and
+        replay never ran. Now on_trade_close stores the decision alpha.
+        """
+        from hanoon_prime.brain.config import EPISODIC_KEYS
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+        from hanoon_prime.brain.shared_state import BrainState
+
+        b = NeuromorphicBrain(brain_state=BrainState(), enable_neuromorphic=True)
+        for i, ticker in enumerate(("AAA", "BBB", "CCC")):
+            alpha = {k: 0.1 + 0.2 * i for k in EPISODIC_KEYS}
+            for _ in range(3):  # create + updates → trade_count reaches 2
+                b._store_decision(ticker, alpha, 0.7, 0.6)
+                b.on_trade_close(ticker=ticker, won=False, pnl_pct=-0.01, direction=1)
+        mem = list(b._neuromorphic.memory)
+        assert len(mem) == 3
+        assert all(a.trade_count == 2 for a in mem)
+        assert len(mem) >= SLEEP_MIN_PATTERNS
+
+    def test_disabled_neuromorphic_skips_quietly(self):
+        """enable_neuromorphic=False keeps the close path a no-op for the organ."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+        from hanoon_prime.brain.shared_state import BrainState
+
+        b = NeuromorphicBrain(brain_state=BrainState(), enable_neuromorphic=False)
+        b._store_decision("AAA", {}, 0.7, 0.6)
+        b.on_trade_close(ticker="AAA", won=True, pnl_pct=0.01, direction=1)
+
+    def test_ib_fill_mirrors_construct_buffer_trades(self, monkeypatch, tmp_path):
+        """Entry + exit IB fills assemble a round-trip in the consolidation buffer."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+        from hanoon_prime.brain.shared_state import BrainState
+        from hanoon_prime.reflection import buffer as buffer_mod
+
+        monkeypatch.setattr(buffer_mod, "_BUFFER_PATH", tmp_path / "trades.json")
+        b = NeuromorphicBrain(brain_state=BrainState(), enable_neuromorphic=True)
+        assert b._consolidation is not None
+        b.on_ib_fill(
+            {"ticker": "AAA", "direction": 1, "qty": 10, "price": 100.0, "fees": 0.5}
+        )
+        b.on_ib_fill(
+            {"ticker": "AAA", "direction": -1, "qty": 10, "price": 105.0, "fees": 0.5}
+        )
+        trades = b._consolidation.buffer.get_trades()
+        assert len(trades) == 1
+        trade = trades[0]
+        assert trade.ticker == "AAA"
+        assert trade.exit_time > trade.entry_time
+        assert trade.win
+
+    def test_sleep_replay_runs_after_live_roundtrip(self, monkeypatch, tmp_path):
+        """Fills + closes are enough for _maybe_sleep_replay to run a cycle."""
+        from hanoon_prime.brain.config import EPISODIC_KEYS
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+        from hanoon_prime.brain.shared_state import BrainState
+        from hanoon_prime.reflection import buffer as buffer_mod
+
+        monkeypatch.setattr(buffer_mod, "_BUFFER_PATH", tmp_path / "trades.json")
+        b = NeuromorphicBrain(brain_state=BrainState(), enable_neuromorphic=True)
+        for i, ticker in enumerate(("AAA", "BBB", "CCC")):
+            alpha = {k: 0.1 + 0.2 * i for k in EPISODIC_KEYS}
+            for _ in range(3):
+                b._store_decision(ticker, alpha, 0.7, 0.6)
+                b.on_trade_close(ticker=ticker, won=False, pnl_pct=-0.01, direction=1)
+        b.on_ib_fill(
+            {"ticker": "AAA", "direction": 1, "qty": 10, "price": 100.0, "fees": 0.0}
+        )
+        b.on_ib_fill(
+            {"ticker": "AAA", "direction": -1, "qty": 10, "price": 101.0, "fees": 0.0}
+        )
+        eng = b._consolidation._sleep_engine
+        assert eng is not None
+        assert eng._cycle_count == 0
+        b._consolidation._maybe_sleep_replay(session_close=True)
+        assert eng._cycle_count >= 1
+        assert eng.last_replay is not None

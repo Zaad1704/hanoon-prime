@@ -18,7 +18,6 @@ from ..edge import score_to_win_prob
 from ..hippocampus import Hippocampus
 from ..immune import DELIBERATION_TRACE_ENABLED, DIRECTION_MIN_SCORE
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
-from ..types import FillInfo
 from . import horizons
 from .cognitive.emotion import CONF_BOUND, RISK_CEIL, RISK_FLOOR
 from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
@@ -26,6 +25,7 @@ from .cognitive.nash import NashBrain, NashPrediction
 from .config import (
     _IRONYCLADE,
     DEFAULT_WEIGHTS,
+    EPISODIC_KEYS,
     EPISODIC_MOD_BOUND,
     GATE_CLOSED_SIZE_SCALAR,
     HALIM_MOD_BOUND,
@@ -1139,8 +1139,7 @@ class NeuromorphicBrain:
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
         if self._last_alpha.get(ticker):
             self.nash.record_outcome(self._last_alpha[ticker], 0.0, won)
-        if self._neuromorphic is not None:
-            self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
+        self._store_neuromorphic_outcome(ticker, won, pnl_pct)
         hz = horizon or self._last_horizon.get(ticker, "scalp")
         vp = self._last_vol_pct.get(ticker, vol_pct)
         last_alpha = self._last_alpha.get(ticker, {})
@@ -1153,6 +1152,26 @@ class NeuromorphicBrain:
         if exit_triggers is not None:
             self._learned_exit.record(0.0, exit_triggers, won)
         self._learn_from_real(ticker, won, pnl_pct, direction, canon, self.rpe.surprise)
+
+    def _store_neuromorphic_outcome(
+        self, ticker: str, won: bool, pnl_pct: float
+    ) -> None:
+        """Feed a closed trade into the neuromorphic organ.
+
+        Applies the STDP reward AND stores the decision alpha as an
+        attractor so sleep replay has consolidated patterns to rehearse.
+        AttractorMemory is not persisted, so every close must repopulate it.
+        """
+        if self._neuromorphic is None:
+            return
+        self._neuromorphic.learn_from_outcome(ticker, won, pnl_pct)
+        alpha = self._last_alpha.get(ticker, {})
+        self._neuromorphic.store_outcome(
+            ticker,
+            [float(alpha.get(k, 0.5)) for k in EPISODIC_KEYS],
+            won,
+            pnl_pct,
+        )
 
     def _adapt_threshold(self) -> None:
         """Adapt the entry threshold from prediction error and losing bins."""
@@ -1293,19 +1312,25 @@ class NeuromorphicBrain:
         return self._learned_exit.count
 
     def on_ib_fill(self, fill: dict[str, Any]) -> None:
-        """Route IB fill data to consolidation engine."""
-        if self._consolidation is not None:
-            self._consolidation.on_trade_close(
-                fill["ticker"],
-                fill.get("won", False),
-                fill.get("pnl_pct", 0.0),
-                fill.get("direction", 1),
-                FillInfo(
-                    qty=fill.get("qty", 1.0),
-                    avg_price=fill.get("price", 0.0),
-                    fees=fill.get("fees", 0.0),
-                ),
+        """Mirror an IB fill (entry or exit) into the consolidation trade buffer.
+
+        Feeds the round-trip ledger that sleep replay and the reflection
+        supervisor consume; per-close learning stays on on_trade_close.
+        """
+        if self._consolidation is None:
+            return
+        from ..reflection.buffer import SELL, Fill
+
+        self._consolidation.buffer.on_fill(
+            Fill(
+                ticker=fill["ticker"],
+                side=SELL if float(fill.get("direction", 1)) < 0 else 1,
+                qty=abs(float(fill.get("qty", 0.0))),
+                price=float(fill.get("price", 0.0)),
+                time=time.time(),
+                commission=float(fill.get("fees", 0.0)),
             )
+        )
 
     def sleep_replay(self, is_market_open: bool = False) -> SleepResult:
         """OFFLINE: Sleep replay for memory consolidation."""

@@ -61,7 +61,12 @@ class TestThinkerConsumed:
         assert 0.05 <= base <= 0.95 and 0.05 <= neg <= 0.95
         assert base - neg >= 0.09  # both nudges applied (bounded apart)
 
-    def test_risk_scalar_clamped_into_size(self):
+    def test_risk_scalar_clamped_into_size(self, tmp_path, monkeypatch):
+        import hanoon_prime.brain.meta_label as mlabel
+        import hanoon_prime.brain.metacog as mcog
+
+        monkeypatch.setattr(mlabel, "META_FILE", tmp_path / "meta.json")
+        monkeypatch.setattr(mcog, "METACOG_FILE", tmp_path / "metacog.json")
         b = _brain()
         sizing = SizingResult(shares=100, risk_pass=True)
         ctx = {"stabilized": 0.9, "confidence": 0.6}
