@@ -93,3 +93,35 @@ METACOG_SURPRISE_THRESHOLD: float = 0.55  # novelty floor that piques curiosity
 METACOG_CURIOUS_SCALE: float = 1.06  # explore: nudge size up (stable pillar)
 METACOG_RETREAT_SCALE: float = 0.80  # retreat: shrink size (falling pillar)
 METACOG_FILE: Path = STATE_DIR / "juli_metacog.json"
+
+# ── Researched-strategy library (brain/strategy_registry.py) ──────────
+# Halim researches strategies from the web; the registry stores them as
+# bounded modifier bundles (sizing scalar + score modifier). Everything a
+# researched strategy may hold is clamped — advisory, never a verdict.
+STRATEGY_MIN_SAMPLES: int = 10  # realized closes before a strategy may win
+STRATEGY_MAX_POOL: int = 24  # library ceiling (keeps the pool auditable)
+STRATEGY_SIZING_MIN: float = 0.8  # researched sizing floor
+STRATEGY_SIZING_MAX: float = 1.2  # researched sizing ceiling
+STRATEGY_SCORE_MOD_BOUND: float = 0.03  # researched score-modifier bound
+STRATEGY_FILE: Path = STATE_DIR / "juli_strategy_registry.json"
+
+# ── Strategy bandit (brain/strategy_bandit.py) ─────────────────────────
+STRATEGY_EPS0: float = 0.20  # starting exploration share per regime
+STRATEGY_EPS_FLOOR: float = 0.02  # exploration floor as JULI learns
+STRATEGY_EPS_DECAY: float = 120.0  # strategies per decay-halving lifetime
+STRATEGY_MARGIN: float = 0.15  # posterior lead over default to override
+STRATEGY_REWARD_SCALE: float = 4.0  # pnl_pct → reward via 0.5 + pnl*scale
+STRATEGY_BANDIT_FILE: Path = STATE_DIR / "juli_strategy_bandit.json"
+
+# ── Strategy research cadence (brain/strategy_research.py) ─────────────
+RESEARCH_BASE_URL: str = "http://127.0.0.1:8765"
+RESEARCH_MAX_PER_CYCLE: int = 3  # strategies ingested from one research pass
+RESEARCH_TIMEOUT: float = 8.0  # bounded research HTTP call
+RESEARCH_INTERVAL_SEC: float = 300.0  # at most one research pass per 5 min
+RESEARCH_TOPICS: tuple[str, ...] = (
+    "mean reversion regimes",  # keep the brain honest: classic edges only
+    "trend pullback entries",
+    "volatility compression breakouts",
+    "momentum continuation patterns",
+    "range suppression fade",
+)

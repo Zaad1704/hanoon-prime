@@ -54,6 +54,7 @@ _INFERENCE_ROUTES = frozenset(
         "/v1/evolve",
         "/v1/chat",
         "/v1/generate",
+        "/v1/research",
     }
 )
 
@@ -472,6 +473,51 @@ def _halim_generate(kind: str, prompt: str, *, path_hint: str = "") -> Dict[str,
         return {"ok": False, "error": str(exc)[:120]}
 
 
+def _halim_research(query: str, source: str = "") -> Dict[str, Any]:
+    """Internet research via Halim: bounded web evidence → LM → strategies.
+
+    Uses the research LM layer so JULI (a numeric brain) can "read the
+    internet" through Halim's text ability. Downgraded responses keep the
+    bot safe: no evidence → LM reasons from training; LM offline → empty
+    result (the registry keeps its prior state).
+    """
+    try:
+        from halim.research import (
+            build_prompt,
+            fetch_web_context,
+            parse_research,
+        )
+        ctx = fetch_web_context(query)
+        evidence = ctx.get("evidence", "") if ctx.get("ok") else ""
+        prompt = build_prompt(query, evidence)
+        out = _get_worker().complete(
+            prompt, purpose="research", priority=PRIORITY_LOW
+        )
+        if not out.get("ok"):
+            return {
+                "ok": False,
+                "reason": out.get("reason", "lm_unavailable"),
+                "evidence": bool(evidence),
+            }
+        parsed = parse_research(out.get("text", ""))
+        if source:
+            for s in parsed.get("strategies", []):
+                s["source"] = str(source)[:80]
+        rec = _record_action({
+            "capability": "research",
+            "action": "strategy_research",
+            "input": query[:800],
+            "output": out.get("text", "")[:800],
+            "source": "halim_lm",
+        })
+        return {"ok": parsed.get("ok", True), "strategies": parsed.get("strategies", []),
+                "regime_hint": parsed.get("regime_hint", "unknown"),
+                "evidence": bool(evidence),
+                "action_recorded": rec.get("recorded", False)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:120]}
+
+
 class HalimHandler(BaseHTTPRequestHandler):
     server_version = "HalimServe/1-active"
 
@@ -641,6 +687,11 @@ class HalimHandler(BaseHTTPRequestHandler):
             kind = str(body.get("kind", "code"))
             prompt = str(body.get("prompt", ""))
             out = _halim_generate(kind, prompt, path_hint=str(body.get("path", "")))
+            self._json(200 if out.get("ok") else 503, out)
+        elif self.path == "/v1/research":
+            query = str(body.get("query", ""))
+            source = str(body.get("source", ""))
+            out = _halim_research(query, source=source)
             self._json(200 if out.get("ok") else 503, out)
         else:
             self._json(404, {"ok": False, "error": "not_found"})

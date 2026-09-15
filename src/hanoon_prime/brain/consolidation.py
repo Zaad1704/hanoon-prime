@@ -51,11 +51,13 @@ class ConsolidationEngine:
         interval: float = CYCLE_INTERVAL,
         sleep_engine: Optional[SleepReplayEngine] = None,
         realized: Optional["RealizedStats"] = None,
+        strategy_research: Optional[Any] = None,
     ) -> None:
         self.state = brain_state
         self.interval = interval
         self.memory = JuliMemory()
         self._realized = realized
+        self._strategy_research = strategy_research
         self.halim = HalimAdapter(base_url=halim_url)
         self.thinker = Thinker()
 
@@ -178,6 +180,7 @@ class ConsolidationEngine:
         self._update_policy()
         self._update_pillar()
         self._maybe_sleep_replay()
+        self._maybe_research()
         self.news.maybe_refresh()
         self._persist_state()
         log.info(
@@ -187,6 +190,14 @@ class ConsolidationEngine:
             self.state.get("thinker_modifier", 0.0),
             self._news_bias(),
         )
+
+    def _maybe_research(self) -> None:
+        """Throttled strategy research pass (HALIM 'reads the internet')."""
+        if self._strategy_research is not None:
+            try:
+                self._strategy_research.maybe_run()
+            except Exception as e:
+                log.debug("strategy research cycle failed: %s", e)
 
     def _news_bias(self) -> float:
         """Bounded news sentiment bias for the latest alpha ticker (±0.03)."""

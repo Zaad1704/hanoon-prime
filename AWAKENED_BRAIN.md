@@ -4,8 +4,8 @@
 > Every implementation session MUST update this document before committing.**
 
 **Created:** 2026-09-14
-**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done, Phase G (full-brain live monitor) done — backend `4b9abbd`, hanoon-dash `0b605cc`; sleep-wiring gap fix applied (live closes now feed `AttractorMemory` + IB fills feed the consolidation `TradeBuffer`, so auto sleep replay can actually cycle); webapp coverage gap closed — every backend `/brain` block now has a rendered panel (hanoon-dash `0acb556`)
-**Last updated:** 2026-09-15 — Phase G: A→Z webapp brain monitor + raw inspector shipped
+**Status:** Phase A done, Phase B done, Phase C done, Phase D done, Phase E done, Phase F done, Phase G (full-brain live monitor) done — backend `4b9abbd`, hanoon-dash `0b605cc`; sleep-wiring gap fix applied (live closes now feed `AttractorMemory` + IB fills feed the consolidation `TradeBuffer`, so auto sleep replay can actually cycle); webapp coverage gap closed — every backend `/brain` block now has a rendered panel (hanoon-dash `0acb556`); **Phase H (internet strategy research) done** — HALIM `/v1/research` endpoint + JULI `StrategyRegistry`/`StrategyBandit`/`StrategyResearch` closed loop (persistent, bounded, advisory); webapp `StrategyResearchPanel` rendered in Brainlab
+**Last updated:** 2026-09-15 — Phase H: internet-researched strategies fed through a regime-conditioned bandit with lock-in gates
 
 ---
 
@@ -31,14 +31,21 @@ Position closes
       ├─ episodic.add (k-NN pattern memory)
       ├─ nash.record_outcome (pattern veto)
       ├─ neuromorphic.learn_from_outcome (SNN STDP)
-      ├─ strategy organs: meta_label, horizon_bandit, regime_weights, learned_exit
+├─ strategy organs: meta_label, horizon_bandit, regime_weights, learned_exit, strategy_bandit, strategy_registry
       └─ _learn_from_real:
            Reflector._adapt_weights (loss-aversion 2.4:1, LR 0.02, decay 0.999)
            → regime weights hot-swap into cortex
            → realized.add_outcome + add_confidence_outcome
            → exits.adapt_from_realized
            → advisor.record_outcome
-  → Next tick reads all of it back
+
+Slow path (S2, 30s): ConsolidationEngine._cycle
+  → regime detection → HALIM modifier
+  → _maybe_research: StrategyResearch.maybe_run (300s throttle)
+      → HALIM /v1/research (bounded web fetch + LM)
+      → StrategyRegistry.ingest (bounded, ≤MAX_POOL)
+  → Thinker 5-pillar fusion → evidence learning
+  → policy/safety pulse → pillar update → state persistence
 ```
 
 ### 1.3 Outcome Stores
@@ -52,6 +59,8 @@ Position closes
 | `runtime/juli_meta_label.json` | MetaLabelModel | SGD weights, Brier score |
 | `runtime/juli_horizon_bandit.json` | HorizonBandit | Beta posteriors per regime×horizon |
 | `runtime/juli_regime_weights.json` | RegimeWeights | Per-regime weight vectors |
+| `runtime/juli_strategy_registry.json` | StrategyRegistry | Researched strategy library (bounded sizing/score_mod bundles, trials/wins) seeded with 3 educated priors |
+| `runtime/juli_strategy_bandit.json` | StrategyBandit | Beta posteriors per regime×strategy, decay clock, selects/overrides/explores counters |
 
 ### 1.4 What Works Well
 
@@ -493,6 +502,30 @@ class MetaMonitor:
 
 ---
 
+### Phase H: Internet Strategy Research (closed loop)
+
+**Backend:** `halim/research.py` (bounded fetch + LM parse), `halim/serve.py` (`POST /v1/research`), `brain/strategy_registry.py`, `brain/strategy_bandit.py`, `brain/strategy_research.py`, `brain/strategy_priors.py`, `brain/learning_config.py` (STRATEGY_*/RESEARCH_*), `brain/orchestrator.py` (wiring), `brain/consolidation.py` (S2 cadence)
+**Webapp:** hanoon-dash — `StrategyResearchPanel` in Brainlab
+**Status:** `done` — backend `pending-hash`, webapp `pending-hash`
+**Priority:** edge — JULI, not her developer, discovers and commits capital to working strategies (the way a trained trader keeps what works)
+
+**Acceptance Criteria:**
+- [x] HALIM exposes `POST /v1/research` — bounded web fetch (Yahoo feed or URL), structured `{strategies[], regime_hint, evidence}` via LM, silent-fail to 503 (`lm_unavailable`)
+- [x] JULI runs research on a throttled S2 cadence (`StrategyResearch.maybe_run`, `RESEARCH_INTERVAL_SEC=300`, topic-drawn) without ever blocking the fast path
+- [x] Results land in a persistent, bounded `StrategyRegistry` (3 seeded priors, `STRATEGY_MAX_POOL=24`, clamping; sizing scalar + score_mod bundles that can never gate a verdict)
+- [x] `StrategyBandit` (Thompson per regime×strategy, decaying ε, lock-in only past `STRATEGY_MIN_SAMPLES` + `STRATEGY_MARGIN`) decides default / explore / strategy_override; stays advisory (R1 — cortex is the sole verdict source)
+- [x] Orchestrator applies nudge on admitted size + score_mod and learns from real closes; `/brain` ships `strategy_research{registry, bandit, research, in_play}`
+- [x] Webapp typecheck + build green; panel renders registry, bandit, research loop, in-play
+
+**Design Decisions:**
+1. **HALIM fetches, JULI decides** — JULI cannot generate text, so the LM lives server-side (`halim`) and returns structured candidates; JULI's registry/bandit decide commitment. Research output is advisory scaffolding, never a verdict (R1).
+2. **Bandit override follows the horizon-bandit geometry already in the brain** — Beta(1,1) priors, per-regime cells, `select` reasons (`default`/`explore`/`strategy_override`), overriding the default only when the default cell has ≥ `STRATEGY_MIN_SAMPLES` real trials and the researched arm leads by ≥ `STRATEGY_MARGIN`.
+3. **Bounds everywhere, poisoning-safe** — registry clamps sizing to `[0.8, 1.2]` and score_mod to ±`0.03`; `reset()` wipes to seeded priors; pool caps at `STRATEGY_MAX_POOL`; corrupt files reseed. `nudge_for` re-clamps on read so a tampered file can't widen a nudge.
+4. **Research is throttled, self-healing, and non-fatal** — 5-minute cadence via the S2 `ConsolidationEngine`, `network` failures degrade to `{"ok": false, reason:"lm_unavailable"}` and are swallowed; the loop never touches the S1 fast path.
+5. **R3 discipline** — registry/bandit recompacted to 200/195 lines (priors extracted to `strategy_priors.py`), all functions ≤40 lines; `get(...) or {}` carries the `# array-safe` annotation for the FIXES.md Class C watchdog.
+
+---
+
 ## 4. Module Contracts Summary
 
 | Module | Input | Output | Wired Into | Persisted |
@@ -503,6 +536,10 @@ class MetaMonitor:
 | `extinction.py` | alpha, outcome, regime, conf, horizon | inhibition weight (context-gated, ≤EXTINCT_MAX) | `_episodic_bias` = excitation − inhibition; regime renewal via `reactivate(canon)` | `runtime/juli_extinction.json` |
 | `sleep_scheduler.py` | last_trade_time, session_close | trigger bool + replay weights | consolidation `_cycle` + `stop()`; `neurons/sleep.py` `replay_list` override | — |
 | `metacog.py` | conf, outcome, alpha, episodic, pillar_state | reliability, surprise, sizing_scalar, curiosity_scale | `_score_pipeline` (surprise), `_scale_admitted_size` (sizing + curiosity), `_learn_from_real` (update), `snapshot` | `runtime/juli_metacog.json` |
+| `strategy_registry.py` | researched strategy candidate | `{id, sizing, score_mod, ...}` bounded library + `nudge_for`/`ids_for`/`record` | `_strategy_select` (ids), `_compute_mods` (score_mod), `_scale_admitted_size` (sizing), `_learn_strategy_organs` (record), snapshot | `runtime/juli_strategy_registry.json` |
+| `strategy_bandit.py` | regime, strategy ids, real pnl | `(strategy_id, reason)` — default/explore/strategy_override | `_strategy_select` (selection), `_learn_strategy_organs` (update), snapshot | `runtime/juli_strategy_bandit.json` |
+| `strategy_research.py` | cadence + topic | ingested strategy ids, last_result, total_ingested | ConsolidationEngine `_maybe_research` (S2), snapshot | state-only (registry/bandit persist) |
+| `halim/research.py` | query | `{strategies[], regime_hint, evidence}` (bounded fetch + LM) | serve.py `POST /v1/research` | — |
 
 ---
 
@@ -584,6 +621,7 @@ class MetaMonitor:
 | 2026-09-14 | Phase F — Metacognitive confidence-of-confidence | New `brain/metacog.py` (MetaMonitor: rolling calibration correlation `0.5+0.5·Pearson(bin,outcome)`, sizing_scalar shrink, surprise from episodic recall `1−mean top-k cosine`, curiosity_scale from surprise + pillar state); orchestrator wires `_meta_cog` into `_score_pipeline` (surprise in ctx), `_publish_meta` (state keys), `_scale_admitted_size` (sizing + curiosity), `_learn_from_real` (update), `reset_learning` (clear), `snapshot`; `_tag_ctx` helper keeps `_evaluate_fast` ≤40; 25 tests; full suite 1132 passed | `683c0a9` | Deviation: `update(conf, won)` bins internally (doc showed `conf_bin` int); `surprise(alpha, episodic)` drops the unused `regime` arg; `_score_pipeline` return dropped unused `advisor_delta`/`thinker_conf` entries to make R3 room for `surprise` (both unread downstream); curiosity gates sizing only (R1) instead of the entry threshold; persists to `runtime/juli_metacog.json` not `state.json` |
 | 2026-09-15 | Phase G — Full-brain A→Z live monitor | Backend: `ExtinctionTracker`/`MetaMonitor`/`SleepReplayEngine` gain snapshot builders; new `brain/telemetry_summaries.py` holds `extinction_summary` (counts + top-16 cells); orchestrator snapshot ships `extinction`/`metacog`/enriched `sleep_engine`; telemetry `/brain` passes the blocks through. Webapp (hanoon-dash): BRAIN tab rebuilt — RpePanel, AllostasisPanel, SomaticPanel, ExtinctionPanel, SleepPanel, MetacogPanel, BrainSeriesChart sparklines (300-sample store buffer), BrainHealthStrip (live/stale/tripped/unknown), InsideManInspector (raw JSON tree + copy). Verified: full prime suite 1141 passed, R3/R3b green, dash typecheck+build green, Playwright live render with no console errors | `4b9abbd` (+ hanoon-dash `0b605cc`) | Deviation: extinction snapshot moved off the tracker into `telemetry_summaries.py` — the method pushed `extinction.py` to 218 lines and broke the R3b 200-line file contract; cell list capped at top-16 by inhibition then pattern mass. Runtime files `juli_metacog.json`/`juli_extinction.json` were transiently removed during a test-isolation check — in-memory bot state is authoritative and persisted on the next write |
 | 2026-09-15 | Webapp coverage gap closed (Phase G follow-up) | Audit of every backend `/brain` key found 10 exposed blocks with no purpose-built panel (`neuromorphic`, `realized`, `advisor`, `nash`, `exits_adaptive`, `meta_label`, `horizon_bandit`, `regime_weights`, `learned_exit`, `genome` — only `nash_modifier` was reachable via gauges). hanoon-dash: 5 new panels — NeuromorphicPanel (init/attractors/neurons/synapses), RealizedPanel (band×conf W/L + RR samples), LearningPanel (meta-label + bandit + regime weights + best-arm-per-regime), ExitPolicyPanel (keep-ratio/stale/adapts + learned-exit trades), GatesPanel (advisor Δ/WR/tightening + nash opinion/conf + genome version/base θ/live θ) — wired into BrainlabTab; `fmtPct` added to lib/fmt.ts. hanoon-dash typecheck + production build green | (+ hanoon-dash `0acb556`) | Deviation: none — panels render `{}`-safe with EmptyState fallbacks when the engine hasn't published yet; `realized` renders W/L per band/conf bin (not a heatmap — data volume is too small at n≈50); Gauge used for keep-ratio drift guard. Backend unchanged — this is a pure webapp delivery commit |
+| 2026-09-15 | Phase H — Internet strategy research loop | Backend: HALIM `halim/research.py` (bounded Yahoo/URL fetch + LM parse → structured strategies; `POST /v1/research` in serve.py); JULI `brain/strategy_registry.py` (persistent bounded library, 3 seeded priors, sizing/score_mod clamps), `brain/strategy_bandit.py` (Thompson per regime×strategy, decaying ε, lock-in past MIN_SAMPLES+MARGIN), `brain/strategy_research.py` (S2 cadence client, 300s throttle), `brain/strategy_priors.py` (priors extracted to hold R3), `learning_config.py` (STRATEGY_*/RESEARCH_*), orchestrator wiring (`_strategy_select`, ctx tags, `_compute_mods`/`_scale_admitted_size` nudges, `_learn_strategy_organs`, snapshot `strategy_research`, reset), consolidation `_maybe_research`; `/brain` ships registry+bandit+research+in_play. 13 new tests; full suite 1158 passed, coverage 70% (≥17% gate), mypy strict green | `pending-hash` | Deviation: registry/bandit recompacted to 200/195 lines to hold the R3 file contract (priors extracted to `strategy_priors.py`); `nudge_for` reuses `_bundle` clamp; bandit `_load` fixed to `setdefault` per-regime rows (persisted `unknown` cells); `get(...) or {}` carries the `# array-safe` annotation for the FIXES.md Class C watchdog |
 | 2026-09-15 | Sleep-wiring gap fix (Phase G live verification) | Found live: `/_brain` showed `sleep_engine.initialized: true` but `cycle_count: 0, last_replay: null` forever. Root cause — two dead wires: (1) nothing called `bridge.store_outcome`, so `AttractorMemory` never grew and `_sleep_patterns()` stayed below `SLEEP_MIN_PATTERNS=3`; (2) `orchestrator.on_ib_fill` was dead code, so the consolidation `TradeBuffer` never assembled a round-trip and `_maybe_sleep_replay` bailed at `get_trades()==[]`. Fix: `on_trade_close` → `_store_neuromorphic_outcome` (decision alpha stored as attractor, win/pnl from IB-sourced close); `on_ib_fill` rewired to mirror entry/exit IB fills straight into the `TradeBuffer` (per-close learning stays on `on_trade_close`); `ib_executor` mirrors entry fills at `_notify_open_fills`/`_handle_parent` and the exit at `_record_exit` (`_ib_exit_price` recovers the child-order stop/target fill; synthetic reconciles skipped). `test_sleep_replay_runs_after_live_roundtrip` proves a full fill-close round trip now cycles the engine. Full suite 1145 passed, R3/R3b green | `67de46b` (+ hanoon-dash `85feacc`) | Deviation: `on_ib_fill` no longer runs the per-close thinker/emotion/halim postmortem (it only mirrors the fill ledger — close learning was already fired by `on_trade_close`, double-processing would have doubled HALIM LLM calls per close). Pre-existing `test_risk_scalar_clamped_into_size` made hermetic — it hard-asserted 85 shares while assuming a cold meta model, but the live bot's `runtime/juli_meta_label.json` (n=866, warm) shrinks the meta scalar; test now retargets `META_FILE`/`METACOG_FILE` to tmp so scalars are 1.0 |
 
 ---

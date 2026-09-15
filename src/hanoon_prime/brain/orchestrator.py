@@ -65,11 +65,21 @@ from .risk import RiskEngine, SizingResult
 from .rpe import MultiTimescaleRPE
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .somatic import SomaticMarkerGenerator
+from .strategy_bandit import DEFAULT_STRATEGY, StrategyBandit
 from .strategy_genome import StrategyGenome
+from .strategy_registry import StrategyRegistry
+from .strategy_research import StrategyResearch
 from .telemetry_summaries import extinction_summary
 from .thinker import TOTAL_MOD_BOUND
 
 log = logging.getLogger(__name__)
+
+
+def _scale_shares(shares: int, factor: float) -> int:
+    """Floor integer share count scaled by an advisory factor."""
+    return max(1, int(shares * factor))
+
+
 NEURO_BLEND: float = 0.3
 
 
@@ -138,6 +148,7 @@ class NeuromorphicBrain:
             brain_state=self.state,
             sleep_engine=self._sleep_engine,
             realized=self._realized,
+            strategy_research=self.strategy_research,
         )
 
     def _init_strategy_organs(self) -> None:
@@ -160,9 +171,14 @@ class NeuromorphicBrain:
         self._extinction_last_regime: str = ""
         self._meta_cog = MetaMonitor()
         self.genome = StrategyGenome(self)
+        self.strategy_registry = StrategyRegistry()
+        self.strategy_bandit = StrategyBandit()
+        self.strategy_research = StrategyResearch(registry=self.strategy_registry)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
         self._last_horizon: dict[str, str] = {}
+        self._last_strategy: dict[str, str] = {}
+        self._last_strategy_reason: dict[str, str] = {}
         self._wkey: tuple[str, int] = ("", -1)
         self._wversion: int = 0
 
@@ -687,12 +703,13 @@ class NeuromorphicBrain:
         horizon = self._classify_horizon(bars)
         horizon, hz_reason = self._bandit.select(canon, horizon)
         self._apply_regime_weights(canon)
+        strat_id, strat_reason = self._strategy_select(canon, ticker)
         # Episodic k-NN modifier queried LIVE (excitation − inhibition).
         eb = self._episodic_bias(alpha, canon, horizon, ticker)
         self.state.update(episodic_bias=eb)
         hm = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(hm or 0.0)))
         ctx = self._score_pipeline(ticker, alpha, _r, hm, eb, cross=cross)
-        self._tag_ctx(ctx, horizon, hz_reason, canon)
+        self._tag_ctx(ctx, horizon, hz_reason, canon, strat_id, strat_reason)
         self._publish_meta(ctx)
         self._deliberation_coherence(ctx, _r, hm, eb, ticker)
         sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
@@ -705,12 +722,20 @@ class NeuromorphicBrain:
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
 
     def _tag_ctx(
-        self, ctx: dict[str, Any], horizon: str, hz_reason: str, canon: str
+        self,
+        ctx: dict[str, Any],
+        horizon: str,
+        hz_reason: str,
+        canon: str,
+        strat_id: str,
+        strat_reason: str,
     ) -> None:
-        """Attach horizon + regime metadata to the decision context."""
+        """Attach horizon + regime + strategy metadata to the decision context."""
         ctx["horizon"] = horizon
         ctx["horizon_reason"] = hz_reason
         ctx["regime_canon"] = canon
+        ctx["strategy"] = strat_id
+        ctx["strategy_reason"] = strat_reason
 
     def _publish_meta(self, ctx: dict[str, Any]) -> None:
         """Publish metacognitive reliability + surprise to shared state."""
@@ -748,6 +773,21 @@ class NeuromorphicBrain:
         inh = self._extinction.inhibition(alpha, canon, conf, horizon)
         return float(max(-EPISODIC_MOD_BOUND, min(EPISODIC_MOD_BOUND, exc - inh)))
 
+    def _strategy_select(self, canon: str, ticker: str) -> tuple[str, str]:
+        """Pick the researched strategy for this regime (bounded, advisory).
+
+        The strategy bandit (Thompson per regime cell, decaying ε) decides
+        whether to override the default with a researched strategy; the
+        override is remembered per ticker so the close path learns the same
+        (regime, strategy) cell that selected it. Never a verdict (R1).
+        """
+        ids = self.strategy_registry.ids_for(canon)
+        strat_id, reason = self.strategy_bandit.select(canon, ids)
+        self._last_strategy[ticker] = strat_id
+        self._last_strategy_reason[ticker] = reason
+        self.state.update(strategy_in_play=strat_id, strategy_reason=reason)
+        return strat_id, reason
+
     def _scale_admitted_size(
         self,
         ctx: dict[str, Any],
@@ -764,27 +804,27 @@ class NeuromorphicBrain:
         if not sizing.risk_pass:
             return
         if self._advisor.is_tightening():
-            sizing.shares = max(1, int(sizing.shares * GATE_CLOSED_SIZE_SCALAR))
-        # Affective state (fear/greed from live streak) scales size within
-        # [RISK_FLOOR, RISK_CEIL] — a losing streak shrinks, a hot streak
-        # grows. Bounded, advisory (never refuses/forces an entry).
-        sizing.shares = max(1, int(sizing.shares * self._bounded_thinker_risk_scalar()))
+            sizing.shares = _scale_shares(sizing.shares, GATE_CLOSED_SIZE_SCALAR)
+        # Affective (fear/greed) + metacog scalars all stay within
+        # [RISK_FLOOR, RISK_CEIL]; advisory, never a verdict (R1).
+        sizing.shares = _scale_shares(
+            sizing.shares, self._bounded_thinker_risk_scalar()
+        )
         vol_pct = self._vol_pct(bars)
         meta_scale = self._meta.size_scalar(
             ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
         )
-        sizing.shares = max(1, int(sizing.shares * meta_scale))
-        # Metacognition: unreliable calibration shrinks size; curiosity
-        # (novel situation) explores when the pillar is stable, retreats
-        # when it is falling. Advisory — sizing only, never a verdict (R1).
-        sizing.shares = max(1, int(sizing.shares * self._meta_cog.sizing_scalar()))
-        sizing.shares = max(
-            1,
-            int(
-                sizing.shares
-                * self._meta_cog.curiosity_scale(
-                    float(ctx.get("surprise", 0.0)), self._pillar_state()
-                )
+        sizing.shares = _scale_shares(sizing.shares, meta_scale)
+        strat_id = str(ctx.get("strategy", DEFAULT_STRATEGY))
+        if strat_id != DEFAULT_STRATEGY:
+            sizing.shares = _scale_shares(
+                sizing.shares, self.strategy_registry.nudge_for(strat_id)["sizing"]
+            )
+        sizing.shares = _scale_shares(sizing.shares, self._meta_cog.sizing_scalar())
+        sizing.shares = _scale_shares(
+            sizing.shares,
+            self._meta_cog.curiosity_scale(
+                float(ctx.get("surprise", 0.0)), self._pillar_state()
             ),
         )
 
@@ -939,6 +979,11 @@ class NeuromorphicBrain:
         thinker_mod: float,
     ) -> float:
         """Sum all non-regime modifiers (somatic is separate, added in raw)."""
+        strat_id = self._last_strategy.get(ticker, DEFAULT_STRATEGY)
+        if strat_id != DEFAULT_STRATEGY:
+            strat_mod = self.strategy_registry.nudge_for(strat_id)["score_mod"]
+        else:
+            strat_mod = 0.0
         return (
             halim
             + episodic
@@ -947,6 +992,7 @@ class NeuromorphicBrain:
             + cross
             - advisor_delta
             + thinker_mod
+            + strat_mod
         )
 
     def _score_pipeline(
@@ -1235,6 +1281,10 @@ class NeuromorphicBrain:
             won,
         )
         self._bandit.update(canon, hz, pnl_pct)
+        strat_id = self._last_strategy.get(ticker, DEFAULT_STRATEGY)
+        self.strategy_bandit.update(canon, strat_id, pnl_pct)
+        if strat_id != DEFAULT_STRATEGY:
+            self.strategy_registry.record(strat_id, won)
         self._regime_weights.learn(
             canon, self._last_alpha.get(ticker, {}), won, direction
         )
@@ -1402,6 +1452,12 @@ class NeuromorphicBrain:
             "regime_weights": self._regime_weights.snapshot(),
             "learned_exit": {"trades": self._learned_exit_trade_count()},
             "genome": self.genome.get_genome(),
+            "strategy_research": {
+                "registry": self.strategy_registry.snapshot(),
+                "bandit": self.strategy_bandit.snapshot(),
+                "research": self.strategy_research.snapshot(),
+                "in_play": dict(self._last_strategy),
+            },
         }
         if self._sleep_engine is not None:
             result["sleep_engine"] = self._sleep_engine.snapshot()
@@ -1416,25 +1472,19 @@ class NeuromorphicBrain:
         horizon bandit, regime weights, learned exits, and indicator weights.
         """
         log.warning("IRONCLADE: resetting all learning state (poisoned data cleanup)")
-        # Episodic k-NN memory
         self.episodic.clear()
         self._extinction.clear()
         self._meta_cog.clear()
-        # Nash pattern brain
         self.nash = NashBrain()
-        # Realized-EV stats (band/conf bins)
         self._realized.reset()
-        # Meta-label model
         self._meta = MetaLabelModel()
-        # Horizon bandit
         self._bandit = HorizonBandit()
-        # Per-regime weights
         self._regime_weights = RegimeWeights()
-        # Learned exit policy
         self._learned_exit = LearnedExitPolicy()
-        # Gate advisor
         self._advisor = GateAdvisor()
-        # Reset indicator weights to immune defaults
+        self.strategy_registry.reset()
+        self.strategy_bandit.reset()
+        self.strategy_research.reset()
         from ..immune import INDICATOR_WEIGHTS
 
         self.memory.set_weights(INDICATOR_WEIGHTS)
@@ -1445,6 +1495,8 @@ class NeuromorphicBrain:
         self._last_regime.clear()
         self._last_vol_pct.clear()
         self._last_horizon.clear()
+        self._last_strategy.clear()
+        self._last_strategy_reason.clear()
         self._decision_count = 0
         log.warning("IRONCLADE: learning state reset complete")
 
