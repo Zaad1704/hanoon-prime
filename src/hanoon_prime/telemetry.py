@@ -32,6 +32,7 @@ from urllib.parse import urlparse
 from ._ib_marks import mark_positions
 from .inspection.notify import manifest_notify
 from .config import TRADING_CONFIG
+from .brain.learning_telemetry import consolidation, exploration, learning_state
 from .immune import DAILY_LOSS_LIMIT, TELEMETRY_AUTH_ENABLED, TELEMETRY_PORT
 from .memory import Journal
 
@@ -882,7 +883,7 @@ class _H(BaseHTTPRequestHandler):
             return {}
         s = brain.snapshot()
         mem = s.get("memory", {})
-        return {
+        result: dict[str, Any] = {
             "threshold": round(s.get("threshold", 0.58), 4),
             "decision_count": s.get("decision_count", 0),
             "episodic_size": s.get("episodic_size", 0),
@@ -903,6 +904,33 @@ class _H(BaseHTTPRequestHandler):
             "extinction": s.get("extinction", {}),
             "metacog": s.get("metacog", {}),
             "strategy_research": s.get("strategy_research", {}),
+        }
+        result["learning"] = self._learning_blocks(result, mem)
+        return result
+
+    def _learning_blocks(self, result: dict[str, Any], mem: dict[str, Any]) -> dict[str, Any]:
+        """Exploration/consolidation observability blocks derived from snapshot."""
+        sr = result.get("strategy_research") or {}  # array-safe: dict-typed
+        bandit = sr.get("bandit") or {}  # array-safe: dict-typed
+        arms = bandit.get("arms") or {}  # array-safe: dict-typed
+        ex = exploration(
+            bandit,
+            arms,
+            research_ingested=int(
+                (sr.get("research") or {}).get("total_ingested", 0)  # array-safe: dict-typed
+            ),
+        )
+        con = consolidation(
+            arms=arms,
+            realized=result.get("realized") or {},  # array-safe: dict-typed
+            sleep=result.get("sleep_engine") or {},  # array-safe: dict-typed
+            memory=mem,
+            pillar=(result.get("brain_state") or {}).get("pillar") or {},  # array-safe: dict-typed
+        )
+        return {
+            **learning_state(ex, con),
+            "exploration": ex,
+            "consolidation": con,
         }
 
     def _system2_state(self) -> dict[str, Any]:

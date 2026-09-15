@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .arm_stats import beta_variance
 from .learning_config import (
     STRATEGY_BANDIT_FILE,
     STRATEGY_EPS0,
@@ -130,13 +131,15 @@ class StrategyBandit:
         with self._lock:
             per_regime: dict[str, Any] = {}
             for regime, row in self._cells.items():
-                ranked = sorted(
-                    ((sid, self._mean(c), self._trials(c)) for sid, c in row.items()),
-                    key=lambda t: -t[1],
-                )
                 per_regime[regime] = [
-                    {"strategy": sid, "mean": round(m, 3), "n": int(n)}
-                    for sid, m, n in ranked
+                    {
+                        "strategy": sid,
+                        "mean": round(self._mean(c), 3),
+                        "n": int(self._trials(c)),
+                        "ab": [round(c[0], 3), round(c[1], 3)],
+                        "variance": round(beta_variance(c[0], c[1]), 4),
+                    }
+                    for sid, c in sorted(row.items(), key=lambda kv: -self._mean(kv[1]))
                 ]
             return {
                 "selects": self._selects,
@@ -151,10 +154,7 @@ class StrategyBandit:
         """Wipe posteriors and the decay clock."""
         with self._lock:
             self._cells = {}
-            self._selects = 0
-            self._overrides = 0
-            self._explores = 0
-            self._total_trials = 0
+            self._selects = self._overrides = self._explores = self._total_trials = 0
             self._save()
 
     def _load(self) -> None:

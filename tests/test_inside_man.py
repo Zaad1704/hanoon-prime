@@ -50,23 +50,23 @@ def _eval_line(token: str) -> str:
 
 def test_brain_halim_bounded_ok_within_band(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.memo["runtime_state"] = {"brain_state": {"halim_modifier": 1.0}}
+    ctx.memo["runtime_state"] = {"brain_state": {"halim_modifier": 0.02}}
     r = brain_halim_bounded(ctx)
     assert r.status == OK
-    assert r.evidence["halim_modifier"] == 1.0
+    assert r.evidence["halim_modifier"] == 0.02
 
 
-@pytest.mark.parametrize("mod", [0.0, 0.5, 1.5, 0.7, 1.25])
+@pytest.mark.parametrize("mod", [0.0, 0.01, 0.02, 0.03, -0.03])
 def test_brain_halim_bounded_ok_contract_values(tmp_path: Path, mod: float) -> None:
-    """0.0 (cold) and the full [0.5, 1.5] warm band are valid."""
+    """0.0 (cold) and the full ±0.03 additive band are valid."""
     ctx = _ctx(tmp_path)
     ctx.memo["runtime_state"] = {"brain_state": {"halim_modifier": mod}}
     assert brain_halim_bounded(ctx).status == OK
 
 
-@pytest.mark.parametrize("mod", [0.03, 0.05, 0.49, 1.51, 2.0, -0.5])
+@pytest.mark.parametrize("mod", [0.04, 0.05, 0.5, 1.5, 2.0, -0.5])
 def test_brain_halim_bounded_fails_outside_contract(tmp_path: Path, mod: float) -> None:
-    """Anything outside {0.0} ∪ [0.5, 1.5] is a corrupted HALIM modifier."""
+    """Anything with |modifier| > ±0.03 is a corrupted HALIM modifier."""
     ctx = _ctx(tmp_path)
     ctx.memo["runtime_state"] = {"brain_state": {"halim_modifier": mod}}
     r = brain_halim_bounded(ctx)
