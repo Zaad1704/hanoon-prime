@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from hanoon_prime.brain.policy.verdict import Verdict
 from hanoon_prime.brain.shadow_book import ShadowBook, ShadowClose, ShadowOpen
 
 
@@ -149,3 +150,67 @@ def test_shadow_close_feeds_only_bandit_and_registry() -> None:
     assert "sizing" not in data
     assert "risk" not in data
     assert "pillars" not in data
+
+
+# ── orchestrator wiring (auto-correction learning path) ─────────────────
+
+
+class TestOrchestratorShadowWiring:
+    """Verifies the shadow hook feeds ONLY the whitelisted organs."""
+
+    def test_learn_from_shadow_updates_bandit_and_registry(self) -> None:
+        """A closed paper trial moves both advisory organs."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+
+        brain = NeuromorphicBrain(enable_neuromorphic=False)
+        before_b = brain.strategy_bandit.snapshot()
+        before_r = brain.strategy_registry.count()
+        realized_before = brain._realized.total_trades
+        brain._learn_from_shadow(
+            ShadowClose(
+                ticker="T",
+                direction=1,
+                strategy_id="trend-pullback",
+                canon="unknown",
+                horizon="scalp",
+                entry_price=100.0,
+                exit_price=102.0,
+                age=90.0,
+                pnl_pct=0.02,
+                won=True,
+            )
+        )
+        after_b = brain.strategy_bandit.snapshot()
+        assert after_b["total_trials"] > before_b["total_trials"]
+        assert brain.strategy_registry.count() >= before_r
+        # Realized PnL must NOT move — shadow is paper, not cash.
+        assert brain._realized.total_trades == realized_before
+
+    def test_shadow_eligible_excludes_policy_declines(self) -> None:
+        """direction_rejected/no_signal/session must never become trials."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+
+        brain = NeuromorphicBrain(enable_neuromorphic=False)
+        assert not brain._shadow_eligible(Verdict(ticker="T", stage="trading_policy"))
+        assert not brain._shadow_eligible(Verdict(ticker="T", reason="no_signal"))
+        assert not brain._shadow_eligible(Verdict(ticker="T", reason="no_data"))
+        assert not brain._shadow_eligible(Verdict(ticker="T", reason="eval_error"))
+        # Eligible cost reasons.
+        assert brain._shadow_eligible(Verdict(ticker="T", reason="not_sized"))
+        assert brain._shadow_eligible(Verdict(ticker="T", reason="low_penny_score"))
+        assert brain._shadow_eligible(Verdict(ticker="T", reason="sized_to_zero"))
+        assert brain._shadow_eligible(Verdict(ticker="T", stage="portfolio_risk"))
+        assert brain._shadow_eligible(Verdict(ticker="T", stage="governor"))
+
+    def test_shadow_observe_opens_on_eligible_decline(self) -> None:
+        """An ignored directional signal becomes a zero-size paper trial."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+
+        brain = NeuromorphicBrain(enable_neuromorphic=False)
+        snap = {"last": 100.0}
+        result = {"direction": 1, "regime_canon": "range", "horizon": "scalp"}
+        brain._last_strategy["T"] = "range-fade"
+        brain._shadow_observe(
+            "T", snap, result, Verdict(ticker="T", reason="not_sized")
+        )
+        assert "T" in brain._shadow_book.snapshot()["open"]

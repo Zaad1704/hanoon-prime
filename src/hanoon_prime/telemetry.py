@@ -946,15 +946,14 @@ class _H(BaseHTTPRequestHandler):
                 )
             ),
         )
+        brain_state = result.get("brain_state") or {}  # array-safe: dict-typed
+        pillar_state = brain_state.get("pillar") or {}  # array-safe: dict-typed
         con = consolidation(
             arms=arms,
             realized=result.get("realized") or {},  # array-safe: dict-typed
             sleep=result.get("sleep_engine") or {},  # array-safe: dict-typed
             memory=mem,
-            pillar=(result.get("brain_state") or {}).get(
-                "pillar"
-            )  # array-safe: dict-typed
-            or {},
+            pillar=pillar_state,
         )
         return {
             **learning_state(ex, con),
