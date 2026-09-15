@@ -162,6 +162,20 @@ fi
 rm -f "$_BOT_PID_FILE"
 ok "HANOON Prime bot stopped"
 
+# ── 2a. Bot Supervisor (auto-restart) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The <--restart> supervisor treats a dead bot as a crash and respawns it,
+# so it MUST be stopped here or the bot will keep coming back. Kill it
+# only AFTER the bot is down so its SIGTERM handler cannot interfere.
+log "Stopping bot supervisor (disables auto-restart)..."
+_stop_pid_file "$PID_DIR/bot_supervisor.pid" "Bot supervisor" 3
+_stop_pgrep "bot_supervisor\.py" "Bot supervisor (orphan)" 3
+ok "Bot supervisor stopped"
+
+# The supervisor may have auto-respawned the bot during the graceful wait
+# above — sweep any orphan so nothing survives its parent.
+_stop_pgrep "hanoon_prime\.cli" "Prime bot (orphan)" 5
+ok "Prime bot orphan sweep complete"
+
 # ── 2b. Learning Vault Release ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 log "Releasing learning vault..."
 if [[ -f "$REBUILD_ROOT/scripts/vault_release.sh" ]]; then

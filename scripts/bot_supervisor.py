@@ -169,6 +169,49 @@ def log(msg: str) -> None:
     print(f"[{ts}] [supervisor] {msg}", flush=True)
 
 
+def _pid_alive(pid: int) -> bool:
+    """Return True when a process with this PID is running."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _lock_is_stale() -> bool:
+    """Return True when SUPERVISOR_PID exists but its owner is gone."""
+    try:
+        pid = int(SUPERVISOR_PID.read_text().strip())
+    except (OSError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    return not _pid_alive(pid)
+
+
+def _acquire_lock() -> bool:
+    """Grab the single-instance lock via an atomic O_EXCL create.
+
+    Serializes supervisor launches so two instances can never fight over
+    the bot/telemetry ports or overwrite each other's pidfile. A stale
+    lock left by a dead supervisor is reclaimed on the first retry.
+    """
+    for attempt in range(2):
+        try:
+            fd = os.open(SUPERVISOR_PID, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            if attempt == 0 and _lock_is_stale():
+                SUPERVISOR_PID.unlink(missing_ok=True)
+                continue
+            return False
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"{os.getpid()}\n")
+        return True
+    return False  # pragma: no cover
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="HANOON Prime bot supervisor")
     parser.add_argument(
@@ -197,10 +240,15 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    if not _acquire_lock():
+        log(
+            "Another bot_supervisor is already running "
+            f"(lock held by {SUPERVISOR_PID.name}) — exiting"
+        )
+        return 1
+
     # Env var override: BOT_AUTO_RESTART=1 enables restart
     auto_restart = args.restart or os.environ.get("BOT_AUTO_RESTART", "") == "1"
-
-    SUPERVISOR_PID.write_text(str(os.getpid()))
 
     if auto_restart:
         log(

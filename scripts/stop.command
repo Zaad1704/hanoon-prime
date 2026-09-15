@@ -44,6 +44,10 @@ _STOP_PIDFILE "guardian monitor" "$MONITOR_PID" "scripts/production_monitor.py -
 _STOP_PIDFILE "trading bot" "$BOT_PID" "hanoon_prime.cli"
 _STOP_PIDFILE "bot supervisor" "$ROOT/runtime/pids/bot_supervisor.pid" "bot_supervisor.py"
 
+# The <--restart> supervisor may have auto-respawned the bot before being
+# stopped — sweep any orphan so it cannot survive its parent.
+pkill -f "hanoon_prime\.cli" 2>/dev/null || true
+
 "$ROOT/scripts/halim_stop.sh"
 
 echo
