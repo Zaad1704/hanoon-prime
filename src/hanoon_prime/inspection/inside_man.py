@@ -1,7 +1,7 @@
 """Inside Man checks — runtime guards for the Sep-11 fixes.
 
-1. HALIM multiplier within {0.0} ∪ [0.5, 1.5] — a corrupted/adversarial
-   external HALIM value must not silently skew the brain.
+1. HALIM modifier stays within ±HALIM_MOD_BOUND (default 0.03) — the
+   brain publishes a bounded additive advisory, not a multiplier.
 2. ib_pnl-dependent exits (profit_lock/giveback) actually fire.
 3. Losing confidence bins surface for aggressive threshold learning.
 4. No zero-conviction |score| verdict is labelled direction_rejected.
@@ -16,13 +16,11 @@ from .checks import FAIL, OK, WARN, CheckResult
 from .ctx import InspectionContext
 from .probe import EVAL_MARKER, _log_lines, journal_tail, runtime_state
 
-# halim_modifier is the *external* HALIM advisory multiplier (clamped to
-# [0.5, 1.5] by HalimAdapter, 0.0 when cold by ConsolidationEngine) — NOT the
-# ±0.03 additive modulator from brain.config.HALIM_MOD_BOUND (that lives in
-# deliberation.py, which is not on the live ScoreComputer path). Guard the
-# multiplier's real contract band instead.
-_HALIM_MULT_MIN: float = 0.5
-_HALIM_MULT_MAX: float = 1.5
+# halim_modifier is a ±0.03 additive bounded modulator (HALIM_MOD_BOUND),
+# clamped *before* it enters shared state by ConsolidationEngine._update_halim.
+# The old code exposed a [0.5, 1.5] multiplier that was removed in the Sep-11
+# fix (commit range): the brain now publishes the additive form.
+_HALIM_MOD_BOUND: float = 0.03
 
 # Must match brain.realized_ev.CONF_LOSS_STREAK_WARN
 _CONF_LOSS_WARN: int = 10
@@ -45,7 +43,12 @@ def _cr(name: str, status: str, detail: str = "", **ev: Any) -> CheckResult:
 
 
 def brain_halim_bounded(ctx: InspectionContext) -> CheckResult:
-    """HALIM multiplier stays within its {0.0} ∪ [0.5, 1.5] contract band."""
+    """HALIM modifier stays within ±HALIM_MOD_BOUND (default 0.03).
+
+    The brain publishes a bounded additive advisory clamped before it
+    enters shared state.  A value beyond the bound indicates a regression
+    in ConsolidationEngine._update_halim's clamping logic.
+    """
     bs = runtime_state(ctx).get("brain_state", {})
     if not isinstance(bs, dict):
         return _cr("brain_halim_bounded", WARN, detail="brain_state missing")
@@ -57,18 +60,18 @@ def brain_halim_bounded(ctx: InspectionContext) -> CheckResult:
             f"halim_modifier not numeric: {hm!r}",
             halim_modifier=hm,
         )
-    band = [_HALIM_MULT_MIN, _HALIM_MULT_MAX]
-    if hm == 0.0 or _HALIM_MULT_MIN <= hm <= _HALIM_MULT_MAX:
-        detail = "HALIM advisory cold (cache miss)" if hm == 0.0 else "in contract band"
+    bound = _HALIM_MOD_BOUND
+    if abs(float(hm)) <= bound + 1e-9:
+        detail = "HALIM advisory cold (cache miss)" if hm == 0.0 else "within bound"
         return _cr(
-            "brain_halim_bounded", OK, detail, halim_modifier=round(hm, 4), band=band
+            "brain_halim_bounded", OK, detail, halim_modifier=round(hm, 4), bound=bound
         )
     return _cr(
         "brain_halim_bounded",
         FAIL,
-        f"halim_modifier {hm:.4f} outside {band} — corrupted HALIM output",
+        f"halim_modifier {hm:.4f} outside ±{bound} — clamping regression",
         halim_modifier=round(hm, 4),
-        band=band,
+        bound=bound,
     )
 
 
