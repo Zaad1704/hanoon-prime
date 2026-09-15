@@ -41,7 +41,9 @@ log = __import__("logging").getLogger(__name__)
 # Shared flag: main cycle checks this and flattens when non-empty
 # Carries order type ("market" or "limit") + optional limit_price
 # so the flatten executor can place the right order kind.
-_FLATTEN_REQUESTED: dict[str, Any] = {}  # {"positions": N, "order_type": "market", "limit_price": None}
+_FLATTEN_REQUESTED: dict[str, Any] = (
+    {}
+)  # {"positions": N, "order_type": "market", "limit_price": None}
 
 # Snapshot cadence. 1s = real-time feel without hammering IB; the refresher
 # thread runs at this rate forever, independent of any browser.
@@ -497,7 +499,12 @@ class _H(BaseHTTPRequestHandler):
         elif action == "resume":
             self._resume_halt()
         else:
-            self._r(400, {"error": 'expected {"action": "enable"|"disable"|"resume"|"kill_release"}'})
+            self._r(
+                400,
+                {
+                    "error": 'expected {"action": "enable"|"disable"|"resume"|"kill_release"}'
+                },
+            )
 
     def _toggle_safety_net(self, en: bool) -> None:
         """Enable/disable the safety net via brain or hippocampus fallback."""
@@ -906,9 +913,26 @@ class _H(BaseHTTPRequestHandler):
             "strategy_research": s.get("strategy_research", {}),
         }
         result["learning"] = self._learning_blocks(result, mem)
+        result["shadow"] = self._shadow_block(result)
         return result
 
-    def _learning_blocks(self, result: dict[str, Any], mem: dict[str, Any]) -> dict[str, Any]:
+    def _shadow_block(self, result: dict[str, Any]) -> dict[str, Any] | None:
+        """Zero-size paper-book observability block."""
+        sr = result.get("strategy_research") or {}  # array-safe: dict-typed
+        book = sr.get("shadow_book") or {}  # array-safe: dict-typed
+        if not book:
+            return None
+        return {
+            "open_count": int(book.get("open_count", 0)),
+            "closed_trials": int(book.get("closed_trials", 0)),
+            "win_rate": float(book.get("win_rate", 0.0)),
+            "edge": round(float(book.get("edge", 0.0)), 6),
+            "ttl_seconds": float(book.get("ttl_seconds", 0.0)),
+        }
+
+    def _learning_blocks(
+        self, result: dict[str, Any], mem: dict[str, Any]
+    ) -> dict[str, Any]:
         """Exploration/consolidation observability blocks derived from snapshot."""
         sr = result.get("strategy_research") or {}  # array-safe: dict-typed
         bandit = sr.get("bandit") or {}  # array-safe: dict-typed
@@ -917,7 +941,9 @@ class _H(BaseHTTPRequestHandler):
             bandit,
             arms,
             research_ingested=int(
-                (sr.get("research") or {}).get("total_ingested", 0)  # array-safe: dict-typed
+                (sr.get("research") or {}).get(  # array-safe: dict-typed
+                    "total_ingested", 0
+                )
             ),
         )
         con = consolidation(
@@ -925,7 +951,10 @@ class _H(BaseHTTPRequestHandler):
             realized=result.get("realized") or {},  # array-safe: dict-typed
             sleep=result.get("sleep_engine") or {},  # array-safe: dict-typed
             memory=mem,
-            pillar=(result.get("brain_state") or {}).get("pillar") or {},  # array-safe: dict-typed
+            pillar=(result.get("brain_state") or {}).get(
+                "pillar"
+            )  # array-safe: dict-typed
+            or {},
         )
         return {
             **learning_state(ex, con),
@@ -1342,7 +1371,9 @@ class _H(BaseHTTPRequestHandler):
                 "limit_price": limit_price,
             }
         )
-        log.warning("FLATTEN requested: %d positions, order_type=%s", pos_count, order_type)
+        log.warning(
+            "FLATTEN requested: %d positions, order_type=%s", pos_count, order_type
+        )
         self._r(
             200,
             {

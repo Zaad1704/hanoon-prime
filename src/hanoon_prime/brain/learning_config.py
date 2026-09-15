@@ -113,6 +113,15 @@ STRATEGY_MARGIN: float = 0.15  # posterior lead over default to override
 STRATEGY_REWARD_SCALE: float = 4.0  # pnl_pct → reward via 0.5 + pnl*scale
 STRATEGY_BANDIT_FILE: Path = STATE_DIR / "juli_strategy_bandit.json"
 
+# ── Shadow book (brain/shadow_book.py) ─────────────────────────────────
+# Zero-size paper trials feed the advisory strategy organs (bandit +
+# registry) so they stop starving for real closes. Offline default; only
+# the whitelisted organs ever see shadow outcomes.
+SHADOW_TTL: float = 5400.0  # paper hold before forced close (90 min)
+SHADOW_MAX_OPEN: int = 12  # concurrent open paper positions
+SHADOW_MAX_HISTORY: int = 600  # retained closed trials (ring buffer)
+SHADOW_BOOK_FILE: Path = STATE_DIR / "juli_shadow_book.json"
+
 # ── Strategy research cadence (brain/strategy_research.py) ─────────────
 RESEARCH_BASE_URL: str = "http://127.0.0.1:8765"
 RESEARCH_MAX_PER_CYCLE: int = 3  # strategies ingested from one research pass

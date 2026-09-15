@@ -63,6 +63,7 @@ from .regime import RegimeDetector
 from .regime_weights import RegimeWeights
 from .risk import RiskEngine, SizingResult
 from .rpe import MultiTimescaleRPE
+from .shadow_book import ShadowBook, ShadowClose, ShadowOpen
 from .shared_state import DEFAULT_POLICY_STATE, BrainState
 from .somatic import SomaticMarkerGenerator
 from .strategy_bandit import DEFAULT_STRATEGY, StrategyBandit
@@ -173,6 +174,7 @@ class NeuromorphicBrain:
         self.genome = StrategyGenome(self)
         self.strategy_registry = StrategyRegistry()
         self.strategy_bandit = StrategyBandit()
+        self._shadow_book = ShadowBook()
         self.strategy_research = StrategyResearch(registry=self.strategy_registry)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -267,6 +269,9 @@ class NeuromorphicBrain:
         )
         if verdict.action == ENTER:
             self.governor.claim_entry()
+            self._shadow_drop(ticker)
+        else:
+            self._shadow_observe(ticker, snap, result, verdict)
         return verdict
 
     def _check_snapshot_valid(self, snap: dict[str, Any] | None) -> str:
@@ -787,6 +792,75 @@ class NeuromorphicBrain:
         self._last_strategy_reason[ticker] = reason
         self.state.update(strategy_in_play=strat_id, strategy_reason=reason)
         return strat_id, reason
+
+    # ── shadow book (zero-size paper trials, data-starvation fix) ────────
+
+    def _shadow_drop(self, ticker: str) -> None:
+        """A real trade covered this signal — abandon any paper trial."""
+        if self._shadow_book is not None:
+            self._shadow_book.drop(ticker)
+
+    def _shadow_observe(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        result: dict[str, Any],
+        verdict: Verdict,
+    ) -> None:
+        """Close a TTL-expired paper trial, then open one for this decline."""
+        book = self._shadow_book
+        if book is None:
+            return
+        price = float(snap.get("last") or snap.get("mid") or 0.0)
+        if price <= 0:
+            return
+        closed = book.sweep_close(ticker, price)
+        if closed is not None:
+            self._learn_from_shadow(closed)
+        if int(result.get("direction", 0)) == 0:
+            return
+        if not self._shadow_eligible(verdict):
+            return
+        book.open(
+            ShadowOpen(
+                ticker=ticker,
+                direction=int(result.get("direction", 0)),
+                strategy_id=str(self._last_strategy.get(ticker, DEFAULT_STRATEGY)),
+                canon=str(result.get("regime_canon", "unknown")),
+                horizon=str(result.get("horizon", "scalp")),
+            ),
+            price,
+        )
+
+    @staticmethod
+    def _shadow_eligible(verdict: Verdict) -> bool:
+        """Qualify the decline for a paper trial: only non-policy checks.
+
+        direction_rejected / session / no_signal declines are policy
+        decisions the real book would never take — no trial there.
+        """
+        return verdict.stage in ("portfolio_risk", "governor") or verdict.reason in (
+            "not_sized",
+            "low_penny_score",
+            "sized_to_zero",
+        )
+
+    def _learn_from_shadow(self, closed: ShadowClose) -> None:
+        """One paper outcome → advisory strategy organs only (whitelist).
+
+        Shadow trials never touch sizing (meta-label), risk scaling, the
+        realized-EV/PnL stats, thresholds, or pillar telemetry — they
+        exist solely to un-starve the strategy bandit + registry.
+        """
+        self.strategy_bandit.update(closed.canon, closed.strategy_id, closed.pnl_pct)
+        self.strategy_registry.record(closed.strategy_id, closed.won)
+        log.info(
+            "SHADOW close %s pnl=%.4f strat=%s age=%.0fs",
+            closed.ticker,
+            closed.pnl_pct,
+            closed.strategy_id,
+            closed.age,
+        )
 
     def _scale_admitted_size(
         self,
@@ -1457,6 +1531,7 @@ class NeuromorphicBrain:
                 "bandit": self.strategy_bandit.snapshot(),
                 "research": self.strategy_research.snapshot(),
                 "in_play": dict(self._last_strategy),
+                "shadow_book": self._shadow_book.snapshot(),
             },
         }
         if self._sleep_engine is not None:
