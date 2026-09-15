@@ -116,7 +116,7 @@ STRATEGY_BANDIT_FILE: Path = STATE_DIR / "juli_strategy_bandit.json"
 # ── Strategy research cadence (brain/strategy_research.py) ─────────────
 RESEARCH_BASE_URL: str = "http://127.0.0.1:8765"
 RESEARCH_MAX_PER_CYCLE: int = 3  # strategies ingested from one research pass
-RESEARCH_TIMEOUT: float = 8.0  # bounded research HTTP call
+RESEARCH_TIMEOUT: float = 45.0  # bounded research HTTP call (LM generation ~20s)
 RESEARCH_INTERVAL_SEC: float = 300.0  # at most one research pass per 5 min
 RESEARCH_TOPICS: tuple[str, ...] = (
     "mean reversion regimes",  # keep the brain honest: classic edges only

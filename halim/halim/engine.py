@@ -292,6 +292,12 @@ def complete_reasoning(prompt: str, purpose: str = "reasoning", thinking: bool =
         # health, gate state, and recommends thaw/override actions.
         max_tokens = int(os.getenv("HALIM_SYSHEALTH_MAX_TOKENS", "120"))
         temperature = float(os.getenv("HALIM_SYSHEALTH_TEMPERATURE", "0.15"))
+    elif purpose == "research":
+        # Web-research strategy generation — the prompt is long (web
+        # evidence) and the LM must produce structured JSON; give it
+        # generous room but not enough to stall the queue.
+        max_tokens = int(os.getenv("HALIM_RESEARCH_MAX_TOKENS", "384"))
+        temperature = float(os.getenv("HALIM_RESEARCH_TEMPERATURE", "0.35"))
     # Default JSON requirement by purpose — structured purposes always
     # return a validated dict, never unparseable text.
     if require_json is None:

@@ -902,6 +902,7 @@ class _H(BaseHTTPRequestHandler):
             "sleep_engine": s.get("sleep_engine", {}),
             "extinction": s.get("extinction", {}),
             "metacog": s.get("metacog", {}),
+            "strategy_research": s.get("strategy_research", {}),
         }
 
     def _system2_state(self) -> dict[str, Any]:

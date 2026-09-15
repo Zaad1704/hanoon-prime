@@ -480,26 +480,40 @@ def _halim_research(query: str, source: str = "") -> Dict[str, Any]:
     internet" through Halim's text ability. Downgraded responses keep the
     bot safe: no evidence → LM reasons from training; LM offline → empty
     result (the registry keeps its prior state).
+
+    If the first attempt (with web evidence) fails to produce parseable
+    JSON, a fallback prompt without evidence is retried — the small LM
+    often truncates long research prompts.
     """
     try:
         from halim.research import (
             build_prompt,
+            build_fallback_prompt,
             fetch_web_context,
             parse_research,
         )
+
         ctx = fetch_web_context(query)
         evidence = ctx.get("evidence", "") if ctx.get("ok") else ""
         prompt = build_prompt(query, evidence)
         out = _get_worker().complete(
             prompt, purpose="research", priority=PRIORITY_LOW
         )
-        if not out.get("ok"):
-            return {
-                "ok": False,
-                "reason": out.get("reason", "lm_unavailable"),
-                "evidence": bool(evidence),
-            }
-        parsed = parse_research(out.get("text", ""))
+        parsed = None
+        if out.get("ok"):
+            parsed = parse_research(out.get("text", ""))
+
+        # Fallback: if LM truncated the JSON, retry without evidence
+        if not parsed or not parsed.get("ok"):
+            fallback = build_fallback_prompt(query)
+            out2 = _get_worker().complete(
+                fallback, purpose="research", priority=PRIORITY_LOW
+            )
+            if out2.get("ok"):
+                parsed = parse_research(out2.get("text", ""))
+
+        if not parsed:
+            parsed = {"ok": False, "strategies": [], "regime_hint": "unknown"}
         if source:
             for s in parsed.get("strategies", []):
                 s["source"] = str(source)[:80]
@@ -507,10 +521,10 @@ def _halim_research(query: str, source: str = "") -> Dict[str, Any]:
             "capability": "research",
             "action": "strategy_research",
             "input": query[:800],
-            "output": out.get("text", "")[:800],
+            "output": (out.get("text", "") if out.get("ok") else "")[:800],
             "source": "halim_lm",
         })
-        return {"ok": parsed.get("ok", True), "strategies": parsed.get("strategies", []),
+        return {"ok": parsed.get("ok", False), "strategies": parsed.get("strategies", []),
                 "regime_hint": parsed.get("regime_hint", "unknown"),
                 "evidence": bool(evidence),
                 "action_recorded": rec.get("recorded", False)}

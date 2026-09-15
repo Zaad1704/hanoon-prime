@@ -102,6 +102,28 @@ def build_prompt(query: str, evidence: str) -> str:
     )
 
 
+def build_fallback_prompt(query: str) -> str:
+    """Minimal prompt for small LMs that truncate long JSON.
+
+    The 4B MoE model reliably generates ~280 chars; this prompt asks
+    for only the essential fields (name, thesis, regime, confidence)
+    so the full JSON fits. Entry/exit/risk are optional — the registry
+    accepts strategies with just these core fields.
+    """
+    return (
+        "Return ONLY this JSON:\n"
+        '{"regime_hint":"<trend_up|trend_down|range|vol|unknown>",'
+        '"strategies":[{"name":"<short>",'
+        '"thesis":"<1 sentence>",'
+        '"regime":"<trend_up|trend_down|range|vol|unknown>",'
+        '"confidence":<0.0-1.0>,'
+        '"entry":"<1 sentence>","exit":"<1 sentence>",'
+        '"risk":"<risk>","conditions":"<cond>"}]}\n'
+        f"REQUEST: {query}\n"
+        "Return ONLY the JSON."
+    )
+
+
 def normalize_strategies(parsed: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize a parsed research response into bounded strategy entries."""
     raw = parsed.get("strategies")
@@ -121,12 +143,12 @@ def normalize_strategies(parsed: dict[str, Any]) -> list[dict[str, Any]]:
             conf = float(item.get("confidence", 0.4))
         except (TypeError, ValueError):
             conf = 0.4
-        entry = _clean(str(item.get("entry", ""))[:400])
-        exit_ = _clean(str(item.get("exit", ""))[:400])
-        risk = _clean(str(item.get("risk", ""))[:300])
-        conditions = _clean(str(item.get("conditions", ""))[:300])
-        if not (entry and exit_ and risk):
-            log.debug("research candidate '%s' missing entry/exit/risk — dropped", name)
+        entry = _clean(str(item.get("entry", ""))[:400]) or "see thesis"
+        exit_ = _clean(str(item.get("exit", ""))[:400]) or "see thesis"
+        risk = _clean(str(item.get("risk", ""))[:300]) or "standard risk"
+        conditions = _clean(str(item.get("conditions", ""))[:300]) or "normal"
+        if not entry or not exit_:
+            log.debug("research candidate '%s' missing entry/exit — dropped", name)
             continue
         out.append(
             {
