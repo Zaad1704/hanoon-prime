@@ -364,9 +364,13 @@ SAME MIN_TRADES=30 floor the WFA protocol uses:
 1. **1-minute technical momentum (VWAP + momentum + RS vs SPY) has ZERO
    predictive alpha** above breakeven on retail-bar granularity.
 2. **The 5y IBKR fetch cannot revive it** — deeper data only tightens the CI
-   around an expectancy already pinned at 0.000R. The fetch was CANCELED
-   (2026-09-13) after this verdict; the 3 completed CSVs (AAPL/CRWD/F) and the
-   `fetch_ibkr.py`/`run_deep_bench.sh` machinery stay for a future, different
+   around an expectancy already pinned at 0.000R. **Record correction
+   (2026-09-16):** the fetch was NOT canceled — the 3 completed CSVs
+   (AAPL/CRWD/F) were actually benched under **Phase 14 (PDH/PDL sweep-and-
+   reclaim)** on `data/research/ibkr_5y_rth` → deflated edge **−0.170 ≤ 0**
+   after 18 trials, PBO 0.50, **FAIL** (`reports/phase14_bench_ibkr5y.*`).
+   Deeper data *strengthened* the NO-GO rather than reviving momentum; the
+   `fetch_ibkr.py`/`run_deep_bench.sh` machinery stays for a future, different
    alpha source.
 3. **Architecture is intact, signal is disproved.** The WFA gates, SimHooks
    fail-closed plumbing, deflation, and deterministic benches did their exact
@@ -545,7 +549,43 @@ panel. It does NOT authorize live capital — `MicroLiveGuard` still requires a
 paper-run PASS before any production code touches the market. No shipped-engine
 mutations in §13; `phase13.py` is sandbox-only.
 
-## Phase 14+ — parked candidates (no code until spec)
+### 13.8 Status — SPEC WRITTEN, NEVER RUN (audited 2026-09-16)
+- No `reports/phase13_bench_*` ship in-tree → the §13 bench was **never executed**.
+- **Spec-vs-code drift found on audit:** `phase13.py::monotonicity_profile`
+  (lines 151-188) profiles the **raw §12 signal** via `_trailing_return`, NOT the
+  beta-residual `_residual_signal` that §13.4 pre-registers as the primary
+  kill-test. Run as written, it would test the OLD momentum hypothesis, not the
+  beta-masking one. The deliverable name in §13.6 (`_signal_beta`) is also stale —
+  the code ships `_residual_signal` + `_session_beta`.
+- **Revival precondition:** fix `monotonicity_profile` to rank each session by
+  `_residual_signal` (beta-window ending at s−1 close, per §13.3), then re-register
+  the run before any bench. Until then Phase 13 stays unexecuted.
+
+## Phase 14 — PDH/PDL Sweep-and-Reclaim (sandbox, DONE 2026-09-14)
+Same WFA verdict/deflation/PBO surface as phases 7-13; folds indexed in sessions.
+Fade the 1-min wick through the prior session's High/Low that reclaims inside
+within 10 bars, entered at the reclaim close, stop beyond the sweep extreme,
+target the session Mid. Shipped: `src/hanoon_prime/phase14.py`,
+`scripts/phase14_bench.py`, `scripts/fetch_ibkr.py`.
+
+### 14.1 Results (both panels)
+- **IBKR 5y RTH** (`reports/phase14_bench_ibkr5y.{md,json}` — the "canceled"
+  fetch, actually completed for AAPL/CRWD/F): pooled EV **−0.099R**, net
+  −0.120R, WR 44.1%, R:R 1.04, 1100 trades, admissible 1100, deflated edge
+  **−0.170 ≤ 0 after 18 trials**, PBO 0.50 → **FAIL**. RVOL/long-short/time
+  splits all negative; no sub-bucket survives.
+- **Alpaca 180d** (`reports/phase14_bench_alpaca.{md,json}`): 273 pool trades,
+  WR 44.7%, but **0 admissible tickers** (none cleared MIN_TRADES=30 OOS),
+  deflated +0.000 → **INSUFFICIENT — a data-depth verdict, not a signal verdict**.
+
+### 14.2 Interpretation
+Both panels FAIL or INSUFFICIENT (the Alpaca result is "not enough data", the
+IBKR 3-ticker deep panel is genuinely FAIL). Consistent with §11.5, the
+sweep-and-reclaim microstructure angle does not produce cross-ticker edge, and
+the deeper-data result *reinforces* the momentum NO-GO. No live-capital path
+opens — `MicroLiveGuard` still requires a paper-run PASS.
+
+## Phase 15+ — parked candidates (no code until spec)
 - **Option B**: 1-session cross-sectional reversal (contra-momentum) on
   high-volume expansion sessions — tests the opposite causal direction.
 - **Option C**: earnings-state factor around announcement windows — the one

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections import deque
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -151,6 +152,7 @@ class NeuromorphicBrain:
             realized=self._realized,
             strategy_research=self.strategy_research,
         )
+        self._consolidation.attach_shadow_cycle(self._shadow_cycle)
 
     def _init_strategy_organs(self) -> None:
         """Wire the strategy-learning organs (all advisory, bounded).
@@ -175,6 +177,7 @@ class NeuromorphicBrain:
         self.strategy_registry = StrategyRegistry()
         self.strategy_bandit = StrategyBandit()
         self._shadow_book = ShadowBook()
+        self._shadow_pending: deque[Any] = deque()  # deferred advisory learning (S2)
         self.strategy_research = StrategyResearch(registry=self.strategy_registry)
         self._last_regime: dict[str, str] = {}
         self._last_vol_pct: dict[str, float] = {}
@@ -261,9 +264,7 @@ class NeuromorphicBrain:
             return admitted
         ok, reason = self.governor.may_enter(ticker)
         if not ok:
-            return Verdict(
-                ticker=ticker, action=VETOED, reason=reason, stage="governor"
-            )
+            return self._governor_veto(ticker, snap, result, reason)
         verdict = self._admit_verdict(
             ticker, snap, result, bars, thought, policy, len(open_positions)
         )
@@ -272,6 +273,14 @@ class NeuromorphicBrain:
             self._shadow_drop(ticker)
         else:
             self._shadow_observe(ticker, snap, result, verdict)
+        return verdict
+
+    def _governor_veto(
+        self, ticker: str, snap: dict[str, Any], result: dict[str, Any], reason: str
+    ) -> Verdict:
+        """Veto due to pacing — still let the signal seed a paper trial."""
+        verdict = Verdict(ticker=ticker, action=VETOED, reason=reason, stage="governor")
+        self._shadow_observe(ticker, snap, result, verdict)
         return verdict
 
     def _check_snapshot_valid(self, snap: dict[str, Any] | None) -> str:
@@ -815,8 +824,8 @@ class NeuromorphicBrain:
         if price <= 0:
             return
         closed = book.sweep_close(ticker, price)
-        if closed is not None:
-            self._learn_from_shadow(closed)
+        if closed is not None and not closed.stale:
+            self._shadow_pending.append(closed)
         if int(result.get("direction", 0)) == 0:
             return
         if not self._shadow_eligible(verdict):
@@ -851,7 +860,11 @@ class NeuromorphicBrain:
         Shadow trials never touch sizing (meta-label), risk scaling, the
         realized-EV/PnL stats, thresholds, or pillar telemetry — they
         exist solely to un-starve the strategy bandit + registry.
+        Stale (refund) closes must be filtered by callers; they carry
+        no observed market outcome.
         """
+        if closed.stale:
+            return
         self.strategy_bandit.update(closed.canon, closed.strategy_id, closed.pnl_pct)
         self.strategy_registry.record(closed.strategy_id, closed.won)
         log.info(
@@ -861,6 +874,20 @@ class NeuromorphicBrain:
             closed.strategy_id,
             closed.age,
         )
+
+    def _shadow_cycle(self) -> None:
+        """S2: expire stale paper trials and drain the deferred learning queue.
+
+        Called by ConsolidationEngine on its ~30s background cadence so
+        the fast path never touches strategy bandit / registry file I/O.
+        """
+        book = self._shadow_book
+        if book is not None:
+            for closed in book.sweep_expired():
+                if not closed.stale:
+                    self._shadow_pending.append(closed)
+        while self._shadow_pending:
+            self._learn_from_shadow(self._shadow_pending.popleft())
 
     def _scale_admitted_size(
         self,

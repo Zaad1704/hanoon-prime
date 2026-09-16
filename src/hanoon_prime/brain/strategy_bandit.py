@@ -2,7 +2,8 @@
 
 Thompson Beta bandit conditioned on canonical regime; decaying ε and
 lock-in gates keep exploration generous early and disciplined late.
-Posteriors update from IRONCLADE-gated real closes only.
+Posteriors update from IRONCLADE-gated real closes and TTL-expired
+shadow paper trials.
 """
 
 from __future__ import annotations

@@ -91,6 +91,7 @@ def test_R3_no_file_exceeds_200_lines():
         "hippocampus.py",
         "orchestrator.py",
         "consolidation.py",
+        "shadow_book.py",
         "exits.py",
         "immune.py",
         "realized_ev.py",

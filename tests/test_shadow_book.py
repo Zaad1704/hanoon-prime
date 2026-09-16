@@ -128,6 +128,35 @@ def test_no_open_without_price(tmp_path: Path) -> None:
     assert b.snapshot()["open_count"] == 0
 
 
+def test_sweep_expired_refunds_all_past_ttl(tmp_path: Path) -> None:
+    b = ShadowBook(path=tmp_path / "b.json", ttl=5.0, max_open=5)
+    b.open(ShadowOpen("A", 1, "trend", "unknown", "scalp"), 10.0, now=1.0)
+    b.open(ShadowOpen("B", 1, "fade", "unknown", "scalp"), 20.0, now=2.0)
+    assert b.sweep_expired(now=5.0) == []
+    assert b.snapshot()["open_count"] == 2
+    closes = b.sweep_expired(now=10.0)
+    assert len(closes) == 2
+    assert all(c.stale for c in closes)
+    assert all(c.pnl_pct == 0.0 for c in closes)
+    assert all(c.won is False for c in closes)
+    assert b.snapshot()["open_count"] == 0
+
+
+def test_sweep_expired_skips_not_yet_expired(tmp_path: Path) -> None:
+    b = ShadowBook(path=tmp_path / "b.json", ttl=5.0, max_open=3)
+    b.open(ShadowOpen("A", 1, "trend", "unknown", "scalp"), 10.0, now=5.0)
+    b.open(ShadowOpen("B", 1, "fade", "unknown", "scalp"), 20.0, now=8.0)
+    closes = b.sweep_expired(now=11.0)
+    assert len(closes) == 1
+    assert closes[0].ticker == "A"
+    assert b.snapshot()["open_count"] == 1
+
+
+def test_sweep_expired_empty_book_returns_empty(tmp_path: Path) -> None:
+    b = ShadowBook(path=tmp_path / "b.json", ttl=5.0, max_open=3)
+    assert b.sweep_expired(now=100.0) == []
+
+
 # ── shadow close contract (advisory organs only) ────────────────────────
 
 
@@ -214,3 +243,81 @@ class TestOrchestratorShadowWiring:
             "T", snap, result, Verdict(ticker="T", reason="not_sized")
         )
         assert "T" in brain._shadow_book.snapshot()["open"]
+
+    def test_governor_veto_routes_to_shadow_observe(self) -> None:
+        """A governor budget veto still becomes a paper trial (was dead code)."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+        from hanoon_prime.immune import MAX_ENTRIES_PER_CYCLE
+
+        class _SpyBrain(NeuromorphicBrain):
+            def __init__(self) -> None:
+                super().__init__(enable_neuromorphic=False)
+                self.observed: list[Verdict] = []
+
+            def _score_candidate(self, _ticker: str, _snap: dict, _num_open: int):
+                return {"direction": 1}, [], {"score": 0.5}
+
+            def _apply_fast_gates(self, _ticker, _snap, _thought, _policy, _session):
+                return None
+
+            def _shadow_observe(self, _ticker, _snap, _result, verdict):
+                self.observed.append(verdict)
+                super()._shadow_observe(_ticker, _snap, _result, verdict)
+
+        brain = _SpyBrain()
+        brain.governor._cycle_used = MAX_ENTRIES_PER_CYCLE  # force budget veto
+        snap = {"last": 100.0, "prices": [1.0] * 20}
+        verdict = brain.decide_entry("T", snap, set(), "rth")
+        assert verdict.stage == "governor"
+        assert len(brain.observed) == 1
+        assert "T" in brain._shadow_book.snapshot()["open"]
+
+    def test_shadow_cycle_drains_pending_and_skips_stale(self) -> None:
+        """S2 drain learns real closes; refunded (stale) closes are dropped."""
+        from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+
+        brain = NeuromorphicBrain(enable_neuromorphic=False)
+        rows = brain.strategy_registry.snapshot()["strategies"]
+        assert len(rows) >= 1
+        sid = str(rows[0]["id"])
+
+        def _trials(target: str) -> int:
+            for row in brain.strategy_registry.snapshot()["strategies"]:
+                if row["id"] == target:
+                    return int(row["trials"])
+            return -1
+
+        before_t = _trials(sid)
+        before_b = brain.strategy_bandit.snapshot()["total_trials"]
+        real = ShadowClose(
+            ticker="A",
+            direction=1,
+            strategy_id=sid,
+            canon="unknown",
+            horizon="scalp",
+            entry_price=10.0,
+            exit_price=11.0,
+            age=9.0,
+            pnl_pct=0.1,
+            won=True,
+            stale=False,
+        )
+        stale = ShadowClose(
+            ticker="B",
+            direction=1,
+            strategy_id=sid,
+            canon="unknown",
+            horizon="scalp",
+            entry_price=10.0,
+            exit_price=10.0,
+            age=9000.0,
+            pnl_pct=0.0,
+            won=False,
+            stale=True,
+        )
+        brain._shadow_pending.append(real)
+        brain._shadow_pending.append(stale)
+        brain._shadow_cycle()
+        assert len(brain._shadow_pending) == 0
+        assert brain.strategy_bandit.snapshot()["total_trials"] == before_b + 1
+        assert _trials(sid) == before_t + 1

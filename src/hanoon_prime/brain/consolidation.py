@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from ..immune import HALIM_EVIDENCE_LEARNING
 from ..reflection.buffer import Fill, Trade, TradeBuffer
@@ -58,6 +58,7 @@ class ConsolidationEngine:
         self.memory = JuliMemory()
         self._realized = realized
         self._strategy_research = strategy_research
+        self._shadow_cycle: Optional[Callable[[], None]] = None
         self.halim = HalimAdapter(base_url=halim_url)
         self.thinker = Thinker()
 
@@ -101,6 +102,10 @@ class ConsolidationEngine:
         """Push initial state to shared dict on startup."""
         weights = self.memory.get_weights()
         self.state.update(threshold=self.memory.threshold, indicator_weights=weights)
+
+    def attach_shadow_cycle(self, fn: Callable[[], None]) -> None:
+        """Bind the orchestrator's shadow-book sweep to the S2 cadence."""
+        self._shadow_cycle = fn
 
     def _loop(self) -> None:
         """Main background loop — runs every interval seconds."""
@@ -181,6 +186,11 @@ class ConsolidationEngine:
         self._update_pillar()
         self._maybe_sleep_replay()
         self._maybe_research()
+        if self._shadow_cycle is not None:
+            try:
+                self._shadow_cycle()
+            except Exception as exc:
+                log.debug("shadow_cycle sweep failed: %s", exc)
         self.news.maybe_refresh()
         self._persist_state()
         log.info(

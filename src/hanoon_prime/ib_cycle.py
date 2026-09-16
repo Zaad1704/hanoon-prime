@@ -164,9 +164,15 @@ class BotCycleMixin:
             self._resubscribe_all()
 
     def _reconnect(self) -> bool:
-        """One reconnect attempt via the adapter's retrying connect()."""
+        """One reconnect attempt via the adapter's retrying connect().
+
+        Uses the params the bot actually launched on (``_last_conn``),
+        never ``self.ib.host`` — ib_insync's IB object exposes no ``host``
+        attribute (AttributeError looped the gateway recovery for hours).
+        """
         try:
-            self.connect(self.ib.host, self.ib.port, self.ib.clientId)
+            host, port, client_id = self._last_conn
+            self.connect(host, port, client_id)
         except Exception as exc:
             log.warning("GATEWAY: reconnect attempt failed: %s", exc)
             return False
@@ -349,7 +355,9 @@ class BotCycleMixin:
         if now - last_retry < CLOSE_RETRY_FLOOR:
             return  # still backing off — give IB time to settle
         self._closing_retries[sym] = now
-        log.warning("RECONCILE: close order died for %s — retrying (pos still open)", sym)
+        log.warning(
+            "RECONCILE: close order died for %s — retrying (pos still open)", sym
+        )
         try:
             self.executor.close_position(sym, self.streamer)
         except Exception as exc:
@@ -770,13 +778,17 @@ class BotCycleMixin:
         except Exception as e:
             log.debug("flatten closing-mark failed: %s", e)
         log.warning(
-            "MANUAL FLATTEN: closing %d IB positions (order_type=%s)", ib_count, order_type
+            "MANUAL FLATTEN: closing %d IB positions (order_type=%s)",
+            ib_count,
+            order_type,
         )
         closed = self.executor.close_all_positions(
             self.streamer, order_type=order_type, limit_price=limit_price
         )
         log.warning(
-            "MANUAL FLATTEN: sent %s orders for %d positions", order_type.upper(), closed
+            "MANUAL FLATTEN: sent %s orders for %d positions",
+            order_type.upper(),
+            closed,
         )
         return True
 
@@ -896,7 +908,9 @@ class BotCycleMixin:
             self._watched.discard(trade["ticker"])
             self._hold_notified.pop(trade["ticker"], None)
             self.streamer.unwatch_pnl_single(trade["ticker"])
-            self.juli.brain.note_exit(trade["ticker"])  # reinforce cooldown on confirmed close
+            self.juli.brain.note_exit(
+                trade["ticker"]
+            )  # reinforce cooldown on confirmed close
             log.info(
                 "REFLECT %s %s pnl=%.4f src=%s",
                 trade["ticker"],

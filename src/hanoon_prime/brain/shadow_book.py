@@ -1,12 +1,7 @@
 """brain.shadow_book — zero-size paper trial book (data-starvation fix).
 
-The advisory strategy organs only learned from IRONYCLADE-gated real
-fills, so their posteriors were starved of trials (~one paper-quality
-signal in ten declined). This book records a paper position whenever the
-pipeline declines a directional signal for a non-policy reason (not
-sized, penny bar, portfolio risk, governor), then closes it at TTL on the
-next re-evaluation. Closed outcomes feed ONLY the strategy bandit + the
-strategy registry — never sizing, risk, or cash-PnL telemetry.
+Paper positions when the pipeline declines a directional signal for a
+non-policy reason, TTL-closed. Feeds ONLY bandit + registry.
 """
 
 from __future__ import annotations
@@ -31,7 +26,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ShadowClose:
-    """One completed paper trial, ready for advisory learning."""
+    """One completed paper trial (stale = refund at entry, skip learning)."""
 
     ticker: str
     direction: int
@@ -43,6 +38,7 @@ class ShadowClose:
     age: float
     pnl_pct: float
     won: bool
+    stale: bool = False
 
 
 @dataclass
@@ -105,7 +101,20 @@ class ShadowBook:
                 return None
             if ts - float(pos["entry_epoch"]) < self._ttl:
                 return None
-            return self._close(ticker, pos, price, ts)
+            return self._close(ticker, pos, price, ts, stale=False)
+
+    def sweep_expired(self, now: float | None = None) -> list[ShadowClose]:
+        """S2: refund every open trial past TTL (stale=True, skip learning)."""
+        ts = float(now if now is not None else time.time())
+        closes: list[ShadowClose] = []
+        with self._lock:
+            for ticker, pos in self._open.copy().items():
+                if ts - float(pos["entry_epoch"]) < self._ttl:
+                    continue
+                closes.append(
+                    self._close(ticker, pos, float(pos["entry_price"]), ts, True)
+                )
+        return closes
 
     def drop(self, ticker: str) -> None:
         """Abandon a paper trial because a real trade covered the signal."""
@@ -113,7 +122,12 @@ class ShadowBook:
             self._open.pop(ticker, None)
 
     def _close(
-        self, ticker: str, pos: dict[str, Any], price: float, ts: float
+        self,
+        ticker: str,
+        pos: dict[str, Any],
+        price: float,
+        ts: float,
+        stale: bool = False,
     ) -> ShadowClose:
         entry = float(pos["entry_price"])
         age = ts - float(pos["entry_epoch"])
@@ -130,10 +144,10 @@ class ShadowBook:
             age=age,
             pnl_pct=round(pnl_pct, 6),
             won=pnl_pct > 0,
+            stale=stale,
         )
         self._history.append(closed)
-        if len(self._history) > SHADOW_MAX_HISTORY:
-            self._history = self._history[-SHADOW_MAX_HISTORY:]
+        del self._history[:-SHADOW_MAX_HISTORY]
         self._save()
         return closed
 
@@ -141,14 +155,17 @@ class ShadowBook:
         """Telemetry view of the paper book."""
         with self._lock:
             closes = self._history[-SHADOW_MAX_HISTORY:]
-            wins = [c for c in closes if c.won]
             total = len(closes)
             edge = sum(c.pnl_pct for c in closes) / total if total else 0.0
             return {
                 "open_count": len(self._open),
                 "total_opened": self._opened,
                 "closed_trials": total,
-                "win_rate": round(len(wins) / total, 4) if total else 0.0,
+                "win_rate": (
+                    round(len([c for c in closes if c.won]) / total, 4)
+                    if total
+                    else 0.0
+                ),
                 "edge": round(edge, 6),
                 "ttl_seconds": self._ttl,
                 "open": list(self._open.keys())[:SHADOW_MAX_OPEN],
@@ -178,15 +195,12 @@ class ShadowBook:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(
-                    {
-                        "open": self._open,
-                        "history": [c.__dict__ for c in self._history],
-                        "opened": self._opened,
-                    }
-                )
-            )
+            payload = {
+                "open": self._open,
+                "history": [c.__dict__ for c in self._history],
+                "opened": self._opened,
+            }
+            tmp.write_text(json.dumps(payload))
             tmp.replace(self._path)
         except OSError as exc:
             log.debug("Shadow book save failed: %s", exc)

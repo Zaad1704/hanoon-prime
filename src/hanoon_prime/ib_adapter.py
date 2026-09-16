@@ -33,6 +33,7 @@ MAX_RECONNECT, RECONNECT_DELAY = 5, 5
 
 class IBStreamingBot(BotCycleMixin):
     """Live bot: IB Gateway stream -> NeuromorphicBrain -> bracket orders."""
+    _last_conn: tuple[str, int, int] = (IB_HOST, IB_PAPER_PORT, IB_CLIENT_ID)
 
     def __init__(self, account: str = "PAPER") -> None:
         if not _ib_available:
@@ -104,6 +105,7 @@ class IBStreamingBot(BotCycleMixin):
         client_id: int = IB_CLIENT_ID,
     ) -> None:
         """Connect to IB Gateway with retry logic."""
+        self._last_conn = (host, port, client_id)
         for attempt in range(1, MAX_RECONNECT + 1):
             log.info("Connect %s:%s (attempt %d)", host, port, attempt)
             if try_connect(self.ib, host, port, client_id):
