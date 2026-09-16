@@ -1,7 +1,9 @@
 """hanoon_prime.data.budget — IB data subscription budget manager.
 
 Allocates finite IB data slots (TBT, DOM, L1) across open positions
-and scanner candidates. Open positions always get priority.
+and scanner candidates. Open positions always get priority; candidate
+seats are rotated across the whole discovered pool so every ticker
+eventually gets live data + a real score within IB's line allowance.
 
 IB Limits:
 - TBT (Tick-by-Tick): ~10 tickers max
@@ -20,6 +22,9 @@ log = logging.getLogger(__name__)
 MAX_TBT: int = 15
 MAX_DOM: int = 20
 MAX_L1: int = 100
+# Rotation batch: candidates re-admitted per allocate cycle so streamed
+# seats pivot across the pool over time (bounded churn on IB lines).
+ROTATE_PER_CYCLE: int = 20
 
 
 @dataclass
@@ -33,11 +38,12 @@ class SubSlot:
 
 
 class DataBudget:
-    """Manages IB data subscription allocations."""
+    """Manages IB data subscription allocations (LRU seat rotation)."""
 
     def __init__(self) -> None:
         self.slots: dict[str, SubSlot] = {}
         self._last_alloc: float = 0.0
+        self._last_seen: dict[str, float] = {}  # last serve time per candidate
 
     def allocate(
         self,
@@ -45,6 +51,8 @@ class DataBudget:
         candidates: list[str],
     ) -> tuple[dict[str, str], set[str]]:
         """Compute target subscriptions. Returns (to_sub, to_unsub)."""
+        for sym in positions:
+            self._last_seen.setdefault(sym, time.time())
         target: dict[str, str] = {}
         tbt_count = 0
         dom_count = 0
@@ -58,7 +66,7 @@ class DataBudget:
                 target[sym] = "DOM"
                 dom_count += 1
 
-        for sym in candidates:
+        for sym in self._rotated(candidates):
             if sym in target:
                 continue
             if tbt_count < MAX_TBT:
@@ -71,6 +79,23 @@ class DataBudget:
         to_sub, to_unsub = self._diff(target)
         self._apply(target, positions)
         return to_sub, to_unsub
+
+    def _rotated(self, candidates: list[str]) -> list[str]:
+        """Order candidates so un/under-served names get seats first.
+
+        New names and least-recently-served names lead the seat fill,
+        while currently-slotted names keep their seat unless the pool
+        outgrows capacity — then the OLDEST slots rotate out in batches
+        of ROTATE_PER_CYCLE to admit never-served ones. Every discovered
+        ticker is eventually streamed with enough bars for a real score.
+        """
+        keep = {c for c in candidates if c in self.slots}
+        fresh = sorted(keep, key=lambda c: self.slots[c].allocated_at, reverse=True)
+        hungry = sorted(
+            (c for c in candidates if c not in keep),
+            key=lambda c: self._last_seen.get(c, 0.0),
+        )[:ROTATE_PER_CYCLE]
+        return hungry + fresh
 
     def _diff(self, target: dict[str, str]) -> tuple[dict[str, str], set[str]]:
         """Compare current slots with target. Returns only actual changes."""
@@ -95,6 +120,7 @@ class DataBudget:
                 new_slots[sym] = self.slots[sym]
             else:
                 new_slots[sym] = SubSlot(ticker=sym, tier=tier, is_position=is_pos)
+            self._last_seen[sym] = time.time()
         self.slots = new_slots
         self._last_alloc = time.time()
 
@@ -109,6 +135,7 @@ class DataBudget:
     def remove(self, ticker: str) -> None:
         """Remove a ticker from tracking."""
         self.slots.pop(ticker, None)
+        self._last_seen.pop(ticker, None)
 
     def count_tiers(self) -> dict[str, int]:
         """Count subscriptions per tier."""

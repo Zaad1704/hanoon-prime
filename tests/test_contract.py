@@ -15,11 +15,18 @@ R19 — Realized-EV learning gate wired + verifiable (refuse losing band/conf-bi
 R20 — Tiered exits integrated (ExitPolicy.evaluate delegated by orchestrator)
 R21 — Gate advisor exists, is bounded, and is advisory (threshold/size only — never verdicts)
 R22 — Closed learning loop: every real trade updates weights, cortex, realized stats, exits, advisor
+R23 — Dynamic PRIOR doctrine: realized wins may widen PRIOR_TOP, capped and wired end-to-end
+R24 — Exit ladder TIER semantics: TIER1 absolute stop, TIER2 numeric likelihood, TIER3 ExitPolicy
+R25 — Scanner universe is RAW + unranked: no weight re-rank, no price/volume/market-cap filters
+R26 — Every scan code is a real, whitelisted, ALL-CAPS IB code (≤10 codes, 50 rows each)
+R27 — The brain sees the FULL discovery union: no MAX_CANDIDATES / [:20] truncation, rotation seats all
+R28 — File-skip allowlists are FROZEN: skip-lists may never grow to dodge the 200-line cap
 """
 
 from __future__ import annotations
 
 import ast
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -28,6 +35,56 @@ import pytest
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC))
+
+# ── Frozen governance allowlists (R28) ─────────────────────────────────
+# The ONLY finite set of modules exempt from the 200-line rule (R3). These
+# are the pre-restructure oversized files. Growing THIS list to dodge the
+# cap is a governance violation (see R28) — files must be refactored under
+# 200 lines, not added to the allowlist. Mirrored 1:1 in
+# scripts/check_file_length.sh.
+FROZEN_FILE_SKIP: frozenset[str] = frozenset(
+    {
+        "hands.py",
+        "validator.py",
+        "telemetry.py",
+        "halim_adapter.py",
+        "ib_cycle.py",
+        "orchestrator.py",
+        "ib_executor.py",
+        "ib_streamer.py",
+        "ironclad.py",
+        "consolidation.py",
+        "shadow_book.py",
+        "ib_adapter.py",
+        "realized_ev.py",
+        "config.py",
+        "immune.py",
+        "ev_gate.py",
+        "risk.py",
+        "exits.py",
+        "stdp.py",
+        "wfa.py",
+        "ablation.py",
+        "micro_live.py",
+        "phase7.py",
+        "phase8.py",
+        "phase9.py",
+    }
+)
+# Tokens that would rank/filter the raw scanner universe — banned by R25.
+SCANNER_FILTER_TOKENS: frozenset[str] = frozenset(
+    {
+        "CODE_WEIGHTS",
+        "abovePrice",
+        "aboveVolume",
+        "marketCapAbove",
+        "marketCapBelow",
+    }
+)
+# Required all-cap discovery codes — present in a raw, unfiltered scanner.
+SCANNER_REQUIRED_CODES: frozenset[str] = frozenset(
+    {"MARKET_CAP_USD_ASC", "HOT_BY_VOLUME", "TOP_VOLUME_RATE", "TOP_PERC_GAIN"}
+)
 
 
 # ── R1: Single Verdict Source ─────────────────────────────────────────
@@ -72,41 +129,13 @@ def test_R1_cortex_is_the_single_verdict_source():
 
 # ── R3: Complexity ─────────────────────────────────────────────────────
 def test_R3_no_file_exceeds_200_lines():
-    """No source file may exceed 200 lines."""
-    skip = {
-        "hands.py",
-        "validator.py",
-        "telemetry.py",
-        "halim_adapter.py",
-        "ib_cycle.py",
-        "ib_executor.py",
-        "ib_adapter.py",
-        "ib_streamer.py",
-        "_ib_sync.py",
-        "ironclad.py",
-        "backtest.py",
-        "_telegram.py",
-        "_protect.py",
-        "eyes.py",
-        "hippocampus.py",
-        "orchestrator.py",
-        "consolidation.py",
-        "shadow_book.py",
-        "exits.py",
-        "immune.py",
-        "realized_ev.py",
-        # Enhanced learning components (entry quality, ev gate, risk, STDP)
-        "config.py",
-        "ev_gate.py",
-        "risk.py",
-        "stdp.py",
-        "wfa.py",
-        "ablation.py",
-        "micro_live.py",
-        "phase7.py",
-        "phase8.py",
-        "phase9.py",
-    }
+    """No source file may exceed 200 lines.
+
+    Skip allowlist is FROZEN (R28): only the 25 genuinely-oversized
+    modules may ever be exempted, and test_R3 must reference the frozen
+    constant — a hand-maintained local copy drifts and lets governance rot.
+    """
+    skip = set(FROZEN_FILE_SKIP)
     violations = []
     for pyfile in SRC.rglob("*.py"):
         if pyfile.name in skip:
@@ -823,3 +852,178 @@ def test_R24_exit_ladder_tier_semantics():
     # TIER3 mechanical is still ExitPolicy (R20/R24 doctrine).
     src = (SRC / "hanoon_prime" / "brain" / "exit_ladder.py").read_text()
     assert "self._policy.evaluate" in src, "R24: TIER3 must be ExitPolicy"
+
+
+# ── R25: Scanner universe is raw + unranked ─────────────────────────────
+def test_R25_scanner_universe_is_raw_natural_order():
+    """Scanner results are raw and unranked: no weight re-ranking, no
+    price/volume/market-cap filters, and each item is ingested at its
+    natural IB scan rank. Data prep never decides — the brain does."""
+    scanner_path = SRC / "hanoon_prime" / "data" / "scanner.py"
+    scanner_src = scanner_path.read_text()
+    tree = ast.parse(scanner_src)
+
+    # Banned tokens: any ranking table or scanner-side filter.
+    for token in SCANNER_FILTER_TOKENS:
+        assert token not in scanner_src, f"R25 VIOLATION: scanner filters/ranks {token}"
+
+    # _ingest_item must take (self, item) — a rank/path offset argument
+    # would let caller-stage ranking sneak back in.
+    ingest = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_ingest_item"
+        ),
+        None,
+    )
+    assert ingest is not None, "R25: _ingest_item missing"
+    assert [a.arg for a in ingest.args.args] == [
+        "self",
+        "item",
+    ], f"R25: ingestion must be (self, item), got {[a.arg for a in ingest.args.args]}"
+
+    # Natural rank retained verbatim (no offset/depth-warp).
+    assert "eff = item.rank" in scanner_src, "R25: natural scan rank must be used"
+
+
+def test_R26_scan_codes_all_caps_and_whitelisted():
+    """Every scanCode is a real IB code: ALL-CAPS, frozen-whitelisted,
+    ≤ 10 configs (IB's scan-subscription limit), 50 rows max per code."""
+    from hanoon_prime.data.scanner import (
+        ALLOWED_SCANCODES,
+        DATA_INSTRUMENT,
+        DATA_LOCATION,
+        SCAN_CONFIGS,
+    )
+
+    assert len(SCAN_CONFIGS) <= 10, "R26: IB allows ≤ 10 scanner subscriptions"
+    assert all(c.isupper() for c in ALLOWED_SCANCODES), "R26: codes must be ALL-CAPS"
+
+    configured = set(SCAN_CONFIGS.values())
+    assert (
+        configured <= ALLOWED_SCANCODES
+    ), f"R26: configured codes not in frozen whitelist: {configured - ALLOWED_SCANCODES}"
+    assert (
+        SCANNER_REQUIRED_CODES <= ALLOWED_SCANCODES
+    ), "R26: raw all-cap discovery codes missing from whitelist"
+
+    # Fixed instrument/location; rows bounded by IB's 50 — never more.
+    assert DATA_INSTRUMENT == "STK", "R26: instrument must be STK"
+    assert DATA_LOCATION == "STK.US.MAJOR", "R26: location must be STK.US.MAJOR"
+    assert (
+        "numberOfRows=50" in (SRC / "hanoon_prime" / "data" / "scanner.py").read_text()
+    ), "R26: rows must be capped at IB's 50"
+
+
+# ── R27: The brain sees the FULL discovery union ────────────────────────
+def test_R27_no_discovery_truncation_before_brain():
+    """No truncation of the discovery pool before the decision layer.
+    A `[:MAX_CANDIDATES]` slice used to hide ~80% of the scanned pool
+    from the brain. juli must feed the WHOLE candidate list, and the live
+    cycle must watch streamed ∪ full-discovery, not a top-N excerpt."""
+    juli_path = SRC / "hanoon_prime" / "juli.py"
+    juli_src = juli_path.read_text()
+    assert "MAX_CANDIDATES" not in juli_src, "R27: MAX_CANDIDATES truncation must go"
+    assert "self._candidates[:20]" not in juli_src, "R27: hardcoded [:20] truncation"
+    assert (
+        "[c.symbol for c in self._candidates]" in juli_src
+    ), "R27: juli must feed the full candidate list to allocation"
+
+    ib_path = SRC / "hanoon_prime" / "ib_cycle.py"
+    ib_src = ib_path.read_text()
+    assert (
+        "watch |= {c.symbol for c in self.juli._candidates}" in ib_src
+    ), "R27: live cycle must watch the full discovery union"
+    for src, name in ((juli_src, "juli.py"), (ib_src, "ib_cycle.py")):
+        assert "[:MAX_CANDIDATES]" not in src, f"R27: slider truncation in {name}"
+
+
+def test_R27_budget_rotates_the_full_pool():
+    """Budget rotation seats EVERY discovered name over time within IB's
+    ~100 live-line allowance — never-served names rotate in each cycle,
+    seats are not frozen, and streaming never exceeds the cap."""
+    from hanoon_prime.data.budget import MAX_L1, ROTATE_PER_CYCLE, DataBudget
+
+    budget = DataBudget()
+    small_pool = ["A", "B", "C", "D"]
+    to_sub, _ = budget.allocate(set(), small_pool)
+    assert set(to_sub) == set(
+        small_pool
+    ), "R27: rotation must seat the whole pool while it fits capacity"
+
+    # Pool grows far past capacity: hungry fresh names must rotate in.
+    fresh = [f"T{i}" for i in range(500)]
+    budget.allocate(set(), ["A"] + fresh)
+    tracked = budget.get_all_tracked()
+    rotated_in = {t for t in fresh[:ROTATE_PER_CYCLE] if t in tracked}
+    assert rotated_in, "R27: fresh discovery names must rotate into seats"
+
+    # Seats are not permanently frozen on the first 20; later names flow in.
+    seen_after = budget.get_all_tracked()
+    assert any(
+        t in seen_after for t in fresh
+    ), "R27: rotation must reach deep into the pool"
+
+    # IB line allowance is never exceeded.
+    assert budget.count_tiers().get("L1", 0) <= MAX_L1, "R27: L1 allowance exceeded"
+
+
+# ── R28: File-skip allowlists are FROZEN ────────────────────────────────
+def test_R28_file_skip_lists_are_frozen():
+    """The 200-line-cap allowlist is FROZEN and single-sourced.
+
+    Growing a skip list to dodge R3 (instead of refactoring) is exactly
+    the governance failure that let ib_adapter.py/shadow_book.py exempt
+    themselves in the past. This rule forces any future 200-line
+    exception to happen in ONE visible place (FROZEN_FILE_SKIP) that is
+    mirrored 1:1 by scripts/check_file_length.sh and re-verified by the
+    shell gate itself, so nothing can silently slip through.
+    """
+    script_path = (
+        Path(__file__).resolve().parent.parent / "scripts" / "check_file_length.sh"
+    )
+    assert script_path.exists(), "R28: shell gate script missing"
+    script_src = script_path.read_text()
+
+    # 1) Line-cap handling must reference the frozen constant (no drift copy).
+    self_file = Path(__file__).read_text()
+    tree = ast.parse(self_file)
+    r3_node = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef)
+        and n.name == "test_R3_no_file_exceeds_200_lines"
+    )
+    r3_body = ast.get_source_segment(self_file, r3_node)
+    assert "FROZEN_FILE_SKIP" in r3_body, "R28: test_R3 must use the frozen constant"
+
+    # 2) Script allowlist == frozen allowlist (exact, basename-for-basename).
+    m = re.search(r"^SKIP=\"([^\"]+)\"$", script_src, re.MULTILINE)
+    assert m, 'R28: script must declare a single SKIP="..." line'
+    script_tokens = {tok for tok in m.group(1).split("|") if tok}
+    assert script_tokens == set(
+        FROZEN_FILE_SKIP
+    ), f"R28: script SKIP drifted from FROZEN_FILE_SKIP: script={script_tokens - set(FROZEN_FILE_SKIP)}, missing={set(FROZEN_FILE_SKIP) - script_tokens}"
+
+    # 3) Allowlist is basenames only — no subdirectory-prefixed entries are
+    #    ever allowed (they'd let a module hide behind a path segment).
+    for entry in FROZEN_FILE_SKIP:
+        assert "/" not in entry, f"R28: allowlist entry must be a basename, got {entry}"
+        assert entry.endswith(
+            ".py"
+        ), f"R28: allowlist entry must end in .py, got {entry}"
+
+    # 4) Every exempted entry must still protect at least one >200-line file
+    #    (no stale entries lingering after a successful refactor). config.py
+    #    legitimately covers brain/config.py (207 lines) while the top-level
+    #    12-line config.py stays subject to the rule.
+    for entry in FROZEN_FILE_SKIP:
+        matches = [p for p in SRC.rglob(entry)]
+        assert (
+            matches
+        ), f"R28: stale allowlist entry {entry} — refactor is done, remove it"
+        oversized = [p for p in matches if len(p.read_text().splitlines()) > 200]
+        assert (
+            oversized
+        ), f"R28: {entry} — no file behind it is >200 lines anymore, remove it"

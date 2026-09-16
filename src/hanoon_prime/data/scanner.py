@@ -5,6 +5,7 @@ Replaces hardcoded ticker lists with dynamic discovery.
 
 Scanner returns ScanDataList that auto-populates via events.
 We poll the list to extract results. Max 50 results per scan.
+Raw-by-doctrine: results stay unranked/unfiltered — the brain decides.
 """
 
 from __future__ import annotations
@@ -18,61 +19,35 @@ from ..ib_compat import _ib_available
 from ..ib_compat import ib as _ib
 
 log = logging.getLogger(__name__)
-# IB MOST_ACTIVE ranks by SHARES (floods with penny names); the dollar-volume
-# codes surface big caps. Filters drop sub-$3 / <250k-share noise.
-SCAN_CONFIGS: dict[str, dict[str, Any]] = {
-    "most_active_usd": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "MOST_ACTIVE_USD",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
-    "most_active_avg_usd": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "MOST_ACTIVE_AVG_USD",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
-    "top_price_range": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "TOP_PRICE_RANGE",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
-    "most_active": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "MOST_ACTIVE",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
-    "top_gainers": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "TOP_PCT_GAIN",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
-    "top_losers": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "TOP_PCT_LOSE",
-        "abovePrice": 3.0,
-        "aboveVolume": 250_000,
-    },
+DATA_INSTRUMENT: str = "STK"
+DATA_LOCATION: str = "STK.US.MAJOR"
+# 10 all-cap codes fill IB's 10-scan limit; each returns 50 rows.
+SCAN_CONFIGS: dict[str, str] = {
+    "most_active_usd": "MOST_ACTIVE_USD",
+    "most_active_avg_usd": "MOST_ACTIVE_AVG_USD",
+    "top_price_range": "TOP_PRICE_RANGE",
+    "most_active": "MOST_ACTIVE",
+    "top_gainers": "TOP_PERC_GAIN",
+    "top_losers": "TOP_PERC_LOSE",
+    "market_cap_desc": "MARKET_CAP_USD_DESC",
+    "market_cap_asc": "MARKET_CAP_USD_ASC",
+    "hot_by_volume": "HOT_BY_VOLUME",
+    "top_volume_rate": "TOP_VOLUME_RATE",
 }
-# Rank offsets prefer dollar-volume names over share-volume penny leaders.
-CODE_WEIGHTS: dict[str, int] = {
-    "most_active_usd": 0,
-    "most_active_avg_usd": 0,
-    "top_price_range": 50,
-    "top_gainers": 60,
-    "top_losers": 70,
-    "most_active": 90,
-}
+# Frozen ScanCode whitelist (R25/R26): every scanCode belongs here.
+_ALLOWED_CODES: tuple[str, ...] = (
+    "MOST_ACTIVE_USD",
+    "MOST_ACTIVE_AVG_USD",
+    "TOP_PRICE_RANGE",
+    "MOST_ACTIVE",
+    "TOP_PERC_GAIN",
+    "TOP_PERC_LOSE",
+    "MARKET_CAP_USD_ASC",
+    "MARKET_CAP_USD_DESC",
+    "HOT_BY_VOLUME",
+    "TOP_VOLUME_RATE",
+)
+ALLOWED_SCANCODES: frozenset[str] = frozenset(_ALLOWED_CODES)
 
 
 @dataclass
@@ -101,37 +76,31 @@ class IBScanner:
         self._scan_started: float = 0.0
 
     def scan(self, config_name: str = "all") -> int:
-        """Start scanner subscriptions. 'all' subscribes to all 4 codes."""
+        """Start scanner subscriptions. 'all' subscribes to all 10 codes."""
         if not _ib_available:
             return 0
         self._cancel_scan()
         configs = (
             SCAN_CONFIGS
             if config_name == "all"
-            else {
-                config_name: SCAN_CONFIGS.get(config_name, SCAN_CONFIGS["most_active"])
-            }
+            else {config_name: SCAN_CONFIGS.get(config_name, "MOST_ACTIVE")}
         )
-        for name, config in configs.items():
-            self._start_sub(name, config)
+        for name, scan_code in configs.items():
+            self._start_sub(name, scan_code)
         self._scan_started = time.time()
         self._last_scan = time.time()
         log.info("Scanner started: %d codes", len(self._scan_lists))
         return 0
 
-    def _start_sub(self, name: str, config: dict[str, Any]) -> None:
-        """Start a single scanner subscription."""
+    def _start_sub(self, name: str, scan_code: str) -> None:
+        """Start one scanner subscription — no price/volume filters."""
         try:
-            kwargs: dict[str, Any] = {
-                "numberOfRows": 50,
-                "instrument": config["instrument"],
-                "locationCode": config["locationCode"],
-                "scanCode": config["scanCode"],
-            }
-            for key in ("abovePrice", "aboveVolume"):
-                if config.get(key):
-                    kwargs[key] = config[key]
-            sub = _ib.ScannerSubscription(**kwargs)
+            sub = _ib.ScannerSubscription(
+                numberOfRows=50,
+                instrument=DATA_INSTRUMENT,
+                locationCode=DATA_LOCATION,
+                scanCode=scan_code,
+            )
             self._scan_lists[name] = self.ib.reqScannerSubscription(sub)
         except Exception as e:
             log.debug("Scanner subscribe failed for %s: %s", name, e)
@@ -147,14 +116,14 @@ class IBScanner:
     def _drain_scan_lists(self) -> None:
         """Drain scan results into deduped dict."""
         try:
-            for name, scan_list in list(self._scan_lists.items()):
+            for scan_list in list(self._scan_lists.values()):
                 for item in scan_list:
-                    self._ingest_item(name, item)
+                    self._ingest_item(item)
         except Exception as e:
             log.debug("Scan collect error: %s", e)
 
-    def _ingest_item(self, name: str, item: Any) -> None:
-        """Ingest a single scan item (weighted across scan codes)."""
+    def _ingest_item(self, item: Any) -> None:
+        """Ingest one scan item at its natural rank — no offsets."""
         cd = getattr(item, "contractDetails", None)
         c = getattr(cd, "contract", None)
         if c is None:
@@ -162,7 +131,7 @@ class IBScanner:
         sym = getattr(c, "symbol", "")
         if not sym or len(sym) > 6:
             return
-        eff = item.rank + CODE_WEIGHTS.get(name, 0)
+        eff = item.rank
         existing = self._results.get(sym)
         if existing is None or eff < existing.rank:
             self._results[sym] = ScanResult(symbol=sym, contract=c, rank=eff)
@@ -198,3 +167,6 @@ class IBScanner:
     def should_scan(self) -> bool:
         """Check if it's time for a new scan."""
         return time.time() - self._last_scan >= self._scan_interval
+
+
+__all__ = ["SCAN_CONFIGS", "ALLOWED_SCANCODES", "IBScanner", "ScanResult"]

@@ -474,7 +474,7 @@ class BotCycleMixin:
         time.sleep(max(CYCLE_FLOOR, poll))
 
     def _run_brain_cycle(self, poll: float, pnl: Any, started: float) -> None:
-        """Score the whole universe and finish the cycle (single funnel)."""
+        """Score the whole discovery union and finish the cycle (single funnel)."""
         positions = set(self.hippocampus._open_positions.keys())
         mkt_state = _SLEEP_MGR.effective_state(TRADING_CONFIG)
         if mkt_state.session == "pre_market":
@@ -489,8 +489,13 @@ class BotCycleMixin:
             for t, p in self.hippocampus._open_positions.items()
         }
         self._halim_order_review()
+        # Brain evaluates the full scanner discovery union (raw pool), not
+        # just streamed tickers — budget rotation streams every name over
+        # time so each eventually scores with real data.
+        watch = set(self.juli.budget.get_all_tracked())
+        watch |= {c.symbol for c in self.juli._candidates}
         exit_s, verdicts = self.juli.tick(
-            set(self.juli.budget.get_all_tracked()),
+            watch,
             self._snapshot,
             self.streamer,
             positions,
@@ -684,11 +689,13 @@ class BotCycleMixin:
         """Sync subscriptions: async mkt data for all, one seed per cycle.
 
         GC unsubscribes stale scanner tickers to free MD lines.
-        Positions are always touched (never collected).
+        Positions are always touched (never collected). Subscription
+        targets come from the budget's rotated pool (IB line allowance
+        ~100) — the whole discovery pool is analyzed via EVAL rotation
+        (data/budget.py), not by streaming every name at once.
         """
         tracked = self.juli.budget.get_all_tracked()
-        scanner = {c.symbol for c in self.juli._candidates[:20]}
-        needed = tracked | scanner | set(self.hippocampus._open_positions.keys())
+        needed = tracked | set(self.hippocampus._open_positions.keys())
         self.executor.tracked_tickers = tracked
         self.streamer.touch(needed)
         missing = [s for s in sorted(needed) if s not in self.streamer.ticker_subs]

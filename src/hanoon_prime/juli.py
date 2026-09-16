@@ -18,8 +18,8 @@ from .data.scanner import IBScanner, ScanResult
 from .juli_feed import JuliFeed, _fmt_verdict
 
 log = logging.getLogger(__name__)
-MAX_CANDIDATES: int = 20
 # Rotating EVAL_WINDOW keeps flow continuous (no THINK burst, then silence).
+# The brain evaluates the FULL discovered union (budget rotation streams it).
 EVAL_WINDOW: int = 4
 
 
@@ -137,10 +137,10 @@ class JuliBrain:
             log.debug("Scan collect error: %s", e)
 
     def _maybe_screen(self, get_snapshot: Any) -> None:
-        """Screen candidates + publish cross-asset ref prices."""
+        """Screen the full candidate pool + publish cross-asset ref prices."""
         if not self._candidates:
             return
-        snaps = [get_snapshot(c.symbol) for c in self._candidates[:MAX_CANDIDATES]]
+        snaps = [get_snapshot(c.symbol) for c in self._candidates]
         log.info(
             "SCREEN: %d/%d passed",
             sum(1 for s in snaps if s and s.get("last", 0) > 0),
@@ -149,13 +149,11 @@ class JuliBrain:
         self.feed.publish_ref_prices(get_snapshot)
 
     def _maybe_allocate(self, positions: set[str]) -> None:
-        """Allocate data budget periodically."""
+        """Allocate data budget periodically — full pool, LRU seat rotation."""
         if time.time() - self._last_alloc < 5.0:
             return
         self._last_alloc = time.time()
-        self.budget.allocate(
-            positions, [c.symbol for c in self._candidates[:MAX_CANDIDATES]]
-        )
+        self.budget.allocate(positions, [c.symbol for c in self._candidates])
 
     def _evaluate_exits(
         self,

@@ -234,8 +234,11 @@ _cycle(poll=1.0, pnl)
 ├── _sync_subs()
 │   │
 │   ├── tracked = juli.budget.get_all_tracked()
-│   ├── scanner = {c.symbol for c in juli._candidates[:20]}
-│   ├── needed = tracked | scanner | set(hippocampus._open_positions)
+│   ├── needed = tracked | set(hippocampus._open_positions)
+│   │   └── subscription targets = budget's ROTATED pool (IB line
+│   │       allowance ~100) — every discovered name gets a seat over
+│   │       time; the whole pool is analyzed via EVAL rotation, NOT by
+│   │       streaming all names at once (no _candidates[:20] cut)
 │   │
 │   ├── executor.tracked_tickers = tracked
 │   │
@@ -328,7 +331,7 @@ juli.tick(positions, get_snapshot, streamer, closing)
 │
 ├── _maybe_screen(get_snapshot)
 │   ├── IF candidates exist:
-│   │   ├── FOR EACH candidate[:MAX_CANDIDATES]:
+│   │   ├── FOR EACH candidate (FULL raw pool — no [:MAX_CANDIDATES]):
 │   │   │   └── snap = get_snapshot(c.symbol) → streamer.get_snapshot(ticker)
 │   │   │
 │   │   ├── n = count snaps where last > 0
@@ -344,9 +347,13 @@ juli.tick(positions, get_snapshot, streamer, closing)
 │
 ├── _maybe_allocate(positions)
 │   └── IF 5s since last allocation:
-│       └── budget.allocate(positions, candidate_symbols)
-│           └── Rank tickers by: open position > scanner > tracked
-│               └── Set data budget priorities
+│       └── budget.allocate(positions, ALL candidate symbols)
+│           └── LRU seat rotation (data/budget.py): positions always keep
+│               TBT/DOM; never-served candidates rotate in first (bounded
+│               ROTATE_PER_CYCLE per cycle); slotted names keep their seat
+│               until the pool outgrows capacity — then the OLDEST seats
+│               rotate out so fresh discovery names get streamed data and a
+│               real brain score. IB line allowance (~100) is respected.
 │
 ├── EXIT EVALUATION:
 │   _evaluate_exits(positions, get_snapshot, closing)
