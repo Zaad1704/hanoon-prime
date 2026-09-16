@@ -127,7 +127,7 @@ class JuliBrain:
         """Sync scanner results and start new scan if due."""
         if self.scanner.should_scan():
             try:
-                self.scanner.scan("most_active")
+                self.scanner.scan("all")
             except Exception as e:
                 log.warning("Scan start failed: %s", e)
         try:

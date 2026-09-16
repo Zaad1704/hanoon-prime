@@ -18,27 +18,60 @@ from ..ib_compat import _ib_available
 from ..ib_compat import ib as _ib
 
 log = logging.getLogger(__name__)
+# IB MOST_ACTIVE ranks by SHARES (floods with penny names); the dollar-volume
+# codes surface big caps. Filters drop sub-$3 / <250k-share noise.
 SCAN_CONFIGS: dict[str, dict[str, Any]] = {
+    "most_active_usd": {
+        "instrument": "STK",
+        "locationCode": "STK.US.MAJOR",
+        "scanCode": "MOST_ACTIVE_USD",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
+    },
+    "most_active_avg_usd": {
+        "instrument": "STK",
+        "locationCode": "STK.US.MAJOR",
+        "scanCode": "MOST_ACTIVE_AVG_USD",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
+    },
+    "top_price_range": {
+        "instrument": "STK",
+        "locationCode": "STK.US.MAJOR",
+        "scanCode": "TOP_PRICE_RANGE",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
+    },
     "most_active": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
         "scanCode": "MOST_ACTIVE",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
     },
     "top_gainers": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
         "scanCode": "TOP_PCT_GAIN",
-    },
-    "high_volume": {
-        "instrument": "STK",
-        "locationCode": "STK.US.MAJOR",
-        "scanCode": "HOT_BY_VOLUME",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
     },
     "top_losers": {
         "instrument": "STK",
         "locationCode": "STK.US.MAJOR",
         "scanCode": "TOP_PCT_LOSE",
+        "abovePrice": 3.0,
+        "aboveVolume": 250_000,
     },
+}
+# Rank offsets prefer dollar-volume names over share-volume penny leaders.
+CODE_WEIGHTS: dict[str, int] = {
+    "most_active_usd": 0,
+    "most_active_avg_usd": 0,
+    "top_price_range": 50,
+    "top_gainers": 60,
+    "top_losers": 70,
+    "most_active": 90,
 }
 
 
@@ -89,12 +122,16 @@ class IBScanner:
     def _start_sub(self, name: str, config: dict[str, Any]) -> None:
         """Start a single scanner subscription."""
         try:
-            sub = _ib.ScannerSubscription(
-                numberOfRows=50,
-                instrument=config["instrument"],
-                locationCode=config["locationCode"],
-                scanCode=config["scanCode"],
-            )
+            kwargs: dict[str, Any] = {
+                "numberOfRows": 50,
+                "instrument": config["instrument"],
+                "locationCode": config["locationCode"],
+                "scanCode": config["scanCode"],
+            }
+            for key in ("abovePrice", "aboveVolume"):
+                if config.get(key):
+                    kwargs[key] = config[key]
+            sub = _ib.ScannerSubscription(**kwargs)
             self._scan_lists[name] = self.ib.reqScannerSubscription(sub)
         except Exception as e:
             log.debug("Scanner subscribe failed for %s: %s", name, e)
@@ -112,12 +149,12 @@ class IBScanner:
         try:
             for name, scan_list in list(self._scan_lists.items()):
                 for item in scan_list:
-                    self._ingest_item(item)
+                    self._ingest_item(name, item)
         except Exception as e:
             log.debug("Scan collect error: %s", e)
 
-    def _ingest_item(self, item: Any) -> None:
-        """Ingest a single scan item."""
+    def _ingest_item(self, name: str, item: Any) -> None:
+        """Ingest a single scan item (weighted across scan codes)."""
         cd = getattr(item, "contractDetails", None)
         c = getattr(cd, "contract", None)
         if c is None:
@@ -125,9 +162,10 @@ class IBScanner:
         sym = getattr(c, "symbol", "")
         if not sym or len(sym) > 6:
             return
+        eff = item.rank + CODE_WEIGHTS.get(name, 0)
         existing = self._results.get(sym)
-        if existing is None or item.rank < existing.rank:
-            self._results[sym] = ScanResult(symbol=sym, contract=c, rank=item.rank)
+        if existing is None or eff < existing.rank:
+            self._results[sym] = ScanResult(symbol=sym, contract=c, rank=eff)
 
     def _maybe_finalize(self) -> None:
         """Clear scan lists after timeout."""

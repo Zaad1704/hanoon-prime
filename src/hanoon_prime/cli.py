@@ -86,10 +86,10 @@ def _setup_logging() -> None:
 def main() -> None:
     """Entry point: start telemetry + bot, connect to IB Gateway live."""
     _setup_logging()
-    # CLI args: explicit tickers, or auto-seed from liquid universe
-    tickers = (
-        sys.argv[1:] if len(sys.argv) > 1 else list(LIQUID_US_SEED)[:5]
-    )  # top 5 for speed
+    # CLI args: explicit tickers, or auto-seed from the full liquid universe
+    # (big caps like TSLA/AMZN/GOOGL/META stay evaluated even when the
+    # share-volume scanner omits them; the scanner adds discovery on top).
+    tickers = sys.argv[1:] if len(sys.argv) > 1 else list(LIQUID_US_SEED)
     # Anchor to repo root, NOT CWD — bot may be launched from anywhere.
     repo_root = Path(__file__).resolve().parents[2]
     journal_path = repo_root / "runtime" / "journal_live.jsonl"
