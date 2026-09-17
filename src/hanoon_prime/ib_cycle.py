@@ -29,6 +29,7 @@ CLOSE_RETRY_FLOOR: float = 15.0  # min gap between dead-close-order retries
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
+HEAL_BATCH_MAX: int = 60  # surgical heal: cap silent-ticker MD resets per heal
 HOLD_FIRST_MIN: float = 15.0  # first open-position hold notice (minutes)
 HOLD_REPEAT_MIN: float = 60.0  # repeat hold notice every this many minutes
 POSTMORTEM_MIN_INTERVAL: float = 900.0  # min seconds between post-mortem sends
@@ -399,7 +400,9 @@ class BotCycleMixin:
             "volume": float(tk.volume or 0),
             "daily_volume": float(tk.volume or 0),
         }
-        if not self.streamer.ready(sym):
+        # Live scalp evaluation gates on LIVE_EVAL_BARS (forming-bar window),
+        # not the 50-bar research warmup — history backfill is enrichment.
+        if not self.streamer.live_ready(sym):
             return base
         a = self.streamer.get_arrays(sym)
         base["atr"] = self.streamer.buffer_atr(sym)
@@ -662,16 +665,28 @@ class BotCycleMixin:
         self.juli.brain.note_entry(ticker)
 
     def _heal_resubscribe(self) -> None:
-        """Force a full market-data reset for every tracked ticker.
+        """Surgical heal: re-request MD only for genuinely silent tickers.
 
         A live connection with zero streaming ticks (silent feed) needs the
         cancelMktData + re-request dance that _sync_subs cannot do — it only
         subscribes MISSING tickers and leaves silent subscriptions alone.
-        Position watchers must be re-attached after the reset because
-        resubscribe swaps the underlying ib_insync Ticker objects.
+        Open positions are always reset (risk); silent scanner tickers are
+        capped per heal so a global outage never churns every MD line at
+        once (reqMktData pacing ~50 req/s). Buffers survive resubscribe, so
+        seeded history is preserved. Position watchers must be re-attached
+        after the reset because resubscribe swaps the ib_insync Ticker objs.
         """
-        targets = set(self.executor.tracked_tickers) | set(self.streamer.ticker_subs)
-        for t in sorted(targets):
+        now = time.time()
+        subs = self.streamer.ticker_subs
+        ldt = self.streamer.last_data_ts
+        positions = set(self.hippocampus._open_positions)
+        stale = [
+            t
+            for t in sorted(subs)
+            if t not in positions and now - ldt.get(t, 0.0) > STALE_SUB_SECS
+        ]
+        targets = sorted(positions | set(stale[:HEAL_BATCH_MAX]))
+        for t in targets:
             try:
                 self.streamer.resubscribe(t)
             except Exception as exc:

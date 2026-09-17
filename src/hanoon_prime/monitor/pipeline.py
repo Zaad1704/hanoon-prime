@@ -49,7 +49,6 @@ class PipelineMonitor:
         }
         if any(sizes.get(t, 0) > self._last_sizes.get(t, 0) for t in sizes):
             self._last_bar_growth = time.time()
-        # Buffer length plateaus at LOOKBACK_BARS; data arrival survives it.
         if getattr(streamer, "last_data_ts", None):
             recency = max([v for v in streamer.last_data_ts.values() if v] or [0.0])
             if recency:
@@ -72,10 +71,11 @@ class PipelineMonitor:
                 "feed_age": time.time() - (self._last_data_ts or self._last_bar_growth),
                 "journal_bytes": self._journal_path_size(),
             }
-            if market_open and decisions == self._last_decisions:
-                self._stall_cycles += 1
-            elif market_open:
-                self._stall_cycles = 0
+            self._stall_cycles = (
+                (self._stall_cycles + 1)
+                * (decisions == self._last_decisions and market_open)
+                * bool(self._last_data_ts or any(sizes.values()))
+            )
             self._last_decisions = decisions
 
     def pop_heal(self) -> bool:

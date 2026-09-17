@@ -18,8 +18,6 @@ from .data.scanner import IBScanner, ScanResult
 from .juli_feed import JuliFeed, _fmt_verdict
 
 log = logging.getLogger(__name__)
-# Rotating EVAL_WINDOW keeps flow continuous (no THINK burst, then silence).
-# The brain evaluates the FULL discovered union (budget rotation streams it).
 EVAL_WINDOW: int = 4
 
 
@@ -93,7 +91,11 @@ class JuliBrain:
     ) -> list[Verdict]:
         """Score the rotating EVAL_WINDOW slice (scheduling, no decisions)."""
         off = int(getattr(self, "_eval_off", 0)) % len(universe)
-        window = universe[off : off + EVAL_WINDOW]
+        window = sorted(
+            universe[off : off + EVAL_WINDOW],
+            key=lambda t: len((self._snap_for(snapshot, t) or {}).get("prices", ())),
+            reverse=True,
+        )
         self._eval_off = (off + EVAL_WINDOW) % len(universe)
         verdicts = [
             self.brain.decide_entry(

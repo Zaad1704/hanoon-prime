@@ -24,6 +24,13 @@ log = logging.getLogger(__name__)
 
 _IB_LOGGER_NAME = "ib_insync.ib"
 
+# Live eval minimum: scalping decides on the forming bar + a short window.
+# The brain's own validity floor is 20 prices (orchestrator._check_snapshot_valid),
+# and every indicator needs at most ~20 bars before it self-degrades to defaults.
+# EDGE_LOOKBACK (50) stays as the RESEARCH warmup target; live evaluation must
+# not wait on it — history seeding is enrichment, not the decision gate.
+LIVE_EVAL_BARS: int = 20
+
 
 @contextmanager
 def _silence_ib_errors() -> Iterator[None]:
@@ -79,6 +86,10 @@ class StreamBuffer:
     def ready(self) -> bool:
         """True if enough bars for Cortex evaluation."""
         return len(self.close) >= EDGE_LOOKBACK
+
+    def live_ready(self) -> bool:
+        """True if enough bars for LIVE scalp evaluation (forming-bar window)."""
+        return len(self.close) >= LIVE_EVAL_BARS
 
     def arrays(self) -> dict[str, Any]:
         """Return numpy arrays for the brain."""
@@ -314,6 +325,10 @@ class IBStreamer:
     def ready(self, ticker: str) -> bool:
         """Check if buffer has enough data."""
         return self.buffers[ticker].ready()
+
+    def live_ready(self, ticker: str) -> bool:
+        """Check if buffer has enough bars for live scalp evaluation."""
+        return self.buffers[ticker].live_ready()
 
     def buffer_atr(self, ticker: str) -> float:
         """Compute ATR(14) from the current buffer."""
