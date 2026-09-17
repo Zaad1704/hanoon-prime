@@ -489,11 +489,12 @@ class BotCycleMixin:
             for t, p in self.hippocampus._open_positions.items()
         }
         self._halim_order_review()
-        # Brain evaluates the full scanner discovery union (raw pool), not
-        # just streamed tickers — budget rotation streams every name over
-        # time so each eventually scores with real data.
+        # Brain evaluates the live-tracked universe only — budget seat
+        # rotation streams every discovered name over time (LRU rotation),
+        # so each eventually scores with REAL streamed data. Evaluating the
+        # full raw union directly would flood the window with ~200 unseated
+        # micro-caps that return no_data -> zero decisions -> bogus stall.
         watch = set(self.juli.budget.get_all_tracked())
-        watch |= {c.symbol for c in self.juli._candidates}
         exit_s, verdicts = self.juli.tick(
             watch,
             self._snapshot,

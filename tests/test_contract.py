@@ -932,9 +932,18 @@ def test_R27_no_discovery_truncation_before_brain():
 
     ib_path = SRC / "hanoon_prime" / "ib_cycle.py"
     ib_src = ib_path.read_text()
+    # The brain evaluates the LIVE budget-rotated universe. Budget rotation
+    # streams EVERY discovered name over time (LRU rotation of data seats),
+    # so each eventually scores with live data. Watching the full raw union
+    # all-at-once flooded the window with ~215 un-seated no-data names →
+    # zero decisions → a false brain-stall. The brain decides on names it
+    # can actually see — which over the rotation is the whole pool.
     assert (
-        "watch |= {c.symbol for c in self.juli._candidates}" in ib_src
-    ), "R27: live cycle must watch the full discovery union"
+        "watch = set(self.juli.budget.get_all_tracked())" in ib_src
+    ), "R27: live cycle must evaluate the budget-tracked (live-streamed) universe"
+    assert (
+        "{c.symbol for c in self.juli._candidates}" not in ib_src
+    ), "R27: brain must not eval the raw all-at-once union (no_data flood)"
     for src, name in ((juli_src, "juli.py"), (ib_src, "ib_cycle.py")):
         assert "[:MAX_CANDIDATES]" not in src, f"R27: slider truncation in {name}"
 
