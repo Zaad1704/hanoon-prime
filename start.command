@@ -53,7 +53,15 @@ echo "  🚀 HANOON PRIME 3.0 — FULL SYSTEM START"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# ── 0. Pre-flight ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ── 0. Clean slate: stop anything left running first ━━━━━━━━━━━━━━━━
+# stop.command wipes stale PID/lock files and kills zombies, so start
+# always begins from a clean state (fixes "supervisor already running").
+log "Cleaning up from previous run..."
+bash "$BOT_ROOT/stop.command" 2>&1 | sed 's/^/  /' || true
+log "Clean slate ready"
+echo ""
+
+# ── 1. Pre-flight ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 log "Step 0/5: Pre-flight verification"
 
 if ! python3 -c "import hanoon_prime" 2>/dev/null; then
@@ -111,13 +119,21 @@ else
   # Launch bot via supervisor (auto-restart OFF by default).
   # Enable with:  BOT_AUTO_RESTART=1 bash start.command
   # Or manually:  python3 scripts/bot_supervisor.py --restart
+  #
+  # NOTE: the supervisor creates bot_supervisor.pid itself via an atomic
+  # O_EXCL lock — do NOT pre-write it here or the lock-create will fail
+  # with "Another bot_supervisor is already running".
   PYTHONUNBUFFERED=1 nohup "$PYTHON_BIN" "$BOT_ROOT/scripts/bot_supervisor.py" \
     >> "$BOT_LOG" 2>&1 &
-  SUPV_PID=$!
-  echo "$SUPV_PID" > "$PID_DIR/bot_supervisor.pid"
-  
+
   sleep 3
-  if kill -0 "$SUPV_PID" 2>/dev/null; then
+  # Read the supervisor's self-published PID (created by its own lock).
+  SUPV_PID="$(cat "$PID_DIR/bot_supervisor.pid" 2>/dev/null || true)"
+  if [[ -z "$SUPV_PID" ]]; then
+    SUPV_PID="$(pgrep -f "scripts/bot_supervisor.py" | head -1 || true)"
+  fi
+
+  if [[ -n "$SUPV_PID" ]] && kill -0 "$SUPV_PID" 2>/dev/null; then
     ok "HANOON Prime bot started via supervisor (Supervisor PID $SUPV_PID)"
   else
     err "Bot failed to start — check $BOT_LOG"
