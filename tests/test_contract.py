@@ -1069,3 +1069,32 @@ def test_R29_gated_organs_default_off():
         assert (
             value is expected
         ), f"{name} must be {expected} by default (live path stays byte-identical)"
+
+
+def test_R30_rollout_gates_off_at_live_read_sites():
+    """The 10 rollout gates are OFF where the LIVE code actually reads them.
+
+    R29 pins the immune.py literals, but several organs are consumed through
+    at-import aliases the live code branches on directly: orchestrator's
+    NEURO_BLEND_ENABLED / DELIBERATION_TRACE_ENABLED, exit_ladder's
+    HYSTERESIS_EXIT_ENABLED, realized_ev's CALIBRATION_NUDGE_ENABLED,
+    probe_recovery's PROBE_RECOVERY_ENABLED, contrarian's
+    CONTRARIAN_MODE_ENABLED, pillar_evidence/consolidation's
+    HALIM_EVIDENCE_LEARNING. A module-import-time flip anywhere would keep
+    immune.py False yet still switch an organ ON live. So the audit runs in a
+    FRESH interpreter — the pristine read-path a live bot gets — constructs
+    the production brain, and requires every read-site to be False.
+    """
+    import subprocess
+
+    audit = Path(__file__).resolve().parents[1] / "scripts" / "live_gate_audit.py"
+    result = subprocess.run(
+        [sys.executable, str(audit)],
+        capture_output=True,
+        text=True,
+        cwd=audit.parents[1],
+        timeout=120,
+    )
+    assert "AUDIT_RESULT=PASS" in result.stdout, (
+        "live read-site audit failed:\n" + result.stdout + result.stderr
+    )

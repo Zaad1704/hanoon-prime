@@ -371,6 +371,19 @@ write-back; attractor→replay consolidation) and signal mode has no closes.
 - R29 contract + pre-commit keep all 10 gates OFF; nothing changes live. The
   harness is retained as the instrument for that day.
 
+**Live read-site verification (R30, 2026-09-18).** R29 pins the `immune.py`
+literals, but six organs are consumed through at-import module aliases the live
+code branches on directly (`orchestrator.NEURO_BLEND_ENABLED`/`DELIBERATION_TRACE_ENABLED`,
+`exit_ladder.HYSTERESIS_EXIT_ENABLED`, `realized_ev.CALIBRATION_NUDGE_ENABLED`,
+`probe_recovery.PROBE_RECOVERY_ENABLED`, `contrarian.CONTRARIAN_MODE_ENABLED`,
+`pillar_evidence`/`consolidation`.HALIM_EVIDENCE_LEARNING) — a false immune.py
+alone would NOT prove the live bot is OFF. `scripts/live_gate_audit.py` spawns a
+FRESH interpreter (the pristine read-path a live process gets), imports every
+consumer, constructs the production brain, and dumps all 10 gate read-sites:
+**AUDIT PASS — every site False** (bridges are lazy-read, so they equal the
+immune literal at call time). Pinned for CI + pre-commit as `test_R30` /
+`r30-gates-live-read`, closing the alias gap R29 could not reach.
+
 - [ ] **F1. `CALIBRATION_NUDGE_ENABLED`** — score nudge toward realized win-rate bands.
   Requires realized-data confidence; start with `CALIB_BOUND=0.10` capped.
 - [ ] **F2. `HYSTERESIS_EXIT_ENABLED`** — soft (Tier2) exits must persist 3 bars.
@@ -486,3 +499,10 @@ baseline cross-clears**; A/B recipe documented in P4. `metrics/` now gitignored.
   (close-driven by construction). Verdicts: NEURO_BLEND = HOLD/do-not-flip (needs graded SNN
   read + trading funnel); A1/C1/D1/G1 = HOLD (unmeasurable on fixtures; validate live once R2/WFA
   cross-clear). Full non-backtest suite 1237 pass; mypy strict clean (197 files); ruff clean.
+- **2026-09-18** — Live read-site gate verification (R30). New `scripts/live_gate_audit.py`
+  spawns a fresh interpreter, imports every gate consumer, constructs the production
+  NeuromorphicBrain, and asserts all 10 rollout gates are False at the exact sites the live code
+  branches on — covering the at-import aliases R29 cannot (orchestrator blend/deliberation,
+  exit_ladder hysteresis, realized_ev calibration, probe_recovery, contrarian,
+  pillar_evidence/consolidation halim). AUDIT PASS. Pinned as `test_R30` +
+  `r30-gates-live-read` pre-commit gate. Suite 1238 pass; mypy strict clean; ruff clean.

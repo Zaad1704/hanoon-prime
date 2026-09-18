@@ -91,6 +91,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # CI Gate: R30 (gates OFF at the LIVE read sites, audited in a fresh process)
+      - id: r30-gates-live-read
+        name: R30 — Gated Organs Off At Live Read Sites
+        entry: pytest tests/test_contract.py::test_R30_rollout_gates_off_at_live_read_sites -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # CI Gate: R8 (integrated learning ecosystem)
       - id: r8-learning
         name: R8 — Integrated Learning Ecosystem
