@@ -95,12 +95,20 @@ MOE_EXPERT_DECISION_WEIGHTS: dict[str, dict[str, float]] = {
     },
 }
 
+# Audited 2026-09-18 (was: claimed 66/20/89/256 — never matched the built
+# network). REAL build via NeuromorphicBridge._build_network:
+#   inputs 32 (16 bull + 16 bear from ALPHA_KEYS; cross-asset neurons are not
+#   built), hidden 17 (8 generalist + 9 MoE experts; cross_regime/cross_* ids
+#   are NOT in HIDDEN_NEURONS), decisions 3, total 52, wired pairs 37
+#   (input→hidden 29 + hidden→decision 8). Expert neurons build exists but
+#   carries zero input/output synapses while NEURO_MOE_GATE_ENABLED is off;
+#   wiring through moe_gate adds ~64 pairs (input→expert 48 + expert→decision 36).
 NETWORK_ARCHITECTURE: dict[str, int] = {
-    "input_neurons": 66,  # 62 alpha + 4 cross-asset
-    "hidden_neurons": 20,  # 8 generalist + 12 MoE
+    "input_neurons": 32,
+    "hidden_neurons": 17,
     "decision_neurons": 3,
-    "total_neurons": 89,
-    "approximate_synapses": 256,
+    "total_neurons": 52,
+    "approximate_synapses": 37,
 }
 
 

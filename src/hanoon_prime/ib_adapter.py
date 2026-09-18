@@ -44,7 +44,7 @@ class IBStreamingBot(BotCycleMixin):
         self.hippocampus = Hippocampus(safety_enabled=False)
         self._halted: bool = False
         self.brain_state = BrainState()
-        self.juli = JuliBrain(self.ib)
+        self.juli = JuliBrain(self.ib, persist_memory=True)
         repo_root = Path(__file__).resolve().parents[2]
         self.journal = Journal(repo_root / "runtime" / "journal_live.jsonl")
         consolidation = getattr(self.juli.brain, "_consolidation", None)

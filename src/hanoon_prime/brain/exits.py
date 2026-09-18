@@ -307,9 +307,7 @@ class ExitPolicy:
         momentum = (current_price - prev) / prev
         pillars = [
             compute_setup_degradation(self._entry_alpha.get(ticker)),
-            compute_momentum_fading(
-                momentum, momentum_accel=momentum, pnl_pct=pnl_pct
-            ),
+            compute_momentum_fading(momentum, momentum_accel=momentum, pnl_pct=pnl_pct),
             compute_flow_reversal(direction, institutional_flow=0.0),
             compute_giveback_risk(health, pnl_pct),
             compute_time_pressure(hold_minutes, self._stale_minutes, pnl_pct),
@@ -356,7 +354,7 @@ class ExitPolicy:
         """
         if ticker not in self._entry_ts:
             return ExitSignal()
-        self._update_peaks(ticker, current_price, ib_unrealized_pnl)
+        self._update_peaks(ticker, current_price, ib_unrealized_pnl, direction)
 
         # Standard mechanical exits
         for check in (
@@ -451,10 +449,36 @@ class ExitPolicy:
             "adapt_count": self._adapt_count,
         }
 
-    def _update_peaks(self, ticker: str, price: float, pnl: float) -> None:
+    def observe(
+        self, ticker: str, price: float, pnl: float, direction: int = 1
+    ) -> None:
+        """Track price/P&L peaks for one position (runs every evaluation)."""
+        self._update_peaks(ticker, price, pnl, direction)
+
+    def peak_return_fraction(self, ticker: str, direction: int = 1) -> float:
+        """Best directional return since entry (fraction, e.g. 0.12 = +12%).
+
+        Clamped at 0.0 so learners only ever see real upside: a short's
+        tracked price extreme is the highest tick, so a wrong sign degrades
+        to no-signal rather than a false peak.
+        """
+        entry = self._entry_price.get(ticker, 0.0)
+        peak = self._peak_price.get(ticker, entry)
+        if entry <= 0:
+            return 0.0
+        return max(0.0, (peak / entry - 1.0) * direction)
+
+    def _update_peaks(
+        self, ticker: str, price: float, pnl: float, direction: int = 1
+    ) -> None:
         """Track the running price and P&L peaks for one position."""
-        if price > self._peak_price.get(ticker, 0):
-            self._peak_price[ticker] = price
+        if direction > 0:
+            if price > self._peak_price.get(ticker, 0):
+                self._peak_price[ticker] = price
+        else:
+            current = self._peak_price.get(ticker, 0)
+            if current == 0 or price < current:
+                self._peak_price[ticker] = price
         if pnl > self._peak_pnl.get(ticker, 0):
             self._peak_pnl[ticker] = pnl
 

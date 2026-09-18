@@ -17,9 +17,14 @@ from typing import Any, Optional
 from ..cortex import Cortex
 from ..edge import score_to_win_prob
 from ..hippocampus import Hippocampus
-from ..immune import DELIBERATION_TRACE_ENABLED, DIRECTION_MIN_SCORE
+from ..immune import (
+    DELIBERATION_TRACE_ENABLED,
+    DIRECTION_MIN_SCORE,
+    NEURO_BLEND_ENABLED,
+)
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from . import horizons
+from .adaptive_thresholds import get_adaptive_thresholds
 from .cognitive.emotion import CONF_BOUND, RISK_CEIL, RISK_FLOOR
 from .cognitive.nash import MOD_BOUND as NASH_MOD_BOUND
 from .cognitive.nash import NashBrain, NashPrediction
@@ -71,7 +76,7 @@ from .strategy_bandit import DEFAULT_STRATEGY, StrategyBandit
 from .strategy_genome import StrategyGenome
 from .strategy_registry import StrategyRegistry
 from .strategy_research import StrategyResearch
-from .telemetry_summaries import extinction_summary
+from .telemetry_facade import build_brain_snapshot
 from .thinker import TOTAL_MOD_BOUND
 
 log = logging.getLogger(__name__)
@@ -98,7 +103,10 @@ class NeuromorphicBrain:
     """Neuromorphic brain — LOCAL SOURCE OF TRUTH for all decisions."""
 
     def __init__(
-        self, brain_state: BrainState | None = None, enable_neuromorphic: bool = True
+        self,
+        brain_state: BrainState | None = None,
+        enable_neuromorphic: bool = True,
+        persist_memory: bool = False,
     ) -> None:
         self.state = brain_state or BrainState()
         self.memory = JuliMemory()
@@ -109,14 +117,10 @@ class NeuromorphicBrain:
         self._decision_count: int = 0
         self._eval_fail_count: int = 0
         self.episodic = EpisodicMemory()
-        # The cortex scores ALL 27 weighted indicators; learned weights are
-        # overlaid on the structural defaults (the memory may hold a subset).
+        # Cortex scores ALL 27 weighted indicators; learned weights are overlaid
+        # on structural defaults (the memory may hold a subset).
         weights = dict(DEFAULT_WEIGHTS)
         weights.update(self.memory.get_weights())
-        # Unified threshold: cortex admission and dynamics sizing share ONE
-        # adaptive number (memory threshold). _update_admission_threshold()
-        # pushes the dynamics value into the cortex each cycle, so the
-        # prediction-error calibration loop actually moves who enters.
         self.cortex = Cortex(weights=weights, threshold=self.memory.threshold)
         self.hippocampus = Hippocampus(cortex=self.cortex, safety_enabled=False)
         self.dynamics = Dynamics(base_threshold=self.memory.threshold)
@@ -136,11 +140,13 @@ class NeuromorphicBrain:
         self._sleep_engine: Optional[SleepReplayEngine] = None
         self._consolidation: Optional[ConsolidationEngine] = None
         if enable_neuromorphic:
-            self._init_neuromorphic()
+            self._init_neuromorphic(persist_memory)
 
-    def _init_neuromorphic(self) -> None:
+    def _init_neuromorphic(self, persist_memory: bool = False) -> None:
         """Initialize neuromorphic bridge, sleep engine, and consolidation."""
-        self._neuromorphic = NeuromorphicBridge()
+        self._persist_memory = persist_memory
+        memory_path = NeuromorphicBridge._memory_path() if persist_memory else None
+        self._neuromorphic = NeuromorphicBridge(memory_path=memory_path)
         self._sleep_engine = SleepReplayEngine(
             network=self._neuromorphic._network,
             stdp=self._neuromorphic._stdp,
@@ -614,8 +620,24 @@ class NeuromorphicBrain:
         )
 
     def _compute_neuro_score(self, alpha: dict[str, float], ticker: str) -> float:
-        """Compute neuromorphic score."""
+        """Compute neuromorphic score.
+
+        Gated by NEURO_BLEND_ENABLED: the SNN input path is repaired, but the
+        legacy live blend ran with an effectively-0 neuro score; flipping it
+        live changes scoring, so it stays OFF until the backtest gate clears.
+        """
         if not self._neuromorphic:
+            return 0.0
+        # Feed market context per tick REGARDLESS of the blend gate so each
+        # organ (adaptive thresholds, MoE routing, blend) can be validated
+        # independently. With all gates off this only records inert adapter
+        # history and re-asserts build-time thresholds — scoring untouched.
+        regime_mul = self.state.get("regime_multiplier", 1.0)
+        regime_label = self.state.get("regime_label", "unknown")
+        self._neuromorphic.feed_context(
+            ticker, self.state.get_latest_prices(), regime_label, regime_mul
+        )
+        if not NEURO_BLEND_ENABLED:
             return 0.0
         result: dict[str, Any] = self._neuromorphic.process_alpha(alpha, ticker)
         return float(result.get("score", 0.0))
@@ -1282,6 +1304,7 @@ class NeuromorphicBrain:
             return
         self._adapt_threshold()
         self._update_rpe(ticker, won, canon)
+        self._learn_exit_thresholds(ticker, won, pnl_pct, direction, exit_triggers)
         self.exits.deregister(ticker)
         log.info("LEARN %s %s pnl=%.4f", ticker, "WIN" if won else "LOSS", pnl_pct)
         if self._last_alpha.get(ticker):
@@ -1307,7 +1330,8 @@ class NeuromorphicBrain:
 
         Applies the STDP reward AND stores the decision alpha as an
         attractor so sleep replay has consolidated patterns to rehearse.
-        AttractorMemory is not persisted, so every close must repopulate it.
+        AttractorMemory persists to ``runtime/attractor_memory.json`` and is
+        reloaded on bridge construction, so closed trades accumulate state.
         """
         if self._neuromorphic is None:
             return
@@ -1345,6 +1369,32 @@ class NeuromorphicBrain:
             rpe_tonic=round(rpe["tonic"], 4),
             rpe_meta={k: round(float(v), 4) for k, v in rpe["v_meta"].items()},
             rpe_surprise=round(rpe["surprise"], 4),
+        )
+
+    def _learn_exit_thresholds(
+        self,
+        ticker: str,
+        won: bool,
+        pnl_pct: float,
+        direction: int,
+        exit_triggers: list[str] | None,
+    ) -> None:
+        """Feed one real close into the nine-rule learned-exit thresholds.
+
+        Runs before ``exits.deregister`` so hold/peak state is still live.
+        Exit-likelihood has no post-hoc source, so the entry confidence that
+        preceded this trade stands in as the bounded advisory signal.
+        """
+        hold_minutes = self.exits.hold_minutes(ticker)
+        peak_pct = self.exits.peak_return_fraction(ticker, direction)
+        reason = ",".join(exit_triggers) if exit_triggers else "mechanical"
+        get_adaptive_thresholds().update_from_outcome(
+            won,
+            hold_minutes,
+            pnl_pct,
+            peak_pct,
+            reason,
+            self._last_conf.get(ticker, 0.5),
         )
 
     def _ironclade_gate(self, ticker: str, source: str) -> bool:
@@ -1533,37 +1583,8 @@ class NeuromorphicBrain:
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """Full brain snapshot for telemetry."""
-        result = {
-            "memory": self.memory.snapshot(),
-            "realized": self._realized.snapshot(),
-            "episodic_size": self.episodic.size,
-            "extinction_size": self._extinction.size,
-            "extinction": extinction_summary(self._extinction.save().get("cells", [])),
-            "metacog": self._meta_cog.snapshot(),
-            "threshold": self.dynamics.threshold,
-            "brain_state": self.state.snapshot(),
-            "decision_count": self._decision_count,
-            "neuromorphic": self._neuromorphic.snapshot() if self._neuromorphic else {},
-            "nash": self.nash.get_telemetry(),
-            "advisor": self._advisor.snapshot(),
-            "exits_adaptive": self.exits.telemetry(),
-            "meta_label": self._meta.snapshot(),
-            "horizon_bandit": self._bandit.snapshot(),
-            "regime_weights": self._regime_weights.snapshot(),
-            "learned_exit": {"trades": self._learned_exit_trade_count()},
-            "genome": self.genome.get_genome(),
-            "strategy_research": {
-                "registry": self.strategy_registry.snapshot(),
-                "bandit": self.strategy_bandit.snapshot(),
-                "research": self.strategy_research.snapshot(),
-                "in_play": dict(self._last_strategy),
-                "shadow_book": self._shadow_book.snapshot(),
-            },
-        }
-        if self._sleep_engine is not None:
-            result["sleep_engine"] = self._sleep_engine.snapshot()
-        return result
+        """Full brain snapshot for telemetry (delegates to the facade)."""
+        return build_brain_snapshot(self)
 
     def reset_learning(self) -> None:
         """Reset all learning state to clean defaults.

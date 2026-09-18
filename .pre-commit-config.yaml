@@ -83,6 +83,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # CI Gate: R29 (all rollout gates default OFF — no silent organ flip)
+      - id: r29-gates-default-off
+        name: R29 — Gated Organs Default Off
+        entry: pytest tests/test_contract.py::test_R29_gated_organs_default_off -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # CI Gate: R8 (integrated learning ecosystem)
       - id: r8-learning
         name: R8 — Integrated Learning Ecosystem

@@ -123,6 +123,28 @@ HYSTERESIS_BARS: int = 3  # consecutive bars a soft exit trigger must persist
 DELIBERATION_TRACE_ENABLED: bool = False  # Deliberator CoT trace (diagnostic)
 HALIM_EVIDENCE_LEARNING: bool = False  # evidence-grounded HALIM CoT -> recs
 
+# ── Neuromorphic scoring blend (off-by-default) ──────────────────────
+# The static-weights SNN input path was repaired (plain-name alpha keys now
+# map to the bull_*/bear_* neurons that actually exist, so the network
+# finally fires). Restoring its score would silently change the live
+# 0.7·cortex + 0.3·neuro blend from effectively 0.3·0.0 to a real 0.3·SNN,
+# so the whole contribution stays gated until the backtest gate clears it.
+NEURO_BLEND_ENABLED: bool = False
+# __init__: STDP-learned strengths write back into LIFNetwork._weights (the
+# fast-path store the scorer reads). OFF: learn_from_outcome stays inert on
+# scoring (byte-identical live). Requires NEURO_LEARN_ENABLED flip + backtest
+# gate BEFORE NEURO_BLEND_ENABLED, or learning moves a score that is live.
+NEURO_LEARN_ENABLED: bool = False
+# __init__: DynamicThresholdAdapter scales neuron firing thresholds with
+# realized price vol (fed via orchestrator -> bridge.update_market_env).
+# OFF: neuron thresholds stay at build-time (0.6/0.7) — byte-identical live.
+NEURO_ADAPTIVE_THRESHOLD_ENABLED: bool = False
+# __init__: regime soft-gate over MoE expert routing wires the dormant expert
+# neurons (input→expert→decision) and scales expert→decision weights by
+# softmax routing weights each tick. OFF: experts stay synapse-less — the
+# exact dormant state that was audited (byte-identical live).
+NEURO_MOE_GATE_ENABLED: bool = False
+
 # Pillar (directional conviction balance) + telemetry posture.
 PILLAR_IMBALANCE_OK: float = 0.35  # |long-short|/(long+short) within band -> OK
 PILLAR_IMBALANCE_WARN: float = 0.60  # above this -> WARN, above FAIL

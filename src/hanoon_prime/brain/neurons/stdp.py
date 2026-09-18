@@ -115,6 +115,8 @@ class STDPLearner:
         spikes.append(now)
         if len(spikes) > self._max_spikes:
             self._pre_spikes[neuron_id] = spikes[-self._max_spikes :]
+        for syn in self._outgoing.get(neuron_id, {}).values():
+            syn.last_pre_spike = now
 
     def _record_post_spike(self, neuron_id: str, now: float) -> None:
         """Record post-synaptic spike and apply LTP."""
@@ -124,6 +126,8 @@ class STDPLearner:
         spikes.append(now)
         if len(spikes) > self._max_spikes:
             self._post_spikes[neuron_id] = spikes[-self._max_spikes :]
+        for syn in self._incoming.get(neuron_id, {}).values():
+            syn.last_post_spike = now
         self._apply_ltp(neuron_id, now)
 
     def _apply_ltp(self, neuron_id: str, now: float) -> None:

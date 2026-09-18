@@ -2,14 +2,21 @@
 
 Stores winning/losing trading patterns as attractor basins in the
 spike space. During sleep replay, these patterns are replayed to
-stabilize synaptic configurations.
+stabilize synaptic configurations. Persists to disk best-effort when
+constructed with a ``filepath`` (log on failure, never raise).
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterator, List, Optional
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,10 +60,57 @@ class AttractorMemory:
     Provides pattern recall and sleep replay functionality.
     """
 
-    def __init__(self, max_patterns: int = 500) -> None:
+    def __init__(
+        self, max_patterns: int = 500, filepath: Optional[Path] = None
+    ) -> None:
         self._attractors: List[Attractor] = []
         self._max_patterns = max_patterns
         self._ticker_index: dict[str, List[int]] = {}
+        self._filepath = filepath
+        self.load()
+
+    def load(self) -> None:
+        """Restore attractors from disk (best-effort; never raises)."""
+        path = self._filepath
+        if path is None or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.clear()
+            for entry in data.get("attractors", [])[: self._max_patterns]:
+                att = Attractor(
+                    ticker=str(entry.get("ticker", "")),
+                    center=[float(v) for v in entry.get("center", [])],
+                    won=bool(entry.get("won", False)),
+                    pnl_pct=float(entry.get("pnl_pct", 0.0)),
+                    trade_count=int(entry.get("trade_count", 0)),
+                    wins=int(entry.get("wins", 0)),
+                    losses=int(entry.get("losses", 0)),
+                )
+                self._attractors.append(att)
+                self._ticker_index.setdefault(att.ticker, []).append(
+                    len(self._attractors) - 1
+                )
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            log.debug("attractor_memory load failed: %s", exc)
+            self.clear()
+
+    def save(self) -> None:
+        """Persist attractors atomically (best-effort; never raises)."""
+        path = self._filepath
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "attractors": [vars(a) for a in self._attractors],
+                "ts": time.time(),
+            }
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            log.debug("attractor_memory save failed: %s", exc)
 
     def store(
         self,
@@ -72,6 +126,7 @@ class AttractorMemory:
                 existing = self._attractors[idx]
                 if self._patterns_match(existing.center, pattern):
                     existing.update(won, pnl_pct)
+                    self.save()
                     return existing
 
         # Create new attractor
@@ -91,6 +146,8 @@ class AttractorMemory:
         # Prune if over capacity
         if len(self._attractors) > self._max_patterns:
             self._prune()
+
+        self.save()
 
         return attractor
 

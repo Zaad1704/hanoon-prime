@@ -498,8 +498,9 @@ class ConsolidationEngine:
         for att in list(self._sleep_engine._memory):
             if att.trade_count < 2:
                 continue
-            center = {f"alpha_{i}": float(v) for i, v in enumerate(att.center)}
-            patterns.append((center, att.wins > att.losses))
+            patterns.append(
+                (self._sleep_engine.encode_pattern(att.center), att.wins > att.losses)
+            )
         return patterns
 
     def _maybe_sleep_replay(self, session_close: bool = False) -> None:

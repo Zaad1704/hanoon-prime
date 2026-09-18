@@ -1036,3 +1036,36 @@ def test_R28_file_skip_lists_are_frozen():
         assert (
             oversized
         ), f"R28: {entry} — no file behind it is >200 lines anymore, remove it"
+
+
+def test_R29_gated_organs_default_off():
+    """Every rollout gate is a literal False: flips are separate, reviewable changes.
+
+    The P3 flag rollouts and the neuro organ gates must default OFF so the
+    live 0.7·cortex + 0.3·neuro path stays byte-identical until each organ
+    passes its backtest gate. Asserting these directly (instead of trusting
+    convention) means no PR can quietly enable an organ in the same change
+    that flips behavior.
+    """
+    from hanoon_prime import immune
+
+    gates = {
+        "CALIBRATION_NUDGE_ENABLED": False,
+        "HYSTERESIS_EXIT_ENABLED": False,
+        "PROBE_RECOVERY_ENABLED": False,
+        "CONTRARIAN_MODE_ENABLED": False,
+        "DELIBERATION_TRACE_ENABLED": False,
+        "HALIM_EVIDENCE_LEARNING": False,
+        "NEURO_BLEND_ENABLED": False,
+        "NEURO_LEARN_ENABLED": False,
+        "NEURO_ADAPTIVE_THRESHOLD_ENABLED": False,
+        "NEURO_MOE_GATE_ENABLED": False,
+    }
+    for name, expected in gates.items():
+        value = getattr(immune, name, None)
+        assert isinstance(
+            value, bool
+        ), f"{name} must be an explicit bool, got {value!r}"
+        assert (
+            value is expected
+        ), f"{name} must be {expected} by default (live path stays byte-identical)"

@@ -73,6 +73,9 @@ class ExitLadder:
         exit_likelihood, win_rate = self._resolve_defaults(
             ticker, current_price, direction, exit_likelihood, win_rate
         )
+        observe = getattr(self._policy, "observe", None)
+        if observe is not None:
+            observe(ticker, current_price, ib_pnl, direction)
         tier1 = self._tier1(current_price, stop_price, force_exit, direction)
         if tier1.should_exit:
             return tier1

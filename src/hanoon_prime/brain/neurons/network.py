@@ -1,7 +1,7 @@
 """hanoon_prime.brain.neurons.network — LIF Network structure and connections.
 
 Manages the spiking neural network topology: neurons, synapses, and
-coordination with NetworkStepper for vectorized stepping.
+scalar ``step_all`` minute-granularity integration.
 """
 
 from __future__ import annotations

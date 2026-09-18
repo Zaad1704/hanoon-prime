@@ -22,8 +22,9 @@ def _set_input_for_alpha(
     elif key.endswith("_bear"):
         _set_neuron_input(network, f"bear_{key}", alpha[key])
     else:
-        _set_neuron_input(network, f"bull_{key}", alpha.get(key, 0.5))
-        _set_neuron_input(network, f"bear_{key}", -alpha.get(key, 0.5))
+        value = alpha.get(key, 0.5)
+        _set_neuron_input(network, f"bull_{key}_bull", value)
+        _set_neuron_input(network, f"bear_{key}_bear", -value)
 
 
 def _set_neuron_input(network: LIFNetwork, neuron_id: str, value: float) -> None:

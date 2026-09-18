@@ -3,12 +3,16 @@
 Adjusts neuron firing thresholds based on market conditions:
 - High volatility → higher thresholds (prevent overshoot)
 - Low volatility → lower thresholds (allow subtler signals)
-"""
 
+The multiplier is measured against a nominal 1%-per-bar return volatility, so
+a doubling of realized vol doubles the threshold (clamped to [0.5x, 5.0x]).
+"""
 from __future__ import annotations
 
 import hashlib
 from typing import Dict, List
+
+NOMINAL_REL_VOL: float = 0.01  # 1% per-bar returns == 1.0x scale factor
 
 
 class DynamicThresholdAdapter:
@@ -41,7 +45,13 @@ class DynamicThresholdAdapter:
         return hashlib.md5(ticker.encode()).hexdigest()[:8]
 
     def compute_dynamic_threshold(self, asset_idx: int) -> float:
-        """Compute threshold scaled by local volatility."""
+        """Compute a base-scaled threshold from local volatility.
+
+        Returns ``base_threshold * multiplier`` where the multiplier is the
+        ratio of realized per-bar volatility to NOMINAL_REL_VOL, further scaled
+        by VIX (clamped to [0.5x, 5.0x]). ``base_threshold`` stays the caller's
+        unit (e.g. a neuron firing threshold), so output is directly usable.
+        """
         history = self.price_history.get(asset_idx, [])
 
         if len(history) < 10:
@@ -55,11 +65,9 @@ class DynamicThresholdAdapter:
 
         vol = (sum(r**2 for r in returns) / len(returns)) ** 0.5
         vix_scale = 1.0 + 0.02 * max(0.0, self.vix - 15.0)
-        dynamic_theta = self.base_threshold * vol * vix_scale
+        multiplier = (vol / NOMINAL_REL_VOL) * vix_scale
 
-        result: float = max(
-            self.base_threshold * 0.5, min(self.base_threshold * 5.0, dynamic_theta)
-        )
+        result: float = self.base_threshold * max(0.5, min(5.0, multiplier))
         return result
 
     def adapt_for_market(

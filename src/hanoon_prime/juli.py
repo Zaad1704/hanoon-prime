@@ -5,9 +5,9 @@ Every evaluated ticker yields a Verdict; off-window ticks are scheduling.
 
 from __future__ import annotations
 
-import collections
 import logging
 import time
+from collections import deque
 from typing import Any
 
 from .brain.orchestrator import NeuromorphicBrain
@@ -24,18 +24,18 @@ EVAL_WINDOW: int = 4
 class JuliBrain:
     """Scanner + router. NeuromorphicBrain makes all decisions."""
 
-    def __init__(self, ib_client: Any) -> None:
+    def __init__(self, ib_client: Any, persist_memory: bool = False) -> None:
         self.ib = ib_client
         self.scanner = IBScanner(ib_client)
         self.budget = DataBudget()
         self._state = BrainState()
-        self.brain = NeuromorphicBrain(brain_state=self._state)
+        self.brain = NeuromorphicBrain(
+            brain_state=self._state, persist_memory=persist_memory
+        )
         self._candidates: list[ScanResult] = []
         self._last_alloc: float = 0.0
         self.feed = JuliFeed(self._state)
-        self._recent_verdicts: collections.deque[Verdict] = collections.deque(
-            maxlen=200
-        )
+        self._recent_verdicts: deque[Verdict] = deque(maxlen=200)
         self._lock_held: bool = False
         self.brain.start()
 

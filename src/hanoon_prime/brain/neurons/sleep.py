@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
+from . import replay as _replay
 from .attractor import Attractor, AttractorMemory
 from .network import LIFNetwork
 from .stdp import STDPLearner
@@ -36,6 +37,7 @@ class SleepReplayEngine:
 
     POISSON_RATE: float = 3.0
     REPLAY_BATCH: int = 10
+    REPLAY_STEPS: int = 5
     WIN_BIAS: float = 1.0
     LOSS_BIAS: float = 3.0
     MAX_PATTERNS: int = 100
@@ -55,6 +57,10 @@ class SleepReplayEngine:
     def should_run(self, is_market_open: bool) -> bool:
         """Should sleep consolidation run? Only when market is closed."""
         return not is_market_open
+
+    def encode_pattern(self, center: List[float]) -> Dict[str, float]:
+        """Map an attractor center (EPISODIC_KEYS order) to real input neurons."""
+        return _replay.encode_pattern(self._network, center)
 
     def select_patterns(
         self,
@@ -78,17 +84,7 @@ class SleepReplayEngine:
                 continue
 
             weight = self.LOSS_BIAS if att.losses >= att.wins else self.WIN_BIAS
-            patterns.append(
-                (
-                    dict(
-                        zip(
-                            [f"alpha_{i}" for i in range(len(att.center))],
-                            att.center,
-                        )
-                    ),
-                    weight,
-                )
-            )
+            patterns.append((self.encode_pattern(att.center), weight))
 
         if len(patterns) > self.MAX_PATTERNS:
             random.shuffle(patterns)
@@ -118,9 +114,10 @@ class SleepReplayEngine:
         for pattern, weight in patterns[: self.REPLAY_BATCH]:
             if time.time() >= deadline:
                 break
-            count, change = self._replay_pattern(pattern, weight)
+            count, change, updated = self._replay_pattern(pattern, weight)
             spikes_generated += count
             total_change += change
+            weights_updated += updated
 
         self._cycle_count += 1
 
@@ -156,20 +153,22 @@ class SleepReplayEngine:
         self,
         pattern: Dict[str, float],
         weight: float,
-    ) -> Tuple[int, float]:
-        """Replay a single pattern through the network."""
-        spikes = 0
-        change = 0.0
+    ) -> Tuple[int, float, int]:
+        """Replay one pattern: drive real inputs, let spikes consolidate.
 
-        for key, value in pattern.items():
-            neuron_id = key.replace("alpha_", "")
-            self._network.set_neuron_input(neuron_id, value * weight)
-
-        for _ in range(5):
-            new_spikes = self._network.step_all(dt=0.05)
-            spikes += len(new_spikes)
-
-        return spikes, change
+        Returns (spikes fired, total abs synapse change, synapses modified).
+        """
+        before = _replay.snapshot_synapses(self._stdp)
+        _replay.apply_pattern_input(self._network, pattern, weight)
+        spikes = _replay.drive_steps(
+            self._network,
+            self._stdp,
+            steps=self.REPLAY_STEPS,
+            poisson_rate=self.POISSON_RATE,
+        )
+        self._stdp.apply_reward(1.0 if weight >= 1.0 else -1.0)
+        updated, change = _replay.synapse_delta_stats(before, self._stdp)
+        return spikes, change, updated
 
 
 __all__ = ["SleepReplayEngine", "SleepResult"]
