@@ -2,7 +2,10 @@
 
 Covers: vitals recording, staleness/stall detection, incident journaling,
 heal-flag handoff, recovery transitions, and telemetry snapshot shape.
-The monitor must be alert-only: it never places orders.
+The monitor must be alert-only: it never places orders. Stall semantics:
+a cycle is ADVANCING when it produces any verdict (ENTER/HOLD/VETOED), so
+cold-start seeding and quiet markets never trip ``brain_advancing``; a
+streaming feed with ZERO verdicts is a wedged brain and still stalls.
 """
 
 from __future__ import annotations
@@ -111,6 +114,51 @@ def test_brain_stall_sets_heal_flag(tmp_path):
         mon._check_once()
     assert mon.pop_heal() is True
     assert mon.pop_heal() is False  # consumed exactly once
+
+
+def test_verdicts_flowing_is_advancing_not_a_stall(tmp_path):
+    """Cold-start seeding: VETOED verdicts every cycle are the brain working.
+
+    Regression for the live false positive — during seeding most
+    candidates return ``no_data`` / ``direction_rejected`` vetoes, so
+    ``_decision_count`` never moves. That is a healthy decision path, not
+    a frozen brain, and must NOT trigger PIPELINE FAIL + full MD reset.
+    """
+    bot = make_bot(tmp_path)
+    mon = PipelineMonitor(bot, bot.journal)
+    for _ in range(BRAIN_STALL_CYCLES * 3):
+        mon.record_cycle(market_open=True, verdicts=4)
+        mon._check_once()
+    assert mon.snapshot()["healthy"] is True
+    assert mon.pop_heal() is False  # no resubscribe churn
+
+
+def test_streaming_feed_without_any_verdict_is_a_stall(tmp_path):
+    """Bars flowing but zero verdicts = a blocked/wedged brain, not a lull.
+
+    The evade-pathproof wedge: data keeps arriving (feed live) but jul
+    produces no EVAL outcomes (e.g. stuck eval lock, empty universe), so
+    the stall must still trip and request the MD-reset heal."""
+    bot = make_bot(tmp_path)
+    bot.streamer.last_data_ts = {"AAPL": time.time()}
+    mon = PipelineMonitor(bot, bot.journal)
+    for _ in range(BRAIN_STALL_CYCLES):
+        mon.record_cycle(market_open=True)
+        mon._check_once()
+    assert mon.pop_heal() is True
+
+
+def test_cold_start_without_any_data_is_a_warmup_not_a_stall(tmp_path):
+    """No data ever seen (subscriptions registered, zero bars): freeze the
+    stall counter — seeding must not trip ``brain_advancing``."""
+    bot = make_bot(tmp_path)
+    bot.streamer.buffers = {"AAPL": SimpleNamespace(close=[])}
+    mon = PipelineMonitor(bot, bot.journal)
+    for _ in range(BRAIN_STALL_CYCLES * 3):
+        mon.record_cycle(market_open=True)
+        mon._check_once()
+    assert mon.snapshot()["healthy"] is True
+    assert mon.pop_heal() is False
 
 
 def test_stale_bars_sets_heal_when_market_open(tmp_path):

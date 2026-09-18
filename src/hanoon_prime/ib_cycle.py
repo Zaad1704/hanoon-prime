@@ -541,10 +541,10 @@ class BotCycleMixin:
         self._publish_account_feed(pnl)
         self._execute_entries(bool(meta and meta.market_open), verdicts)
         self._reflect_closed()
-        self.monitor.record_cycle(bool(meta and meta.market_open), session=session)
-        elapsed = time.monotonic() - meta.started
-        gap = max(CYCLE_FLOOR, meta.poll - elapsed)
-        time.sleep(gap)
+        self.monitor.record_cycle(
+            meta.market_open, session=session, verdicts=len(verdicts)
+        )
+        time.sleep(max(CYCLE_FLOOR, meta.poll - (time.monotonic() - meta.started)))
         self._heartbeat()
         log.info(
             _cycle_line(

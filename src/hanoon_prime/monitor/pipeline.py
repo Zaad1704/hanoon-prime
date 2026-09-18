@@ -39,20 +39,22 @@ class PipelineMonitor:
         self._last_data_ts: float = 0.0  # max per-ticker data arrival (feed liveness)
         self._last_resub_set: float = 0.0  # heal throttle clock
 
-    # ── cycle-thread side ────────────────────────────────────────────
-    def record_cycle(self, market_open: bool, session: str = "rth") -> None:
-        """Publish vitals from the cycle thread (cheap, lock-light)."""
-        streamer = self._bot.streamer
+    def record_cycle(
+        self,
+        market_open: bool,
+        session: str = "rth",
+        verdicts: int = 0,
+    ) -> None:
+        """Publish vitals + stall; any verdict (ENTER/HOLD/VETOED) = advance."""
         sizes = {
             t: len(getattr(buf, "close", []) or [])
-            for t, buf in list(getattr(streamer, "buffers", {}).items())
+            for t, buf in list(getattr(self._bot.streamer, "buffers", {}).items())
         }
         if any(sizes.get(t, 0) > self._last_sizes.get(t, 0) for t in sizes):
             self._last_bar_growth = time.time()
-        if getattr(streamer, "last_data_ts", None):
-            recency = max([v for v in streamer.last_data_ts.values() if v] or [0.0])
-            if recency:
-                self._last_data_ts = recency
+        feed = getattr(self._bot.streamer, "last_data_ts", {})
+        if feed and (m := max([v for v in feed.values() if v] or [0.0])):
+            self._last_data_ts = m
         self._last_sizes = sizes
         try:
             connected = bool(self._bot.ib.isConnected())
@@ -73,7 +75,7 @@ class PipelineMonitor:
             }
             self._stall_cycles = (
                 (self._stall_cycles + 1)
-                * (decisions == self._last_decisions and market_open)
+                * (not (verdicts > 0) and market_open)
                 * bool(self._last_data_ts or any(sizes.values()))
             )
             self._last_decisions = decisions
@@ -155,7 +157,6 @@ class PipelineMonitor:
                 log.info("PIPELINE RECOVERED: %s", name)
         if open_mkt and not v.get("ib_connected"):
             log.critical("PIPELINE: IB disconnected while market open")
-        # Silent bar feed or stalled brain requests a throttled MD reset.
         if open_mkt and (
             self._failures.get("bars_fresh") or self._stall_cycles >= BRAIN_STALL_CYCLES
         ):
@@ -173,8 +174,7 @@ class PipelineMonitor:
             "market_open": v.get("market_open"),
         }
         with self._lock:
-            self._incidents.append(inc)
-            self._incidents = self._incidents[-50:]
+            self._incidents = (self._incidents + [inc])[-50:]
         try:
             self._journal.append({"event": "pipeline_incident", **inc})
         except Exception:
