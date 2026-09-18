@@ -134,6 +134,10 @@ class HealthBudget:
         """Auto-generated docstring."""
         return [m for m, s in self._scores.items() if s < 0.3]
 
+    def scores(self) -> dict[str, float]:
+        """Current per-module scores (observe-only telemetry view)."""
+        return dict(self._scores)
+
 
 class HealthDiagnosis:
     """Diagnose why health is low."""

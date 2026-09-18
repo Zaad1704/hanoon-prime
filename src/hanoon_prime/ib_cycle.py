@@ -1065,6 +1065,7 @@ class BotCycleMixin:
     def _cleanup(self, pnl: Any) -> None:
         """Shutdown all subsystems."""
         self.monitor.stop()
+        self.monitors.stop()
         self.juli.brain.stop()
         self.streamer.cancel_all()
         self.executor.cancel_all()

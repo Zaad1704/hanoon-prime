@@ -8,6 +8,7 @@ This runs on the monitor daemon thread, not the main loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from ..brain.indicators import compute_all_alpha
 from ..types import BarSeries
@@ -53,3 +54,7 @@ class ExitScorer:
         if score < self._threshold * 0.5:
             return ExitHealth(score=score, verdict=EXIT, reason="health_collapse")
         return ExitHealth(score=score, verdict=STAY, reason="ok")
+
+    def snapshot(self) -> dict[str, Any]:
+        """Telemetry view (observe-only; scoring is driven by the live loop)."""
+        return {"threshold": self._threshold, "mode": "observe"}

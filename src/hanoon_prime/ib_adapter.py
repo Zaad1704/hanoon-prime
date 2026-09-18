@@ -25,6 +25,7 @@ from .ib_streamer import IBStreamer
 from .immune import IB_CLIENT_ID, IB_HOST, IB_LIVE_PORT, IB_PAPER_PORT
 from .juli import JuliBrain
 from .memory import Journal
+from .monitor.observe import MonitorSuite
 from .monitor.pipeline import PipelineMonitor
 from .monitor.vitals_log import VitalsLog
 
@@ -69,6 +70,7 @@ class IBStreamingBot(BotCycleMixin):
         self._chat = TelegramChat(state_provider=self._chat_state)
         self.monitor = PipelineMonitor(self, self.journal)
         self.vitals_log = VitalsLog(repo_root / "runtime" / "vitals")
+        self.monitors = MonitorSuite(self, self.brain_state)
         self._running = self._last_beat = False
         self._closing: set[str] = set()
         self._watched: set[str] = set()
@@ -155,6 +157,7 @@ class IBStreamingBot(BotCycleMixin):
         self._pnl_ref: Any = pnl
         self._chat.start()
         self.monitor.start()
+        self.monitors.start()
         log.info("All streams active. Entering event loop...")
         while self._running:
             self._cycle(poll, pnl)

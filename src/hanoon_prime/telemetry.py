@@ -73,6 +73,7 @@ ROUTES_GET = {
     "/trust": "_trust",
     "/vitals": "_vitals",
     "/exec-quality": "_exec_quality",
+    "/monitors": "_monitors",
     "/metrics": "_metrics",
     "/auth": "_auth",
 }
@@ -133,6 +134,8 @@ _ROUTE_KEY = {
     "/verdicts": "verdicts",
     "/session": "session",
     "/logs": "logs",
+    "/monitors": "monitors",
+    "/exec-quality": "exec_quality",
 }
 
 _MISSING = object()
@@ -798,15 +801,48 @@ class _H(BaseHTTPRequestHandler):
         get_snap = getattr(bot, "_snapshot", None)
         return mark_positions(self._ib(), get_snap)
 
-    def _recent_trades(self) -> dict[str, Any]:
+    def _trade_buffer(self) -> Any:
+        """TradeBuffer owned by the consolidation engine, or None."""
+        cons = getattr(self._brain(), "_consolidation", None)
+        return getattr(cons, "buffer", None) if cons else None
+
+    def _trade_rows(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Serialized closed trades (newest first) from the real TradeBuffer."""
+        buf = self._trade_buffer()
+        if buf is None:
+            return []
+        rows: list[dict[str, Any]] = []
+        for t in reversed(buf.get_trades(last_n=limit)):
+            notional = abs(t.avg_entry * t.qty)
+            # fmt: off
+            rows.append({
+                "event": "position_closed", "id": t.trade_id, "ticker": t.ticker,
+                "pnl": round(t.pnl, 2), "win": t.win,
+                "entry": round(t.avg_entry, 4), "exit": round(t.avg_exit, 4),
+                "shares": round(t.qty, 4), "fees": round(t.fees, 2),
+                "return_pct": round(t.pnl / notional, 4) if notional else None,
+                "timestamp": t.exit_time, "time": t.exit_time,
+                "opened": t.entry_time,
+            })
+            # fmt: on
+        return rows
+
+    def _journal_closed(self, window: int) -> list[dict[str, Any]]:
+        """Fallback: closed rows from the journal tail (buffer unavailable)."""
         if not self.journal_path or not self.journal_path.exists():
-            return {"trades": []}
-        es = Journal(self.journal_path).tail(50)[::-1]
-        return {
-            "trades": [e for e in es if e.get("event") in ("position_closed", "exit")][
-                :20
-            ]
-        }
+            return []
+        return [
+            e
+            for e in Journal(self.journal_path).tail(window)
+            if e.get("event") in ("position_closed", "exit")
+        ]
+
+    def _recent_trades(self) -> dict[str, Any]:
+        """Closed trades from the reflection buffer (newest first)."""
+        rows = self._trade_rows(200)
+        if not rows:
+            rows = self._journal_closed(50)[::-1]
+        return {"trades": rows[:20]}
 
     def _decisions(self) -> dict[str, Any]:
         """Full decision chain: verdicts → entries → exits → fills → P&L."""
@@ -827,8 +863,11 @@ class _H(BaseHTTPRequestHandler):
         return {"chain": chain, "total_events": len(entries)}
 
     def _trade_quality(self) -> dict[str, Any]:
-        """Live trade-quality metrics: win rate, profit factor, P&L breakdown."""
-        if not self.journal_path or not self.journal_path.exists():
+        """Live trade-quality metrics from the real TradeBuffer."""
+        rows = self._trade_rows(500)
+        if not rows:
+            rows = self._journal_closed(500)
+        if not rows:
             return {
                 "trades": 0,
                 "win_rate": 0,
@@ -836,32 +875,19 @@ class _H(BaseHTTPRequestHandler):
                 "net_pnl": 0.0,
                 "breakdown": [],
             }
-        trades = [
-            e
-            for e in Journal(self.journal_path).tail(500)
-            if e.get("event") in ("position_closed", "exit")
-        ]
-        if not trades:
-            return {
-                "trades": 0,
-                "win_rate": 0,
-                "pf": 0,
-                "net_pnl": 0.0,
-                "breakdown": [],
-            }
-        wins = [t for t in trades if (t.get("pnl") or 0) > 0]
-        losses = [t for t in trades if (t.get("pnl") or 0) < 0]
-        gw = sum(t.get("pnl") or 0 for t in wins)
-        gl = abs(sum(t.get("pnl") or 0 for t in losses))
+        wins = [r for r in rows if (r.get("pnl") or 0) > 0]
+        losses = [r for r in rows if (r.get("pnl") or 0) < 0]
+        gw = sum(r.get("pnl") or 0 for r in wins)
+        gl = abs(sum(r.get("pnl") or 0 for r in losses))
         pf = (gw / gl) if gl else float("inf")
         return {
-            "trades": len(trades),
+            "trades": len(rows),
             "wins": len(wins),
             "losses": len(losses),
-            "win_rate": round(len(wins) / len(trades), 3),
+            "win_rate": round(len(wins) / len(rows), 3),
             "pf": round(pf, 3) if pf != float("inf") else "inf",
-            "net_pnl": round(sum(t.get("pnl") or 0 for t in trades), 2),
-            "breakdown": trades[-20:],
+            "net_pnl": round(sum(r.get("pnl") or 0 for r in rows), 2),
+            "breakdown": rows[:20],
         }
 
     def _pipeline_state(self) -> dict[str, Any]:
@@ -905,6 +931,18 @@ class _H(BaseHTTPRequestHandler):
         except Exception as exc:
             log.debug("exec-quality summary failed: %s", exc)
             return {"enabled": True, "fills": 0}
+
+    def _monitors(self) -> dict[str, Any]:
+        """Observe-only dormant-monitor suite (watchdog, enforcement, ...)."""
+        suite = getattr(self.bot, "monitors", None) if self.bot else None
+        if suite is None:
+            return {"enabled": False}
+        try:
+            snap = suite.snapshot()
+            return snap if isinstance(snap, dict) else {"enabled": False}
+        except Exception as exc:
+            log.debug("monitor suite snapshot failed: %s", exc)
+            return {"enabled": False}
 
     def _metrics(self) -> dict[str, Any]:
         """Prometheus-flavored gauges for /metrics (JSON object)."""
@@ -1573,6 +1611,8 @@ def build_snapshot(handler: _H) -> dict[str, Any]:
         "decisions": handler._decisions(),
         "trade_quality": handler._trade_quality(),
         "trades": handler._recent_trades(),
+        "monitors": handler._monitors(),
+        "exec_quality": handler._exec_quality(),
         "journal": handler._journal(),
         "session": handler._session(),
         "meta": {

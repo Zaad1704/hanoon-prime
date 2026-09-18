@@ -55,3 +55,7 @@ class Reconciliation:
     def clear_seed(self, ticker: str) -> None:
         """Auto-generated docstring."""
         self._seeded.discard(ticker)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Telemetry view (observe-only; reconcile() is not driven here)."""
+        return {"seeded": sorted(self._seeded), "seed_count": len(self._seeded)}
