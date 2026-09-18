@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from hanoon_prime.ib_cycle import BotCycleMixin
+import time
+
+from hanoon_prime import ib_cycle
+from hanoon_prime.ib_cycle import GATEWAY_FEED_STALE_SECS, BotCycleMixin
 
 
 class _FakeIB:
@@ -14,6 +17,9 @@ class _FakeIB:
 
 
 class _FakeStreamer:
+    def __init__(self) -> None:
+        self.last_data_ts: dict[str, float] = {}
+
     def touch(self, tickers: set) -> None:
         pass
 
@@ -21,6 +27,21 @@ class _FakeStreamer:
 class _FakeHippo:
     def __init__(self) -> None:
         self._open_positions: set = set()
+
+
+class _FakeState:
+    def __init__(self, active: bool) -> None:
+        self.active = active
+
+
+class _SleepProxy:
+    """Stand-in for ib_cycle._SLEEP_MGR (active session = expect live data)."""
+
+    def __init__(self, active: bool) -> None:
+        self.active = active
+
+    def effective_state(self, _cfg) -> _FakeState:
+        return _FakeState(self.active)
 
 
 class FakeBot(BotCycleMixin):
@@ -87,3 +108,68 @@ def test_reconnect_success_touches_streamer() -> None:
     ok = bot._reconnect()
     assert ok is True
     assert getattr(tracker, "touch_tracker", False) is True
+
+
+def test_feed_stale_skips_during_inactive_session(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=False))
+    bot = FakeBot()
+    bot.streamer.last_data_ts["AAPL"] = time.time() - GATEWAY_FEED_STALE_SECS - 60
+    assert bot._feed_stale() is False
+
+
+def test_feed_stale_true_when_data_silent_in_active_session(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=True))
+    bot = FakeBot()
+    bot.streamer.last_data_ts["AAPL"] = time.time() - GATEWAY_FEED_STALE_SECS - 10
+    assert bot._feed_stale() is True
+
+
+def test_feed_stale_false_with_fresh_data(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=True))
+    bot = FakeBot()
+    bot.streamer.last_data_ts["AAPL"] = time.time()
+    assert bot._feed_stale() is False
+
+
+def test_feed_stale_false_when_nothing_received(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=True))
+    bot = FakeBot()
+    assert bot._feed_stale() is False
+
+
+def test_supervise_forces_reconnect_on_stale_feed(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=True))
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    bot9 = FakeBot()
+    bot9.ib._connected = True  # socket "up" but silent at IB level
+    bot9.streamer.last_data_ts["AAPL"] = time.time() - GATEWAY_FEED_STALE_SECS - 5
+    resubscribed: list[str] = []
+
+    def _connect(_host: str, _port: int, _client_id: int) -> None:
+        bot9.ib._connected = True
+
+    def _resubscribe() -> None:
+        resubscribed.append("x")
+
+    bot9.connect = _connect  # type: ignore[assignment]
+    bot9._resubscribe_all = _resubscribe  # type: ignore[method-assign]
+    bot9._supervise_gateway()
+    assert resubscribed, "stale-but-connected feed must be force-reconnected"
+    assert bot9._gw_was_connected is True  # re-set by successful _reconnect()
+
+
+def test_supervise_skips_reconnect_when_feed_fresh(monkeypatch) -> None:
+    monkeypatch.setattr(ib_cycle, "_SLEEP_MGR", _SleepProxy(active=True))
+    bot = FakeBot()
+    bot.ib._connected = True
+    bot.streamer.last_data_ts["AAPL"] = time.time()
+    called: list[str] = []
+
+    def _reconnect() -> bool:
+        called.append("reconnect")
+        return True
+
+    bot._reconnect = _reconnect  # type: ignore[method-assign]
+    bot._supervise_gateway()
+    assert called == []
+    assert bot._gw_was_connected is True

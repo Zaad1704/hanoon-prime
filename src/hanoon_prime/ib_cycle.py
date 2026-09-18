@@ -30,6 +30,7 @@ STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
 SEED_PACE_SECS: float = 12.0  # space successful seeds under IB's historical cap
+GATEWAY_FEED_STALE_SECS: float = 150.0  # active-session feed silence until reconnect
 HEAL_BATCH_MAX: int = 60  # surgical heal: cap silent-ticker MD resets per heal
 HOLD_FIRST_MIN: float = 15.0  # first open-position hold notice (minutes)
 HOLD_REPEAT_MIN: float = 60.0  # repeat hold notice every this many minutes
@@ -139,31 +140,52 @@ class BotCycleMixin:
     # ── Gateway supervision (rebuild runner_gateway.py port) ────────────
 
     def _supervise_gateway(self) -> None:
-        """Detect a dropped Gateway and reconnect with backoff + re-sync.
+        """Detect a dropped or silent Gateway and reconnect with backoff.
 
         Rebuild lesson (runner_gateway.py): after reconnecting you MUST
         re-request market data — IB silently drops subscriptions on
         disconnect, and without re-subscribe the watchdog sees stale
         ticks and panics. 1s → 2s → 4s → 8s → 16s → 30s (cap).
+
+        isConnected() only mirrors the connect handshake, so a half-open
+        socket stays "connected" and blocking requests hang. Those are
+        bounded by ib.RequestTimeout; _feed_stale() forces the reconnect
+        here when the session is active but no market data has arrived.
         """
         try:
             connected = bool(self.ib.isConnected())
         except Exception as exc:
             log.debug("isConnected check failed: %s", exc)
             connected = False
-        if connected:
+        if connected and not self._feed_stale():
             self._gw_was_connected = True
             self._gw_attempts = 0
             return
         if self._gw_was_connected:
             self._gw_was_connected = False
             self._gw_attempts = 0
-            log.warning("GATEWAY: connection lost — reconnecting")
+            log.warning("GATEWAY: connection lost or feed silent — reconnecting")
         delay = min(30.0, 1.0 * (2 ** min(self._gw_attempts, 4)))
         time.sleep(delay)
         self._gw_attempts += 1
         if self._reconnect():
             self._resubscribe_all()
+
+    def _feed_stale(self) -> bool:
+        """True when an active session has seen no live market data lately.
+
+        Max per-ticker data arrival is the liveness signal (mirrors
+        PipelineMonitor.bars_fresh). Only checked during an active session
+        — while asleep, stale subscriptions are expected.
+        """
+        if not _SLEEP_MGR.effective_state(TRADING_CONFIG).active:
+            return False
+        now = time.time()
+        last = max(
+            (v for v in getattr(self.streamer, "last_data_ts", {}).values() if v),
+            default=0.0,
+        )
+        return bool(last) and now - last > GATEWAY_FEED_STALE_SECS
 
     def _reconnect(self) -> bool:
         """One reconnect attempt via the adapter's retrying connect().

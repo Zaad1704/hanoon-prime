@@ -30,6 +30,12 @@ from .monitor.vitals_log import VitalsLog
 
 log = logging.getLogger(__name__)
 MAX_RECONNECT, RECONNECT_DELAY = 5, 5
+# Bound every blocking IB request (positions(), qualifyContracts(),
+# reqHistoricalData()...). ib_insync's default RequestTimeout=0 waits
+# indefinitely, so a half-open gateway socket freezes the loop for minutes
+# (observed 620s). A bound raises asyncio.TimeoutError and lets the cycle
+# reclaim control to force a reconnect.
+IB_REQUEST_TIMEOUT_SECS: float = 60.0
 
 
 class IBStreamingBot(BotCycleMixin):
@@ -41,6 +47,7 @@ class IBStreamingBot(BotCycleMixin):
         if not _ib_available:
             raise ImportError("ib_insync required")
         self.ib: Any = ib.IB()
+        self.ib.RequestTimeout = IB_REQUEST_TIMEOUT_SECS
         self.account = account
         # Safety nets OFF by default; blocks entries when tripped, never stops.
         self.hippocampus = Hippocampus(safety_enabled=False)
@@ -67,9 +74,7 @@ class IBStreamingBot(BotCycleMixin):
         self._watched: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
         self._hold_notified: dict[str, float] = {}
-        self._closing_retries: dict[str, float] = (
-            {}
-        )  # backoff for dead close-order retry
+        self._closing_retries: dict[str, float] = {}  # backoff for close-order retry
         self._last_bars: int = 0
         self._init_position_cache()
         # Gateway supervision state (rebuild runner_gateway.py port)
