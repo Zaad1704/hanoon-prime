@@ -30,6 +30,10 @@ _IB_LOGGER_NAME = "ib_insync.ib"
 # EDGE_LOOKBACK (50) stays as the RESEARCH warmup target; live evaluation must
 # not wait on it — history seeding is enrichment, not the decision gate.
 LIVE_EVAL_BARS: int = 20
+# Rotation pacing: qualify in chunks (IB contract-detail pacing) and cap
+# the parked contract cache so a session is bounded, not unbounded.
+QUALIFY_BATCH: int = 25
+MAX_PARKED: int = 400
 
 
 @contextmanager
@@ -179,32 +183,105 @@ class IBStreamer:
             self.last_seen[t] = now
 
     def unsubscribe(self, ticker: str) -> None:
-        """Cancel one subscription and drop its state (frees an MD line)."""
+        """Cancel one subscription and free its MD line (parks contract)."""
         sub = self.ticker_subs.pop(ticker, None)
         if sub is not None:
             try:
                 self.ib.cancelMktData(sub)
             except Exception as exc:
                 log.debug("cancelMktData %s failed: %s", ticker, exc)
-        self.depth_subs.pop(ticker, None)
-        self.contracts.pop(ticker, None)
-        self.buffers.pop(ticker, None)
+        self.depth_subs[ticker] = None
         self._minutely.pop(ticker, None)
         self.last_data_ts.pop(ticker, None)
         self.last_seen.pop(ticker, None)
-        log.info("Unsubscribed %s (GC)", ticker)
+        self._trim_parked()
+        log.debug("Unsubscribed %s (GC)", ticker)
+
+    def unsubscribe_many(self, tickers: list[str]) -> int:
+        """Cancel a batch of MD subs in one pass with a single log line."""
+        count = 0
+        for t in tickers:
+            sub = self.ticker_subs.pop(t, None)
+            if sub is not None:
+                self._cancel_one(t, sub)
+                count += 1
+            self.depth_subs.pop(t, None)
+            self._minutely.pop(t, None)
+            self.last_data_ts.pop(t, None)
+            self.last_seen.pop(t, None)
+        self._trim_parked()
+        if count:
+            log.info("Feed: -%d unsubscribed, pool=%d", count, len(self.ticker_subs))
+        return count
+
+    def _cancel_one(self, ticker: str, sub: Any) -> None:
+        """Cancel one market-data sub, tolerating gateway teardown errors."""
+        try:
+            self.ib.cancelMktData(sub)
+        except Exception as exc:
+            log.debug("cancelMktData %s failed: %s", ticker, exc)
+
+    def _trim_parked(self) -> None:
+        """Evict oldest parked contracts once the park cache overflows."""
+        if len(self.contracts) <= MAX_PARKED:
+            return
+        tracked = set(self.ticker_subs)
+        parked = sorted(
+            (t for t in self.contracts if t not in tracked),
+            key=lambda t: self.last_seen.get(t, 0.0),
+        )
+        for t in parked[: len(self.contracts) - MAX_PARKED]:
+            self.contracts.pop(t, None)
+            self.buffers.pop(t, None)
 
     def subscribe(self, ticker: str) -> None:
         """Subscribe to live market data + order book depth."""
-        contract = ib.Stock(ticker, "SMART", "USD")
-        self.ib.qualifyContracts(contract)
-        self.contracts[ticker] = contract
-        self.buffers[ticker] = StreamBuffer(ticker)
+        contract = self.contracts.get(ticker)
+        if contract is None:
+            contract = ib.Stock(ticker, "SMART", "USD")
+            self.ib.qualifyContracts(contract)
+            self.contracts[ticker] = contract
+        if ticker not in self.buffers:
+            self.buffers[ticker] = StreamBuffer(ticker)
         self.ticker_subs[ticker] = self.ib.reqMktData(contract, "", False, False)
         # DOM (Level 2) not supported for US equities without subscription.
         # Skip silently to avoid IB error 10092 flooding logs.
         self.depth_subs[ticker] = None
-        log.info("Subscribed to %s (mkt data)", ticker)
+        log.debug("Subscribed to %s (mkt data)", ticker)
+
+    def subscribe_many(self, tickers: list[str]) -> int:
+        """Subscribe a batch with ONE qualification round-trip + one log line."""
+        new = [
+            t for t in tickers if t not in self.contracts and t not in self.ticker_subs
+        ]
+        for i in range(0, len(new), QUALIFY_BATCH):
+            chunk = new[i : i + QUALIFY_BATCH]
+            contracts = [ib.Stock(t, "SMART", "USD") for t in chunk]
+            try:
+                self.ib.qualifyContracts(*contracts)
+            except Exception as exc:
+                log.debug("Batch qualify failed: %s", exc)
+                contracts = [
+                    self.contracts.get(t) or c for t, c in zip(chunk, contracts)
+                ]
+            for t, c in zip(chunk, contracts, strict=True):
+                self.contracts[t] = c
+        for t in tickers:
+            if t in self.ticker_subs:
+                continue
+            if t not in self.buffers:
+                self.buffers[t] = StreamBuffer(t)
+            self.ticker_subs[t] = self.ib.reqMktData(
+                self.contracts[t], "", False, False
+            )
+            self.depth_subs[t] = None
+        log.info(
+            "Feed: +%d subscribed, pool=%d/%d (stats)",
+            len(tickers),
+            len(self.ticker_subs),
+            len(self.contracts),
+        )
+        return len(tickers)
 
     def resubscribe(self, ticker: str) -> None:
         """Cancel + re-request market data for a silent ticker (keeps buffers).

@@ -715,11 +715,11 @@ class BotCycleMixin:
         self.executor.tracked_tickers = tracked
         self.streamer.touch(needed)
         missing = [s for s in sorted(needed) if s not in self.streamer.ticker_subs]
-        for s in missing:
+        if missing:
             try:
-                self.streamer.subscribe(s)
+                self.streamer.subscribe_many(missing)
             except Exception as e:
-                log.warning("Sub %s fail: %s", s, e)
+                log.warning("Batch sub fail: %s", e)
         self._gc_stale_subs()
         self._seed_next_backfill(needed)
 
@@ -766,13 +766,13 @@ class BotCycleMixin:
         stale = [
             t
             for t, seen in self.streamer.last_seen.items()
-            if now - seen > STALE_SUB_SECS
+            if now - seen > STALE_SUB_SECS and t not in self.hippocampus._open_positions
         ]
-        for t in stale:
-            if t in set(self.hippocampus._open_positions):
-                self.streamer.touch({t})  # positions are never collected
-                continue
-            self.streamer.unsubscribe(t)
+        if stale:
+            try:
+                self.streamer.unsubscribe_many(stale)
+            except Exception as e:
+                log.warning("Batch unsub fail: %s", e)
 
     def _check_manual_flatten(self) -> bool:
         """Check if webapp requested a manual flatten."""

@@ -284,3 +284,62 @@ class TestResubscribe:
             s.resubscribe("AAPL")
             assert "AAPL" in s.ticker_subs
             assert s.ib.cancelMktData.call_count == 0
+
+
+class TestBatchRotation:
+    """subscribe_many/unsubscribe_many batch; one qualify round-trip total."""
+
+    def test_subscribe_many_qualifies_once_per_chunk(self):
+        """Batch subscribe: one qualifyContracts call, one reqMktData each."""
+        with patch("hanoon_prime.ib_streamer.ib") as ibmod:
+            ibmod.Stock.side_effect = lambda t, e, c: MagicMock(symbol=t)
+            s = IBStreamer(MagicMock())
+            s.ib.qualifyContracts.side_effect = lambda *cs: list(cs)
+            s.ib.reqMktData.return_value = MagicMock()
+            n = s.subscribe_many(["AA", "AB", "AC"])
+            assert n == 3
+            assert s.ib.reqMktData.call_count == 3
+            assert s.ib.qualifyContracts.call_count == 1
+            assert set(s.contracts) == {"AA", "AB", "AC"}
+
+    def test_subscribe_many_skips_already_streaming(self):
+        """Existing live subs are untouched by a batch re-entry."""
+        s = IBStreamer(MagicMock())
+        s.contracts["AA"] = MagicMock()
+        s.buffers["AA"] = StreamBuffer("AA")
+        s.ticker_subs["AA"] = FakeTicker(1.0, 1.5, 0.5)
+        s.depth_subs["AA"] = None
+        n = s.subscribe_many(["AA", "BB"])
+        assert n == 2
+        assert s.ib.reqMktData.call_count == 1  # only BB
+
+    def test_unsubscribe_many_parks_contract_for_reentry(self):
+        """Batch GC frees MD lines but parks the contract for instant re-sub."""
+        with patch("hanoon_prime.ib_streamer.ib") as ibmod:
+            ibmod.Stock.return_value = MagicMock()
+            s = IBStreamer(MagicMock())
+            s.ib.qualifyContracts.side_effect = lambda *cs: list(cs)
+            s.ib.reqMktData.return_value = MagicMock()
+            s.subscribe_many(["AA", "BB"])
+            s.ib.reqMktData.reset_mock()
+            dropped = s.unsubscribe_many(["AA", "BB"])
+            assert dropped == 2
+            assert "AA" not in s.ticker_subs
+            assert "AA" in s.contracts  # parked
+            s.subscribe_many(["AA"])  # re-entry: no qualify, no new buffer
+            assert s.ib.qualifyContracts.call_count == 1  # not re-qualified
+            assert ("AA" not in s.buffers) or s.buffers["AA"].ticker == "AA"
+
+    def test_unsubscribe_many_trims_parked_cache(self):
+        """Park cache is LRU-evicted once it exceeds MAX_PARKED."""
+        from hanoon_prime.ib_streamer import MAX_PARKED
+
+        with patch("hanoon_prime.ib_streamer.ib") as ibmod:
+            ibmod.Stock.return_value = MagicMock()
+            s = IBStreamer(MagicMock())
+            s.ib.qualifyContracts.side_effect = lambda *cs: list(cs)
+            s.ib.reqMktData.return_value = MagicMock()
+            tickers = [f"XX{i}" for i in range(MAX_PARKED + 10)]
+            s.subscribe_many(tickers)
+            s.unsubscribe_many(tickers)
+            assert len(s.contracts) <= MAX_PARKED
