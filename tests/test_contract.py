@@ -36,6 +36,23 @@ import pytest
 SRC = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC))
 
+# ── Rollout gates (R29/R30/R31) ─────────────────────────────────────────
+# The 10 rollout organs. R29 forces default-OFF literals, R30 forces the live
+# read-sites OFF, R31 forces any ON gate to carry money-gate evidence in
+# docs/gates/promotions.json. Shared here so the truth table lives once.
+ROLLOUT_GATES: tuple[str, ...] = (
+    "CALIBRATION_NUDGE_ENABLED",
+    "HYSTERESIS_EXIT_ENABLED",
+    "PROBE_RECOVERY_ENABLED",
+    "CONTRARIAN_MODE_ENABLED",
+    "DELIBERATION_TRACE_ENABLED",
+    "HALIM_EVIDENCE_LEARNING",
+    "NEURO_BLEND_ENABLED",
+    "NEURO_LEARN_ENABLED",
+    "NEURO_ADAPTIVE_THRESHOLD_ENABLED",
+    "NEURO_MOE_GATE_ENABLED",
+)
+
 # ── Frozen governance allowlists (R28) ─────────────────────────────────
 # The ONLY finite set of modules exempt from the 200-line rule (R3). These
 # are the pre-restructure oversized files. Growing THIS list to dodge the
@@ -1098,3 +1115,34 @@ def test_R30_rollout_gates_off_at_live_read_sites():
     assert "AUDIT_RESULT=PASS" in result.stdout, (
         "live read-site audit failed:\n" + result.stdout + result.stderr
     )
+
+
+def test_R31_promotion_manifest_backs_every_flipped_gate():
+    """Any ON gate must equal promotions.json, evidenced with the money gates."""
+    import json as _json
+
+    from hanoon_prime import immune
+
+    manifest = _json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "docs" / "gates" / "promotions.json"
+        ).read_text()
+    )
+    promoted = manifest.get("promoted", {})
+    asserted_unknown = set(promoted) - set(ROLLOUT_GATES)
+    assert not asserted_unknown, f"unknown gates in promotions.json: {asserted_unknown}"
+    declared_on = {name for name in ROLLOUT_GATES if bool(getattr(immune, name, False))}
+    assert declared_on == set(promoted), (
+        "promoted must equal declared-ON gates; a flip without "
+        f"evidence fails: on={sorted(declared_on)} "
+        f"promoted={sorted(set(promoted))}"
+    )
+    for name, entry in promoted.items():
+        assert entry.get("deflated_sr", 0.0) > 0.0, f"{name}: deflated_sr must be > 0"
+        ticks = entry.get("profitable_tickers")
+        assert (
+            isinstance(ticks, str) and "/" in ticks
+        ), f"{name}: profitable_tickers must look like 'N/M'"
+        assert entry.get("wfa_file") and entry.get(
+            "date"
+        ), f"{name}: wfa_file and date are required"

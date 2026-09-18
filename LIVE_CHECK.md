@@ -384,6 +384,28 @@ consumer, constructs the production brain, and dumps all 10 gate read-sites:
 immune literal at call time). Pinned for CI + pre-commit as `test_R30` /
 `r30-gates-live-read`, closing the alias gap R29 could not reach.
 
+### P6 — Closing the remaining gate gap planes (2026-09-18)
+What "enough" means for a rollout gate, and where each plane now stands:
+1. **Declared OFF** — immune.py literals — ✅ R29.
+2. **Read-sites OFF in a pristine live process** (incl. import aliases) — ✅ R30.
+3. **No non-code arming path** (env/config files) — ✅ by R6 design: immune.py is
+   literals-only, no env vars, and no disk writer of gates exists.
+4. **OFF path is decision-surface neutral** — ✅ by inspection: blend→0.0;
+   learn write-back gated; adaptive feed re-asserts build-time thresholds;
+   MoE no-ops; sleep mutates only the STDP store consumed only when armed;
+   adapter price history is bounded (volatility_window truncation).
+5. **Runtime drift cannot silently arm an organ** — ✅ **new = gate_guard**.
+   `brain/gate_guard.py` snapshots the declared gates at `start()` and checks
+   them at every `decide_entry` boundary; on drift it logs an ERROR and
+   force-resets the drifted aliases to declared (fail-closed = inert, never a
+   crash). Promotion-aware: enforcing DECLARED, not OFF — a legit flip with
+   matching read-sites passes untouched. `tests/test_gate_guard.py` (5).
+6. **Promotion is evidence-gated, machine-checked** — ✅ **new = R31**.
+   `docs/gates/promotions.json` must exactly equal declared-ON gates; each
+   entry requires deflated Sharpe > 0, R2 profitability N/M, wfa_file, date.
+   A gate flip without its money-gate evidence fails CI + pre-commit
+   (`test_R31` / `r31-promotion-evidence`). Empty manifest = correct baseline.
+
 - [ ] **F1. `CALIBRATION_NUDGE_ENABLED`** — score nudge toward realized win-rate bands.
   Requires realized-data confidence; start with `CALIB_BOUND=0.10` capped.
 - [ ] **F2. `HYSTERESIS_EXIT_ENABLED`** — soft (Tier2) exits must persist 3 bars.
@@ -506,3 +528,10 @@ baseline cross-clears**; A/B recipe documented in P4. `metrics/` now gitignored.
   exit_ladder hysteresis, realized_ev calibration, probe_recovery, contrarian,
   pillar_evidence/consolidation halim). AUDIT PASS. Pinned as `test_R30` +
   `r30-gates-live-read` pre-commit gate. Suite 1238 pass; mypy strict clean; ruff clean.
+- **2026-09-18** — Gate gap planes closed (P6). New `brain/gate_guard.py`: fail-closed
+  runtime arm — snapshots declared gates at `NeuromorphicBrain.start()`, verifies at every
+  `decide_entry` boundary, force-resets drifted aliases to declared (promotion-aware, never
+  crashes). `tests/test_gate_guard.py` (5). New `test_R31` + `r31-promotion-evidence`: any
+  gate declaring ON must equal `docs/gates/promotions.json` with deflated Sharpe > 0, R2
+  profitability N/M, wfa_file, date — a flip without evidence fails CI + pre-commit.
+  Full non-backtest suite 1243 pass; mypy strict clean; ruff clean.

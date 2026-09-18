@@ -99,6 +99,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # CI Gate: R31 (any ON gate must carry money-gate evidence in promotions.json)
+      - id: r31-promotion-evidence
+        name: R31 — Promotion Requires Money-Gate Evidence
+        entry: pytest tests/test_contract.py::test_R31_promotion_manifest_backs_every_flipped_gate -v -o addopts=""
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # CI Gate: R8 (integrated learning ecosystem)
       - id: r8-learning
         name: R8 — Integrated Learning Ecosystem

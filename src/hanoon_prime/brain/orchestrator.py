@@ -49,6 +49,7 @@ from .exit_ladder import ExitLadder
 from .exits import ExitPolicy
 from .extinction import ExtinctionTracker, context_key
 from .gate_advisor import GateAdvisor
+from .gate_guard import declared_gates, verify_decision_boundary
 from .horizon_bandit import HorizonBandit
 from .learned_exit import LearnedExitPolicy
 from .learning_config import CROSS_ASSET_MOD_BOUND, REGIME_MIN_TRADES
@@ -139,6 +140,7 @@ class NeuromorphicBrain:
         self._neuromorphic: Optional[NeuromorphicBridge] = None
         self._sleep_engine: Optional[SleepReplayEngine] = None
         self._consolidation: Optional[ConsolidationEngine] = None
+        self._gate_declared: Optional[dict[str, bool]] = None
         if enable_neuromorphic:
             self._init_neuromorphic(persist_memory)
 
@@ -197,6 +199,7 @@ class NeuromorphicBrain:
         """Start the neuromorphic brain (includes slow path)."""
         if self._consolidation is not None:
             self._consolidation.start()
+        self._gate_declared = declared_gates()
         log.info("NeuromorphicBrain started (neuro=%s)", self._neuromorphic is not None)
 
     def stop(self) -> None:
@@ -250,6 +253,7 @@ class NeuromorphicBrain:
         session: str = "rth",
     ) -> Verdict:
         """THE single entry decision point (fast path, policy from snapshot)."""
+        verify_decision_boundary(self._gate_declared)
         veto = self._check_snapshot_valid(snap)
         if veto:
             return Verdict(ticker=ticker, action=VETOED, reason=veto, stage="validity")

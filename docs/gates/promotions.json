@@ -1,0 +1,12 @@
+{
+  "_comment": "Promotion evidence manifest. A rollout gate may ONLY be declared ON (immune.py literal True) when it appears here as promoted, backed by the money gates (R2 profitability + WFA deflated Sharpe). test_R31 enforces: promoted == declared-on, and every promotion carries evidence fields. An empty promoted set is the correct baseline (all gates OFF).",
+  "promoted": {},
+  "_schema": {
+    "gate": {
+      "deflated_sr": "trials-deflated pooled Sharpe from the WFA report (> 0 required)",
+      "profitable_tickers": "N/M tickers with positive EV crossing the R2 profitability gate",
+      "wfa_file": "path to the WFA JSON that produced the numbers",
+      "date": "YYYY-MM-DD the promotion was approved"
+    }
+  }
+}
