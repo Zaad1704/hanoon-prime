@@ -19,6 +19,7 @@ from .juli_feed import JuliFeed, _fmt_verdict
 
 log = logging.getLogger(__name__)
 EVAL_WINDOW: int = 4
+READY_FLOOR: int = 20  # prices needed before a ticker is scored every cycle
 
 
 class JuliBrain:
@@ -89,26 +90,25 @@ class JuliBrain:
         held_positions: set[str] | list[str],
         session: str,
     ) -> list[Verdict]:
-        """Score the rotating EVAL_WINDOW slice (scheduling, no decisions)."""
-        off = int(getattr(self, "_eval_off", 0)) % len(universe)
-        window = sorted(
-            universe[off : off + EVAL_WINDOW],
-            key=lambda t: len((self._snap_for(snapshot, t) or {}).get("prices", ())),
-            reverse=True,
-        )
-        self._eval_off = (off + EVAL_WINDOW) % len(universe)
-        verdicts = [
-            self.brain.decide_entry(
-                ticker,
-                self._snap_for(snapshot, ticker),
-                set(held_positions or ()),
-                session,
+        """Score live-ready tickers every cycle; rotate the no-data rest."""
+        snaps = {t: self._snap_for(snapshot, t) for t in universe}
+        counts = {t: len((snaps[t] or {}).get("prices", ())) for t in universe}
+        ready = [t for t in universe if counts[t] >= READY_FLOOR]
+        cold = [t for t in universe if counts[t] < READY_FLOOR]
+        window = sorted(ready, key=lambda t: counts[t], reverse=True)
+        if cold:
+            off = int(getattr(self, "_eval_off", 0)) % len(cold)
+            window += sorted(
+                cold[off : off + EVAL_WINDOW], key=lambda t: counts[t], reverse=True
             )
-            for ticker in window
+            self._eval_off = (off + EVAL_WINDOW) % len(cold)
+        verdicts = [
+            self.brain.decide_entry(t, snaps[t], set(held_positions or ()), session)
+            for t in window
         ]
         self._recent_verdicts.extend(verdicts)
         if verdicts:
-            log.info("EVAL %s", " ".join(_fmt_verdict(v) for v in verdicts))
+            log.info("EVAL %s", " ".join(_fmt_verdict(v) for v in verdicts)[:1500])
         return verdicts
 
     @staticmethod

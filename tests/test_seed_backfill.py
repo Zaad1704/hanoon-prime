@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, call
 
-from hanoon_prime.ib_cycle import SEED_RETRY_MAX, BotCycleMixin
+from hanoon_prime.ib_cycle import SEED_PACE_SECS, SEED_RETRY_MAX, BotCycleMixin
 
 
 class _Tk:
@@ -71,3 +71,22 @@ class TestSeedBackfill:
             mixin._sync_subs()
         assert mixin.streamer.seed_history.call_count == SEED_RETRY_MAX
         assert mixin.__dict__.get("_seeded_subs") == {"BABA"}
+
+    def test_successful_seeds_are_paced(self, monkeypatch):
+        """Successful seeds space out under IB's historical-request cap.
+
+        A failed seed is not paced (retries stay immediate); only success
+        sets the clock, so the bot cannot launch ~6 historical requests a
+        minute and trip IB's pacing cooldown.
+        """
+        mixin = _make_mixin()
+        mixin.streamer.seed_history = MagicMock()
+        now = 1_700_000_000.0
+        monkeypatch.setattr("hanoon_prime.ib_cycle.time.time", lambda: now)
+        mixin._sync_subs()
+        assert mixin.streamer.seed_history.call_count == 1
+        mixin._sync_subs()
+        assert mixin.streamer.seed_history.call_count == 1, "paced"
+        now += SEED_PACE_SECS + 0.5
+        mixin._sync_subs()
+        assert mixin.streamer.seed_history.call_count == 2, "gate reopened"

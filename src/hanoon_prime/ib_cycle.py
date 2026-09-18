@@ -29,6 +29,7 @@ CLOSE_RETRY_FLOOR: float = 15.0  # min gap between dead-close-order retries
 STALE_SUB_SECS: float = 60.0  # subscription GC: unsubscribe after this idle
 CYCLE_FLOOR: float = 0.2  # minimum gap between cycles even when overran
 SEED_RETRY_MAX: int = 3  # backfill retries before a ticker is left to live bars
+SEED_PACE_SECS: float = 12.0  # space successful seeds under IB's historical cap
 HEAL_BATCH_MAX: int = 60  # surgical heal: cap silent-ticker MD resets per heal
 HOLD_FIRST_MIN: float = 15.0  # first open-position hold notice (minutes)
 HOLD_REPEAT_MIN: float = 60.0  # repeat hold notice every this many minutes
@@ -762,7 +763,7 @@ class BotCycleMixin:
         self._seed_next_backfill(needed)
 
     def _seed_next_backfill(self, needed: set[str]) -> None:
-        """Seed one ticker per cycle: any desired ticker missing backfill.
+        """Seed one desired ticker, spaced by SEED_PACE_SECS (IB history cap).
 
         Positions take priority over scanner candidates. Every desired
         subscribed ticker is eligible (not only same-cycle subscriptions),
@@ -786,9 +787,12 @@ class BotCycleMixin:
         ]
         if not pending:
             return
+        if time.time() - self.__dict__.get("_last_seed_ok", 0.0) < SEED_PACE_SECS:
+            return
         s = pending[0]
         try:
             self.streamer.seed_history(s)
+            self.__dict__["_last_seed_ok"] = time.time()
             seeded.add(s)
             ever.add(s)
             retries.pop(s, None)
