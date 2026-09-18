@@ -23,6 +23,7 @@ from .ib_compat import ib as _ib
 from .ib_order_sweep import sweep_zombies
 from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
+from .monitor.exec_quality import ExecQuality
 from .types import ExitLevels
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class IBExecutor:
         self._winrate_provider: Callable[[], tuple[float, int]] | None = None
         # Netting guard state: ticker → qty last requested to flatten.
         self._flattening: dict[str, int] = {}
+        # Execution-quality intent: ticker → (expected, direction, placed_ts).
+        self._intent: dict[str, tuple[float, int, float]] = {}
+        self.exec_stats = ExecQuality()
 
     def place_bracket(
         self,
@@ -76,7 +80,9 @@ class IBExecutor:
         """
         atr = streamer.buffer_atr(ticker)
         if atr <= 0.0 or np.isnan(atr) or np.isnan(price):
-            log.warning("ATR/price invalid for %s (atr=%.4f price=%.4f)", ticker, atr, price)
+            log.warning(
+                "ATR/price invalid for %s (atr=%.4f price=%.4f)", ticker, atr, price
+            )
             return
         d = thought.direction
         if sizing is not None and getattr(sizing, "risk_pass", False):
@@ -89,7 +95,9 @@ class IBExecutor:
             if not math.isfinite(stop) or not math.isfinite(target):
                 log.warning(
                     "ABORT %s: NaN stop/target from sizing (stop=%.4f target=%.4f)",
-                    ticker, stop, target,
+                    ticker,
+                    stop,
+                    target,
                 )
                 return
         else:
@@ -114,6 +122,7 @@ class IBExecutor:
             self.ib.placeOrder(contract, order)
         self._brackets[ticker] = (stop, target)
         self._pending_parent.add(ticker)
+        self._intent[ticker] = (round(price, 2), d, time.time())
         log.info(
             "BRACKET %s %s @ %.2f stop=%.2f target=%.2f qty=%d",
             action,
@@ -226,8 +235,9 @@ class IBExecutor:
                 continue
             if sym not in self.tracked_tickers:
                 self.tracked_tickers.add(sym)
-                log.info("RECONCILE: adopted %s (qty=%d, avg=%.2f)",
-                         sym, qty, pos.avgCost)
+                log.info(
+                    "RECONCILE: adopted %s (qty=%d, avg=%.2f)", sym, qty, pos.avgCost
+                )
                 try:
                     # Subscribe only — history seeding happens one ticker
                     # per cycle off the hot path in _sync_subs, so adoption
@@ -270,8 +280,9 @@ class IBExecutor:
             extra=self._close_summary(),
         )
         if is_synthetic:
-            log.info("EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
-                     ticker, pnl)
+            log.info(
+                "EXIT %s (reconciled close, P&L=%.4f) — learn from exit", ticker, pnl
+            )
         else:
             log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
             self.brain.record_trade(
@@ -291,7 +302,9 @@ class IBExecutor:
         )
         if not is_synthetic:
             self._mirror_fill(
-                ticker, -pos.direction, pos.shares,
+                ticker,
+                -pos.direction,
+                pos.shares,
                 self._ib_exit_price(ticker) or float(pos.entry_price or 0.0),
             )
 
@@ -313,7 +326,9 @@ class IBExecutor:
                 return px
         return 0.0
 
-    def _mirror_fill(self, ticker: str, direction: int, qty: float, price: float) -> None:
+    def _mirror_fill(
+        self, ticker: str, direction: int, qty: float, price: float
+    ) -> None:
         """Mirror an IB fill into the consolidation trade buffer (sleep replay)."""
         if self.on_fill_mirrored is None:
             return
@@ -355,6 +370,17 @@ class IBExecutor:
         except Exception as exc:
             log.debug("fill-confirm accounting failed for %s: %s", sym, exc)
 
+    def _record_entry_fill(self, sym: str, entry_price: float, ts: float) -> None:
+        """Record an entry fill against its intent for exec-quality gauges."""
+        intent = self._intent.pop(sym, None)
+        if intent is None:
+            return
+        expected, direction, placed = intent
+        try:
+            self.exec_stats.record(direction, expected, entry_price, placed, ts)
+        except Exception as exc:
+            log.debug("exec-quality record failed for %s: %s", sym, exc)
+
     def _notify_open_fills(self, ib_positions: dict[str, Any]) -> None:
         """Fire fill-confirmed entry notifications for pending brackets."""
         for sym in list(self._pending_parent):
@@ -371,8 +397,10 @@ class IBExecutor:
                 ExitLevels(stop=float(stop or 0.0), target=float(target or 0.0)),
             )
             self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
-            self._mirror_fill(sym, pos.direction, pos.shares,
-                              float(pos.entry_price or 0.0))
+            self._mirror_fill(
+                sym, pos.direction, pos.shares, float(pos.entry_price or 0.0)
+            )
+            self._record_entry_fill(sym, float(pos.entry_price or 0.0), time.time())
 
     def monitor_orders(self, ib_positions: dict[str, Any], streamer: Any) -> None:
         """Monitor ALL parent orders — cancel orphans, trail both."""
@@ -420,8 +448,10 @@ class IBExecutor:
                     ExitLevels(stop=stop, target=target),
                 )
                 self._confirm_fill_hook(sym, float(pos.entry_price or 0.0))
-                self._mirror_fill(sym, pos.direction, abs(pos.shares),
-                                  float(pos.entry_price or 0.0))
+                self._mirror_fill(
+                    sym, pos.direction, abs(pos.shares), float(pos.entry_price or 0.0)
+                )
+                self._record_entry_fill(sym, float(pos.entry_price or 0.0), time.time())
             else:
                 return
         elif sym not in ib_positions:

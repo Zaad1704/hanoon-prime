@@ -17,7 +17,7 @@ from typing import Any
 
 from ._ib_marks import feed_positions
 from ._ib_sync import read_account_summary
-from ._telegram import postmortem, shutdown, trade_hold
+from ._telegram import error_notify, postmortem, recovered, shutdown, trade_hold
 from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
 from .brain.policy.verdict import ENTER, Verdict
@@ -443,6 +443,8 @@ class BotCycleMixin:
                 return
             self._run_brain_cycle(poll, pnl, started)
             self._notify_holds()
+            self._record_vitals()
+            self._notify_pipeline_transitions()
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
 
@@ -474,7 +476,43 @@ class BotCycleMixin:
             log.debug("Gateway supervise during sleep: %s", exc)
         self._heartbeat()
         self.monitor.record_cycle(False, session=state.session)
+        self._record_vitals()
+        self._notify_pipeline_transitions()
         time.sleep(max(CYCLE_FLOOR, poll))
+
+    def _record_vitals(self) -> None:
+        """Persist the current pipeline snapshot to the vitals CSV."""
+        vlog = getattr(self, "vitals_log", None)
+        if vlog is None:
+            return
+        try:
+            snap = self.monitor.snapshot()
+        except Exception as exc:
+            log.debug("vitals snapshot failed: %s", exc)
+            return
+        try:
+            vlog.record(snap)
+        except Exception as exc:
+            log.debug("vitals record failed: %s", exc)
+
+    def _notify_pipeline_transitions(self) -> None:
+        """Alert on health transitions only (broken -> recovered, or back)."""
+        try:
+            snap = self.monitor.snapshot()
+        except Exception as exc:
+            log.debug("pipeline transition snapshot failed: %s", exc)
+            return
+        failing = {k: v for k, v in (snap.get("failing", {})).items()}
+        prev = getattr(self, "_pipe_failures_last", None)
+        if prev is None:
+            self._pipe_failures_last = failing
+            return
+        if not prev and failing:
+            detail = ", ".join(f"{k}: {v}" for k, v in failing.items())
+            error_notify("pipeline", detail or "unknown failure")
+        elif prev and not failing:
+            recovered("pipeline", "all checks green")
+        self._pipe_failures_last = failing
 
     def _run_brain_cycle(self, poll: float, pnl: Any, started: float) -> None:
         """Score the whole discovery union and finish the cycle (single funnel)."""

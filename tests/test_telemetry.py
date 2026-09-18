@@ -375,3 +375,145 @@ class TestSnapshot:
         trade_quality = h._trade_quality()
         assert "win_rate" in trade_quality
         assert trade_quality["trades"] == 0
+
+
+class TestObservabilityRoutes:
+    """New observability surfaces: /trust, /vitals, /exec-quality, /metrics."""
+
+    def test_trust_route_registered(self) -> None:
+        from hanoon_prime.telemetry import ROUTES_GET
+
+        assert ROUTES_GET["/trust"] == "_trust"
+        assert ROUTES_GET["/vitals"] == "_vitals"
+        assert ROUTES_GET["/exec-quality"] == "_exec_quality"
+        assert ROUTES_GET["/metrics"] == "_metrics"
+
+    def test_trust_healthy_when_monitor_green(self, server) -> None:
+        from hanoon_prime.monitor.trust import HEALTHY_FLOOR
+
+        class _Mon:
+            def snapshot(self):
+                return {
+                    "healthy": True,
+                    "failing": {},
+                    "vitals": {"decision_count": 5, "feed_age": 2.0},
+                    "stall_cycles": 0,
+                }
+
+        bot = _FakeBot()
+        bot.monitor = _Mon()
+        _H.bot = bot
+        code, body = _get(server, "/trust")
+        assert code == 200
+        assert body["status"] == "HEALTHY"
+        assert body["score"] >= HEALTHY_FLOOR
+        assert body["failing"] == []
+
+    def test_trust_critical_when_brain_stalled(self, server) -> None:
+        class _Mon:
+            def snapshot(self):
+                return {
+                    "healthy": False,
+                    "failing": {
+                        "brain_advancing": "40 cycles",
+                        "bars_fresh": "stale",
+                        "ib_connected": "Gateway link",
+                    },
+                    "vitals": {"decision_count": 0},
+                    "stall_cycles": 40,
+                }
+
+        bot = _FakeBot()
+        bot.monitor = _Mon()
+        _H.bot = bot
+        code, body = _get(server, "/trust")
+        assert code == 200
+        assert body["status"] == "CRITICAL"
+        assert "brain_advancing" in body["failing"]
+
+    def test_trust_unknown_when_monitor_missing(self, server) -> None:
+        _H.bot = _FakeBot()  # no monitor attribute
+        code, body = _get(server, "/trust")
+        assert code == 200
+        assert body["status"] == "UNKNOWN"
+
+    def test_vitals_route_returns_recorded_rows(self, server, tmp_path: Path) -> None:
+        from hanoon_prime.monitor.vitals_log import VitalsLog
+
+        bot = _FakeBot()
+        vlog = VitalsLog(tmp_path)
+        vlog.record(
+            {
+                "healthy": True,
+                "failing": {},
+                "vitals": {"decision_count": 7, "feed_age": 1.0},
+                "stall_cycles": 0,
+            }
+        )
+        bot.vitals_log = vlog
+        _H.bot = bot
+        code, body = _get(server, "/vitals")
+        assert code == 200
+        assert body["enabled"] is True
+        assert body["rows"]
+        assert body["rows"][0]["decision_count"] == 7
+
+    def test_vitals_route_disabled_when_missing(self, server) -> None:
+        _H.bot = _FakeBot()  # no vitals_log attribute
+        code, body = _get(server, "/vitals")
+        assert code == 200
+        assert body["enabled"] is False
+
+    def test_exec_quality_route_shape(self, server) -> None:
+        from hanoon_prime.monitor.exec_quality import ExecQuality
+
+        bot = _FakeBot()
+        ex = MagicMock()
+        ex.exec_stats = ExecQuality(maxlen=10)
+        ex.exec_stats.record(1, 100.0, 100.05, 1.0, 1.4)
+        bot.executor = ex
+        _H.bot = bot
+        code, body = _get(server, "/exec-quality")
+        assert code == 200
+        assert body["enabled"] is True
+        assert body["fills"] == 1
+        assert "slippage_bps_p50" in body
+
+    def test_metrics_route_exposes_gauges(self, server) -> None:
+        from hanoon_prime.monitor.trust import HEALTHY_FLOOR
+
+        class _Mon:
+            def snapshot(self):
+                return {
+                    "healthy": True,
+                    "failing": {},
+                    "vitals": {"decision_count": 9, "feed_age": 1.0},
+                    "stall_cycles": 0,
+                }
+
+        bot = _FakeBot()
+        bot.monitor = _Mon()
+        _H.bot = bot
+        code, body = _get(server, "/metrics")
+        assert code == 200
+        assert body["hanoon_pipeline_healthy"] == 1.0
+        assert body["hanoon_trust_score"] >= HEALTHY_FLOOR
+        assert body["hanoon_ib_connected"] == 1.0
+        assert "hanoon_feed_age_seconds" in body
+
+    def test_snapshot_embeds_trust(self, tmp_path: Path) -> None:
+        from hanoon_prime.monitor.trust import HEALTHY_FLOOR
+        from hanoon_prime.telemetry import build_snapshot
+
+        class _Mon:
+            def snapshot(self):
+                return {"healthy": True, "failing": {}, "stall_cycles": 0}
+
+        h = _H.__new__(_H)
+        bot = _FakeBot()
+        bot.monitor = _Mon()
+        h.bot = bot
+        h.journal_path = tmp_path / "journal_live.jsonl"
+        h.journal_path.write_text("")
+        snap = build_snapshot(h)
+        assert snap["trust"]["score"] >= HEALTHY_FLOOR

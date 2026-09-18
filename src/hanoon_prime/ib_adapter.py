@@ -26,6 +26,7 @@ from .immune import IB_CLIENT_ID, IB_HOST, IB_LIVE_PORT, IB_PAPER_PORT
 from .juli import JuliBrain
 from .memory import Journal
 from .monitor.pipeline import PipelineMonitor
+from .monitor.vitals_log import VitalsLog
 
 log = logging.getLogger(__name__)
 MAX_RECONNECT, RECONNECT_DELAY = 5, 5
@@ -33,6 +34,7 @@ MAX_RECONNECT, RECONNECT_DELAY = 5, 5
 
 class IBStreamingBot(BotCycleMixin):
     """Live bot: IB Gateway stream -> NeuromorphicBrain -> bracket orders."""
+
     _last_conn: tuple[str, int, int] = (IB_HOST, IB_PAPER_PORT, IB_CLIENT_ID)
 
     def __init__(self, account: str = "PAPER") -> None:
@@ -58,14 +60,16 @@ class IBStreamingBot(BotCycleMixin):
         self.executor._winrate_provider = self.juli.brain._realized.recent_win_rate
         # Telegram chat (read-only queries answered from brain state)
         self._chat = TelegramChat(state_provider=self._chat_state)
-        # Continuous pipeline health daemon (alerts + heal flags)
         self.monitor = PipelineMonitor(self, self.journal)
-        self._running, self._last_beat = False, 0.0
+        self.vitals_log = VitalsLog(repo_root / "runtime" / "vitals")
+        self._running = self._last_beat = False
         self._closing: set[str] = set()
         self._watched: set[str] = set()
         self._exit_reasons: dict[str, str] = {}
         self._hold_notified: dict[str, float] = {}
-        self._closing_retries: dict[str, float] = {}  # backoff for dead close-order retry
+        self._closing_retries: dict[str, float] = (
+            {}
+        )  # backoff for dead close-order retry
         self._last_bars: int = 0
         self._init_position_cache()
         # Gateway supervision state (rebuild runner_gateway.py port)
@@ -76,7 +80,11 @@ class IBStreamingBot(BotCycleMixin):
 
     def _init_position_cache(self) -> None:
         self._positions_lock = threading.RLock()
-        self._position_marks: dict[str, Any] = {"positions": [], "total_pnl": 0.0, "count": 0}
+        self._position_marks: dict[str, Any] = {
+            "positions": [],
+            "total_pnl": 0.0,
+            "count": 0,
+        }
 
     def _wire_kill_hook(self, safety: Any) -> None:
         def _kill_cancel(reason: str) -> None:
@@ -189,10 +197,16 @@ class IBStreamingBot(BotCycleMixin):
                 "positions": positions,
                 "horizons": sorted(TRADING_CONFIG.horizons),
                 "daily_pnl": float(getattr(pnl_obj, "dailyPnL", 0.0) or 0.0),
-                "wins": int(mem.get("recent_wr_n", 0) * mem.get("recent_wr", 0.0))
-                if isinstance(mem, dict) else 0,
-                "losses": int(mem.get("recent_wr_n", 0) * (1 - mem.get("recent_wr", 0.0)))
-                if isinstance(mem, dict) else 0,
+                "wins": (
+                    int(mem.get("recent_wr_n", 0) * mem.get("recent_wr", 0.0))
+                    if isinstance(mem, dict)
+                    else 0
+                ),
+                "losses": (
+                    int(mem.get("recent_wr_n", 0) * (1 - mem.get("recent_wr", 0.0)))
+                    if isinstance(mem, dict)
+                    else 0
+                ),
             }
         except Exception as exc:
             log.debug("Chat state failed: %s", exc)

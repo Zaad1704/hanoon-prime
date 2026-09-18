@@ -247,6 +247,48 @@ class TestNotifyOpenFills:
             exc._notify_open_fills({"TSLA": pos})
         assert seen == [("TSLA", 100.0)]
 
+    def test_entry_fill_records_exec_stats(self):
+        """A confirmed entry fill with an intent feeds ExecQuality gauges."""
+        exc = make_executor(tracked={"TSLA"})
+        exc._pending_parent.add("TSLA")
+        exc._intent["TSLA"] = (100.0, 1, 0.0)
+        pos = make_pos(direction=1, shares=10, entry_price=100.10)
+        with patch("hanoon_prime.ib_executor.trade_opened"):
+            exc._notify_open_fills({"TSLA": pos})
+        s = exc.exec_stats.summary()
+        assert s["fills"] == 1
+        assert 9.0 < s["slippage_bps_mean"] < 11.0
+        assert "TSLA" not in exc._intent
+
+    def test_fill_without_intent_does_not_record(self):
+        """Fills for positions we never bracketed (reconciled) skip stats."""
+        exc = make_executor(tracked={"TSLA"})
+        exc._pending_parent.add("TSLA")
+        pos = make_pos(direction=1, shares=10, entry_price=100.0)
+        with patch("hanoon_prime.ib_executor.trade_opened"):
+            exc._notify_open_fills({"TSLA": pos})
+        assert exc.exec_stats.summary()["fills"] == 0
+
+    def test_place_bracket_records_intent(self):
+        """place_bracket stores (price, direction, placement_ts) intent."""
+        exc = make_executor(tracked={"TSLA"})
+        exc.brain.size_position.return_value = 100
+        exc.brain.score_to_win_prob = MagicMock(return_value=0.7)
+        thought = MagicMock()
+        thought.score = 0.7
+        thought.direction = 1
+        streamer = MagicMock()
+        streamer.buffer_atr.return_value = 2.0
+        streamer.contracts = {"TSLA": MagicMock()}
+        exc.ib.bracketOrder.return_value = [MagicMock(), MagicMock(), MagicMock()]
+        exc._intent = {}
+        exc.place_bracket("TSLA", thought, 150.0, streamer)
+        assert "TSLA" in exc._intent
+        expected, direction, placed = exc._intent["TSLA"]
+        assert expected == 150.0
+        assert direction == 1
+        assert isinstance(placed, float)
+
 
 # ---------------------------------------------------------------------------
 # TestRecordExitNotify — all closes notify, including reconciled
@@ -618,7 +660,7 @@ class TestShortPositions:
 # ---------------------------------------------------------------------------
 
 
-def _open_trade(symbol, action, done=False, active=True):
+def _open_trade(symbol, action, done=False, _active=True):
     """Helper: mock open Trade with order action + status."""
     m = MagicMock()
     order = MagicMock()

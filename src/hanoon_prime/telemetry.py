@@ -70,6 +70,10 @@ ROUTES_GET = {
     "/ib": "_ib_raw",
     "/decisions": "_decisions",
     "/trade-quality": "_trade_quality",
+    "/trust": "_trust",
+    "/vitals": "_vitals",
+    "/exec-quality": "_exec_quality",
+    "/metrics": "_metrics",
     "/auth": "_auth",
 }
 POST_ROUTES = {"/safety-net", "/config"}
@@ -110,6 +114,8 @@ DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
     "http://127.0.0.1:4173",
 )
 EXTRA_TTL["/ib"] = 1.0
+EXTRA_TTL["/vitals"] = 1.0
+EXTRA_TTL["/exec-quality"] = 1.0
 
 # Route → key inside the snapshot payload
 _ROUTE_KEY = {
@@ -866,6 +872,56 @@ class _H(BaseHTTPRequestHandler):
         snap: dict[str, Any] = mon.snapshot()
         return snap
 
+    def _trust(self) -> dict[str, Any]:
+        """Composite weighted trust score from the pipeline snapshot."""
+        from .monitor.trust import assess
+
+        mon = getattr(self.bot, "monitor", None) if self.bot else None
+        if mon is None:
+            return {"status": "UNKNOWN", "score": 0, "failing": ["monitor missing"]}
+        return assess(mon.snapshot())
+
+    def _vitals(self) -> dict[str, Any]:
+        """Recent pipeline vitals trend rows (rotating CSV log tail)."""
+        vlog = getattr(self.bot, "vitals_log", None) if self.bot else None
+        if vlog is None:
+            return {"enabled": False, "rows": []}
+        try:
+            rows: list[dict[str, Any]] = vlog.tail(240)
+        except Exception as exc:
+            log.debug("vitals tail failed: %s", exc)
+            return {"enabled": True, "rows": []}
+        return {"enabled": True, "rows": rows}
+
+    def _exec_quality(self) -> dict[str, Any]:
+        """Live execution-quality gauges (slippage bps, ack latency)."""
+        bot = self.bot
+        ex = getattr(bot, "executor", None) if bot else None
+        stats = getattr(ex, "exec_stats", None)
+        if stats is None:
+            return {"enabled": False}
+        try:
+            return {"enabled": True, **stats.summary()}
+        except Exception as exc:
+            log.debug("exec-quality summary failed: %s", exc)
+            return {"enabled": True, "fills": 0}
+
+    def _metrics(self) -> dict[str, Any]:
+        """Prometheus-flavored gauges for /metrics (JSON object)."""
+        health = self._health()
+        trust = self._trust()
+        pipe = self._pipeline_state()
+        vit = pipe.get("vitals", {})
+        return {
+            "hanoon_pipeline_healthy": 1.0 if pipe.get("healthy") else 0.0,
+            "hanoon_trust_score": float(trust.get("score") or 0.0),
+            "hanoon_ib_connected": 1.0 if health.get("connected") else 0.0,
+            "hanoon_feed_age_seconds": float(vit.get("feed_age") or 0.0),
+            "hanoon_decision_count": float(vit.get("decision_count") or 0.0),
+            "hanoon_stall_cycles": float(pipe.get("stall_cycles") or 0.0),
+            "hanoon_positions": float(health.get("position_count") or 0.0),
+        }
+
     def _risk_state(self) -> dict[str, Any]:
         """Portfolio risk snapshot (policy_state, observer-safe subset)."""
         policy = self._policy_state()
@@ -1509,6 +1565,7 @@ def build_snapshot(handler: _H) -> dict[str, Any]:
         "brain": handler._brain_state(),
         "system2": handler._system2_state(),
         "pipeline": handler._pipeline_state(),
+        "trust": handler._trust(),
         "risk": handler._risk_state(),
         "config": handler._config(),
         "halim": handler._halim_state(),

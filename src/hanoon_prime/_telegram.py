@@ -1,6 +1,4 @@
-"""hanoon_prime._telegram — Telegram notifications for JULI.
-Sends entries, exits, holds, halts, and errors via stdlib urllib.
-"""
+"""hanoon_prime._telegram — Telegram notifications for JULI (stdlib urllib)."""
 
 from __future__ import annotations
 
@@ -181,6 +179,11 @@ def postmortem(insight: dict[str, Any]) -> None:
 def error_notify(context: str, detail: str) -> None:
     """Notify an error condition."""
     send(f"❗ ERROR in {context}\n{detail}")
+
+
+def recovered(context: str, detail: str) -> None:
+    """Notify recovery from a failed pipeline/brain state."""
+    send(f"🟢 RECOVERED: {context}\n{detail}")
 
 
 def startup(tickers: list[str] | None = None) -> None:
