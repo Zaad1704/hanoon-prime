@@ -28,6 +28,12 @@ class Position:
     entry_time: float = field(default_factory=lambda: __import__("time").time())
 
 
+def fraction_to_dollars(pnl_frac: float, pos: Position) -> float:
+    """Convert a return fraction (0.006 == +0.6%) to dollar P&L for display."""
+    notional = abs(float(pos.entry_price)) * abs(float(pos.shares))
+    return pnl_frac * notional if notional > 0 else pnl_frac
+
+
 @dataclass
 class Trade:
     """A completed trade."""

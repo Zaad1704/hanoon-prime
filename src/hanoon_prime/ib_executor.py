@@ -24,7 +24,7 @@ from .ib_order_sweep import sweep_zombies
 from .immune import ALLOW_EXTENDED_HOURS, ATR_STOP_MULT, ATR_TARGET_MULT
 from .memory import Journal
 from .monitor.exec_quality import ExecQuality
-from .types import ExitLevels
+from .types import ExitLevels, fraction_to_dollars
 
 log = logging.getLogger(__name__)
 
@@ -270,21 +270,24 @@ class IBExecutor:
         if pos is None:
             return
         pnl = get_ib_pnl(self.ib, ticker, pos)
+        dollars = fraction_to_dollars(pnl, pos)
         is_synthetic = ticker in self._synthetic
         self._synthetic.discard(ticker)
         trade_closed(
             ticker,
             "LONG" if pos.direction > 0 else "SHORT",
-            pnl,
+            dollars,
             reason="reconciled" if is_synthetic else "",
             extra=self._close_summary(),
         )
         if is_synthetic:
             log.info(
-                "EXIT %s (reconciled close, P&L=%.4f) — learn from exit", ticker, pnl
+                "EXIT %s (reconciled close, P&L=%.4f) — learn from exit",
+                ticker,
+                dollars,
             )
         else:
-            log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, pnl)
+            log.info("EXIT %s (IB closed at P&L=%.4f)", ticker, dollars)
             self.brain.record_trade(
                 ticker=ticker, won=pnl > 0, pnl_pct=pnl, direction=pos.direction
             )
