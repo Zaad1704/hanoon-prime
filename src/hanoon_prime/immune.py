@@ -167,6 +167,35 @@ FIXED_FEE: float = 0.01  # $0.01 per leg (negligible round-trip)
 SLIPPAGE_BPS: float = 5.0  # 0.05% per fill — adverse-slippage model for backtests
 KELLY_FRACTION: float = 0.25  # fractional Kelly (25%)
 
+
+# ── Strategy adaptation (money-gate tested entry gates) ───────────────
+# Both default OFF so the live path is byte-identical until a funnel run
+# clears the money gate. Read at CALL TIME by orchestrator.decide_entry.
+# Cost-aversion encodes the no-churn band from the market-microstructure
+# literature: a mean-reversion scalp only earns the option value of WAITING
+# for a move that clears the round-trip cost barrier, not the myopic
+# cover-the-spread boundary.
+ENTRY_REGIME_GATE: bool = False  # only enter mean-reversion-favorable regimes
+ENTRY_COST_AVERSE_GATE: bool = False  # require move >= capture × cost barrier
+# Per-entry ATR% must be at least this multiple of the net round-trip cost
+# fraction (slippage + fees). 2.0 = require a full ATR of move to clear
+# two round-trip cost barriers of edge (ROT-style cost-feasibility floor).
+ENTRY_COST_CAPTURE_MULTIPLE: float = 2.0
+
+
+def round_trip_cost_fraction(equity: float = 100_000.0) -> float:
+    """Net round-trip transaction drag as a fraction of notional.
+
+    Two adverse fills at SLIPPAGE_BPS plus two legs of FEE_RATE + FIXED_FEE
+    (fees amortized over the sizing account equity). Matches the harness
+    money-gate accounting (``_adverse_fill`` + fee drag).
+    """
+    equity = float(equity or 0.0)
+    if equity <= 0.0:
+        equity = 100_000.0
+    return 2.0 * (SLIPPAGE_BPS / 10_000.0) + 2.0 * (FEE_RATE + FIXED_FEE / equity)
+
+
 # ── Indicator weights (abs sum = 1.0) ────────────────────────────────
 # Signs encode the 1-bar edge direction on FAST tickers:
 #   Positive weight → positive z-score → bullish (LONG)

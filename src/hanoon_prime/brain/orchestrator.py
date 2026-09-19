@@ -20,7 +20,11 @@ from ..hippocampus import Hippocampus
 from ..immune import (
     DELIBERATION_TRACE_ENABLED,
     DIRECTION_MIN_SCORE,
+    ENTRY_COST_AVERSE_GATE,
+    ENTRY_COST_CAPTURE_MULTIPLE,
+    ENTRY_REGIME_GATE,
     NEURO_BLEND_ENABLED,
+    round_trip_cost_fraction,
 )
 from ..juli_feed import check_tick_latency, compute_alpha_from_snap, entry_bars
 from . import horizons
@@ -194,6 +198,7 @@ class NeuromorphicBrain:
         self._last_strategy_reason: dict[str, str] = {}
         self._wkey: tuple[str, int] = ("", -1)
         self._wversion: int = 0
+        self._entry_regime_detectors: dict[str, RegimeDetector] = {}
 
     def start(self) -> None:
         """Start the neuromorphic brain (includes slow path)."""
@@ -258,9 +263,7 @@ class NeuromorphicBrain:
         if veto:
             return Verdict(ticker=ticker, action=VETOED, reason=veto, stage="validity")
         assert snap is not None
-        prices = snap.get("prices")
-        if prices is None:
-            prices = []
+        prices = snap.get("prices") or []  # array-safe (plain list)
         self.state.set_latest_prices(prices)
         outcome = self._score_candidate(ticker, snap, len(open_positions))
         if isinstance(outcome, Verdict):
@@ -272,6 +275,9 @@ class NeuromorphicBrain:
         admitted = self._apply_fast_gates(ticker, snap, thought, policy, session)
         if admitted is not None:
             return admitted
+        strategy_veto = self._apply_strategy_gates(ticker, snap, bars, thought)
+        if strategy_veto is not None:
+            return strategy_veto
         ok, reason = self.governor.may_enter(ticker)
         if not ok:
             return self._governor_veto(ticker, snap, result, reason)
@@ -419,6 +425,53 @@ class NeuromorphicBrain:
         if policy.get("authorized", True) is False:
             return self._halted_verdict(ticker, thought, snap, policy)
         return None
+
+    def _apply_strategy_gates(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        bars: dict[str, Any] | None,
+        thought: SimpleNamespace,
+    ) -> Verdict | None:
+        """Money-gate strategy layer: cost-averse and regime-conditioned entry.
+
+        Both levers read immune literals at CALL TIME and default OFF, so the
+        live path stays byte-identical until a funnel run clears the money
+        gate. ``decide_entry`` is the shared decision point for live AND
+        replay, so a gate-cleared strategy here is tested by the same code
+        that trades.
+        """
+        if ENTRY_COST_AVERSE_GATE:
+            price = float(snap.get("last") or 0.0)
+            atr = float(snap.get("atr") or 0.0)
+            if price > 0.0 and atr > 0.0:
+                feed = self.state.get("account_feed")
+                equity = 0.0
+                if isinstance(feed, dict) and feed.get("equity") is not None:
+                    equity = float(feed["equity"])
+                barrier = round_trip_cost_fraction(equity) * ENTRY_COST_CAPTURE_MULTIPLE
+                if atr / price < barrier:
+                    return self._veto(ticker, thought, "cost_floor")
+        if ENTRY_REGIME_GATE:
+            label = self._entry_regime_label(ticker, bars)
+            if label in ("trending_bullish", "trending_bearish", "volatile"):
+                return self._veto(ticker, thought, "regime_adverse")
+        return None
+
+    def _entry_regime_label(self, ticker: str, bars: dict[str, Any] | None) -> str:
+        """Per-ticker local regime label for the entry regime gate.
+
+        Uses a dedicated detector per ticker so the volatility percentile
+        history stays ticker-locally consistent (the funnel replays many
+        tickers through one brain, and shared-state regime labels are never
+        written in replay).
+        """
+        close = (bars or {}).get("close")
+        if not isinstance(close, (list, tuple)) or len(close) < 20:
+            return "unknown"
+        detector = self._entry_regime_detectors.setdefault(ticker, RegimeDetector())
+        state = detector.detect(list(close))
+        return state.regime
 
     def _halted_verdict(
         self,

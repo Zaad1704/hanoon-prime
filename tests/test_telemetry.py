@@ -285,7 +285,13 @@ class TestSessionEndpoint:
         handler = _H.__new__(_H)
         handler.bot = None
         body = handler._session()
-        assert body["session"] in {"pre_market", "rth", "post_market", "overnight"}
+        assert body["session"] in {
+            "pre_market",
+            "rth",
+            "post_market",
+            "overnight",
+            "weekend",
+        }
         assert isinstance(body["active"], bool)
         assert set(body["enabled"]) == {
             "pre_market",
