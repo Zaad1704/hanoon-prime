@@ -11,6 +11,7 @@ import json
 import logging
 import math
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -100,6 +101,11 @@ class MetaDNN:
         self._rng = np.random.default_rng(42)
         self._layers: list[tuple[np.ndarray, np.ndarray]] = []
         self._built = False
+        self._eval_count: int = 0
+        self._veto_count: int = 0
+        self._last_p_win: float = 0.0
+        self._last_eval_ts: float = 0.0
+        self._veto_window: list[int] = []
         self._load()
 
     def _build(self) -> None:
@@ -129,10 +135,57 @@ class MetaDNN:
 
     def infer(self, features: list[float]) -> tuple[bool, float, float]:
         """(admit, p_win, size_scale) — admit=False when P(Win) < threshold."""
+        import time
+
         p = self.predict(features)
         admit = p >= META_WIN_THRESHOLD
         frac = max(0.0, min(1.0, p / META_WIN_THRESHOLD))
+        self._eval_count += 1
+        if not admit:
+            self._veto_count += 1
+        self._last_p_win = p
+        self._last_eval_ts = time.time()
+        self._veto_window.append(0 if admit else 1)
+        if len(self._veto_window) > 100:
+            self._veto_window = self._veto_window[-100:]
         return admit, p, round(0.5 + 0.5 * frac, 4)
+
+    def live_snapshot(self) -> dict[str, Any]:
+        """Telemetry view of DNN gatekeeper live state."""
+        import time
+
+        report: dict[str, Any] = {}
+        report_path = self._path.with_suffix(".report.json")
+        if report_path.exists():
+            try:
+                report = json.loads(report_path.read_text())
+            except (json.JSONDecodeError, OSError) as exc:
+                log.debug("DNN report load failed: %s", exc)
+        window = self._veto_window[-100:] if self._veto_window else []
+        return {
+            "enabled": META_WIN_THRESHOLD > 0,
+            "gate_active": self._built and self._layers,
+            "threshold": META_WIN_THRESHOLD,
+            "oos_accuracy": report.get("accuracy"),
+            "eval_count": self._eval_count,
+            "veto_count": self._veto_count,
+            "veto_rate_20": round(sum(window[-20:]) / min(20, len(window)), 4)
+            if window
+            else 0.0,
+            "veto_rate_100": round(sum(window) / len(window), 4) if window else 0.0,
+            "weights_loaded": self._built and len(self._layers) > 0,
+            "param_count": sum(w.size + b.size for w, b in self._layers)
+            if self._layers
+            else 0,
+            "last_p_win": round(self._last_p_win, 4),
+            "last_eval": self._last_eval_ts,
+            "train_entries": report.get("total_entries"),
+            "train_tickers": None,
+            "train_accuracy": report.get("accuracy"),
+            "cv_folds": report.get("folds"),
+            "train_epochs": META_DNN_EPOCHS,
+            "last_train_ts": report.get("train_ts"),
+        }
 
     def train(
         self,

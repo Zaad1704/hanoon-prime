@@ -189,6 +189,16 @@ class MetaLabelModel:
                 "sizing_active": self._n >= META_MIN_SAMPLES,
             }
 
+    def dnn_snapshot(self) -> dict[str, Any]:
+        """Telemetry view: DNN gatekeeper live state."""
+        if META_DNN_ENABLED:
+            try:
+                result: dict[str, Any] = _get_dnn().live_snapshot()
+                return result
+            except Exception as exc:
+                log.debug("DNN snapshot failed: %s", exc)
+        return {"enabled": False, "gate_active": False}
+
     def _load(self) -> None:
         if not self._path.exists():
             return

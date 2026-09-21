@@ -997,6 +997,7 @@ class _H(BaseHTTPRequestHandler):
             "advisor": s.get("advisor", {}),
             "exits_adaptive": s.get("exits_adaptive", {}),
             "meta_label": s.get("meta_label", {}),
+            "meta_label_dnn": s.get("meta_label_dnn", {}),
             "horizon_bandit": s.get("horizon_bandit", {}),
             "regime_weights": s.get("regime_weights", {}),
             "learned_exit": s.get("learned_exit", {}),
