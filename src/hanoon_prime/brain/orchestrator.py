@@ -93,6 +93,25 @@ def _scale_shares(shares: int, factor: float) -> int:
     return max(1, int(shares * factor))
 
 
+def _dnn_veto_verdict(
+    ticker: str, p_win: float, confidence: float, score: float
+) -> Verdict:
+    """Log and return the dnn_gatekeeper VETOED verdict."""
+    log.info(
+        "DNN_GATEKEEPER_VETO %s p=%.3f conf=%.3f score=%.3f",
+        ticker,
+        p_win,
+        confidence,
+        score,
+    )
+    return Verdict(
+        ticker=ticker,
+        action=VETOED,
+        reason="dnn_gatekeeper",
+        stage="meta_dnn",
+    )
+
+
 NEURO_BLEND: float = 0.3
 
 
@@ -536,8 +555,7 @@ class NeuromorphicBrain:
         if not META_DNN_ENABLED:
             return None
         try:
-            prices = snap.get("prices") or []
-            price = float(prices[-1]) if prices else 0.0
+            price = float((snap.get("prices") or [0.0])[-1])
             atr_val = float(snap.get("atr", 0.0))
             admit, p_win, _scale = self._meta.gate(
                 float(thought.confidence),
@@ -551,21 +569,11 @@ class NeuromorphicBrain:
                 vpin=float(snap.get("vpin", 0.0) or 0.0),
             )
             if not admit:
-                log.info(
-                    "DNN_GATEKEEPER_VETO %s p=%.3f conf=%.3f score=%.3f",
-                    ticker,
-                    p_win,
-                    thought.confidence,
-                    thought.score,
-                )
-                return Verdict(
-                    ticker=ticker,
-                    action=VETOED,
-                    reason="dnn_gatekeeper",
-                    stage="meta_dnn",
+                return _dnn_veto_verdict(
+                    ticker, p_win, thought.confidence, thought.score
                 )
         except Exception as exc:
-            log.debug("DNN gatekeeper error (admitting): %s", exc)
+            log.debug("DNN gatekeeper bypass: %s", exc)
         return None
 
     def _portfolio_admit(

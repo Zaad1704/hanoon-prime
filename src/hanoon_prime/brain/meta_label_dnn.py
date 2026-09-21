@@ -11,7 +11,7 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -101,11 +101,14 @@ class MetaDNN:
         self._rng = np.random.default_rng(42)
         self._layers: list[tuple[np.ndarray, np.ndarray]] = []
         self._built = False
+        self._defective: bool = False
         self._eval_count: int = 0
         self._veto_count: int = 0
         self._last_p_win: float = 0.0
         self._last_eval_ts: float = 0.0
         self._veto_window: list[int] = []
+        self._scaler_mean: np.ndarray | None = None
+        self._scaler_std: np.ndarray | None = None
         self._load()
 
     def _build(self) -> None:
@@ -116,6 +119,18 @@ class MetaDNN:
             _he_init(dims[i], dims[i + 1], self._rng) for i in range(len(dims) - 1)
         ]
         self._built = True
+
+    def _fit_scaler(self, X: np.ndarray) -> None:
+        """Compute mean/std from training data for input normalization."""
+        self._scaler_mean = np.mean(X, axis=0)
+        self._scaler_std = np.std(X, axis=0)
+        self._scaler_std[self._scaler_std < 1e-8] = 1.0
+
+    def _transform(self, X: np.ndarray) -> np.ndarray:
+        """Apply Z-score normalization using fitted scaler."""
+        if self._scaler_mean is None or self._scaler_std is None:
+            return X
+        return cast(np.ndarray, (X - self._scaler_mean) / self._scaler_std)
 
     def forward(self, x: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
         """Forward pass; returns (output, caches) for backprop."""
@@ -130,12 +145,26 @@ class MetaDNN:
 
     def predict(self, features: list[float]) -> float:
         """P(Win) for a single feature vector."""
-        out, _ = self.forward(np.asarray(features, dtype=np.float64).reshape(1, -1))
+        if self._defective:
+            return META_WIN_THRESHOLD
+        x = np.asarray(features, dtype=np.float64).reshape(1, -1)
+        if self._scaler_mean is not None:
+            x = (x - self._scaler_mean) / self._scaler_std
+        out, _ = self.forward(x)
         return float(out[0, 0])
 
     def infer(self, features: list[float]) -> tuple[bool, float, float]:
         """(admit, p_win, size_scale) — admit=False when P(Win) < threshold."""
         import time
+
+        if self._defective or not self._built:
+            self._eval_count += 1
+            self._last_p_win = META_WIN_THRESHOLD
+            self._last_eval_ts = time.time()
+            self._veto_window.append(0)
+            if len(self._veto_window) > 100:
+                self._veto_window = self._veto_window[-100:]
+            return True, META_WIN_THRESHOLD, 1.0
 
         p = self.predict(features)
         admit = p >= META_WIN_THRESHOLD
@@ -149,6 +178,22 @@ class MetaDNN:
         if len(self._veto_window) > 100:
             self._veto_window = self._veto_window[-100:]
         return admit, p, round(0.5 + 0.5 * frac, 4)
+
+    def guard_status(self) -> dict[str, Any]:
+        """Ironclad guard verdict for telemetry."""
+        from . import meta_label_dnn_guard as _guard
+
+        if self._defective or not self._built:
+            return {
+                "healthy": not self._defective,
+                "active": False,
+                "bypassed": True,
+                "reasons": ["defective"] if self._defective else ["unbuilt"],
+            }
+        verdict = _guard.govern(self._layers, self.predict, self._input_dim)
+        verdict["active"] = True
+        verdict["bypassed"] = False
+        return verdict
 
     def live_snapshot(self) -> dict[str, Any]:
         """Telemetry view of DNN gatekeeper live state."""
@@ -164,19 +209,21 @@ class MetaDNN:
         window = self._veto_window[-100:] if self._veto_window else []
         return {
             "enabled": META_WIN_THRESHOLD > 0,
-            "gate_active": self._built and self._layers,
+            "gate_active": self._built and self._layers and not self._defective,
+            "defective": self._defective,
+            "guard": self.guard_status(),
             "threshold": META_WIN_THRESHOLD,
             "oos_accuracy": report.get("accuracy"),
             "eval_count": self._eval_count,
             "veto_count": self._veto_count,
-            "veto_rate_20": round(sum(window[-20:]) / min(20, len(window)), 4)
-            if window
-            else 0.0,
+            "veto_rate_20": (
+                round(sum(window[-20:]) / min(20, len(window)), 4) if window else 0.0
+            ),
             "veto_rate_100": round(sum(window) / len(window), 4) if window else 0.0,
             "weights_loaded": self._built and len(self._layers) > 0,
-            "param_count": sum(w.size + b.size for w, b in self._layers)
-            if self._layers
-            else 0,
+            "param_count": (
+                sum(w.size + b.size for w, b in self._layers) if self._layers else 0
+            ),
             "last_p_win": round(self._last_p_win, 4),
             "last_eval": self._last_eval_ts,
             "train_entries": report.get("total_entries"),
@@ -199,8 +246,10 @@ class MetaDNN:
     ) -> list[float]:
         """Mini-batch Adam training loop. Returns per-epoch BCE losses."""
         self._build()
+        self._fit_scaler(X)
+        Xs = self._transform(X)
         rng = np.random.default_rng(0)
-        n = X.shape[0]
+        n = Xs.shape[0]
         m = [np.zeros_like(w) for w, _ in self._layers]
         v = [np.zeros_like(w) for w, _ in self._layers]
         bm = [np.zeros_like(b) for _, b in self._layers]
@@ -211,7 +260,8 @@ class MetaDNN:
             idx = rng.permutation(n)
             e_loss, n_b = 0.0, 0
             for s in range(0, n, batch_size):
-                xb = X[idx[s : s + batch_size]]
+                xb = Xs[idx[s : s + batch_size]]
+                bs = xb.shape[0]
                 yb = y[idx[s : s + batch_size]].reshape(-1, 1)
                 xb_sw = (
                     sample_weight[idx[s : s + batch_size]].reshape(-1, 1)
@@ -223,10 +273,20 @@ class MetaDNN:
                 n_b += 1
                 t += 1
                 self._adam_step(
-                    (out - yb) / n, cache, weight_decay, m, v, bm, bv, t, lr
+                    (out - yb) / bs, cache, weight_decay, m, v, bm, bv, t, lr
                 )
             losses.append(e_loss / max(n_b, 1))
-        self._save()
+        from . import meta_label_dnn_guard as _guard
+
+        verdict = _guard.govern(self._layers, self.predict, self._input_dim)
+        if verdict["healthy"]:
+            self._save()
+        else:
+            self._defective = True
+            log.critical(
+                "DNN training collapsed (%s) — good artifact kept, gatekeeper bypassed",
+                verdict["reasons"],
+            )
         return losses
 
     def _adam_step(
@@ -242,9 +302,15 @@ class MetaDNN:
         lr: float,
     ) -> None:
         b1, b2, eps = 0.9, 0.999, 1e-8
+        grad_norm = float(np.sqrt(sum(np.sum(x**2) for x in [g])))
+        clip = 5.0
+        if grad_norm > clip:
+            g = g * (clip / grad_norm)
         for i in range(len(self._layers) - 1, -1, -1):
             dw = cache[i].T @ g + wd * self._layers[i][0]
             db = np.mean(g, axis=0)
+            dw = np.clip(dw, -clip, clip)
+            db = np.clip(db, -clip, clip)
             m[i] = b1 * m[i] + (1 - b1) * dw
             v[i] = b2 * v[i] + (1 - b2) * dw**2
             bm[i] = b1 * bm[i] + (1 - b1) * db
@@ -269,6 +335,9 @@ class MetaDNN:
                     {"w": w.tolist(), "b": b.tolist()} for w, b in self._layers
                 ],
             }
+            if self._scaler_mean is not None and self._scaler_std is not None:
+                data["scaler_mean"] = self._scaler_mean.tolist()
+                data["scaler_std"] = self._scaler_std.tolist()
             tmp = self._path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data))
             tmp.replace(self._path)
@@ -286,7 +355,24 @@ class MetaDNN:
                 (np.array(l["w"], dtype=np.float64), np.array(l["b"], dtype=np.float64))
                 for l in d.get("weights", [])
             ]
+            if "scaler_mean" in d and "scaler_std" in d:
+                self._scaler_mean = np.array(d["scaler_mean"], dtype=np.float64)
+                self._scaler_std = np.array(d["scaler_std"], dtype=np.float64)
             if self._layers:
                 self._built = True
+            if self._built:
+                from . import meta_label_dnn_guard as _guard
+
+                verdict = _guard.govern(self._layers, self.predict, self._input_dim)
+                if not verdict["healthy"]:
+                    self._defective = True
+                    log.critical(
+                        "DNN artifact rejected by ironclad guard (%s) — gatekeeper bypassed",
+                        verdict["reasons"],
+                    )
+                    self._layers = []
+                    self._built = False
+                    self._scaler_mean = None
+                    self._scaler_std = None
         except (json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
             log.debug("DNN load failed (fresh init): %s", exc)

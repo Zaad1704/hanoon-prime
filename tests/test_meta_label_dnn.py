@@ -138,6 +138,9 @@ class TestMetaDNN:
     def test_size_scale_monotonic(self):
         """size_scale increases as P(Win) approaches threshold."""
         model = MetaDNN(path=Path("/tmp/_test_dnn_mono.json"))
+        # Cold models bypass to admittance; build so infer() consults predict().
+        model._built = True
+        model._layers = [(np.ones((15, 1)), np.zeros(1))]
         # Use fake predict to test scale calculation directly
         original_predict = model.predict
         model.predict = lambda feats: 0.3  # below threshold

@@ -92,6 +92,29 @@ def _compute_atr(
     return float(np.mean(tr))
 
 
+def _compute_obi(high: list, low: list, close: list, i: int, period: int = 20) -> float:
+    """Order-book imbalance proxy from bar geometry."""
+    if i < period:
+        return 0.0
+    h = np.asarray(high[i - period + 1 : i + 1], dtype=float)
+    l = np.asarray(low[i - period + 1 : i + 1], dtype=float)
+    c = np.asarray(close[i - period + 1 : i + 1], dtype=float)
+    upper = c - l
+    lower = h - c
+    total = upper + lower + 1e-12
+    return float(np.clip(np.mean((upper - lower) / total), -1.0, 1.0))
+
+
+def _compute_vpin(volume: list, close: list, i: int, period: int = 20) -> float:
+    """VPIN proxy from volume and price direction."""
+    if i < period:
+        return 0.0
+    v = np.asarray(volume[i - period + 1 : i + 1], dtype=float)
+    c = np.asarray(close[i - period + 1 : i + 1], dtype=float)
+    signed = np.where(np.diff(c, prepend=c[0]) >= 0, v, -v)
+    return float(np.clip(np.mean(signed / (np.mean(v) + 1e-12)), -1.0, 1.0))
+
+
 def _triple_barrier_outcome(
     close: list,
     high: list,
@@ -158,6 +181,7 @@ def harvest_entries(
         if n <= WINDOW + VERTICAL_BARS + 10:
             continue
         last_entry_bar = -min_spacing
+        n_before = len(entries)
         for i in range(WINDOW, n - VERTICAL_BARS):
             if i - last_entry_bar < min_spacing:
                 continue
@@ -176,14 +200,17 @@ def harvest_entries(
                 min(0.95, max(0.5, 0.5 + abs(momentum) / atr * 0.3)) if atr > 0 else 0.5
             )
             score = np.tanh(momentum / atr) if atr > 0 else 0.0
+            atr_ratio = atr / entry_price if entry_price > 0 else 0.0
+            obi = _compute_obi(high, low, close, i)
+            vpin = _compute_vpin(volume, close, i)
             feat = [
                 confidence,
                 min(1.0, abs(score)),
                 vol_pct,
                 float(direction),
-                0.0,
-                0.0,
-                0.0,
+                atr_ratio,
+                obi,
+                vpin,
             ]
             feat += [1.0, 0.0, 0.0, 0.0, 0.0]  # regime: unknown
             feat += [1.0, 0.0, 0.0]  # horizon: scalp
@@ -192,7 +219,7 @@ def harvest_entries(
             last_entry_bar = i
         log.info(
             "Generated %d entries from %s",
-            sum(1 for f, _, _ in entries if True),
+            len(entries) - n_before,
             ticker,
         )
     return entries
@@ -376,7 +403,14 @@ def main() -> int:
     log.info("  Mean P(Win): %.4f", mean_pred)
     log.info("  OOS accuracy (0.5 cut): %.1f%%", 100 * acc)
     log.info("  OOS weighted accuracy: %.1f%%", 100 * weighted_acc)
-    log.info("  Model saved to: %s", out_path)
+    guard = dnn.guard_status()
+    healthy = bool(guard.get("healthy"))
+    log.info("  Ironclad guard: %s", "HEALTHY" if healthy else "COLLAPSED")
+    if guard.get("reasons"):
+        log.info("  Guard reasons: %s", ", ".join(guard["reasons"]))
+    log.info(
+        "  Model saved to: %s", out_path if healthy else "(refused — artifact kept)"
+    )
     log.info("=" * 60)
 
     report = {
@@ -387,12 +421,14 @@ def main() -> int:
         "p_win_mean": round(mean_pred, 4),
         "accuracy": round(acc, 4),
         "weighted_accuracy": round(weighted_acc, 4),
-        "output": str(out_path),
+        "guard_healthy": healthy,
+        "guard_reasons": guard.get("reasons") or [],
+        "output": str(out_path) if healthy else None,
     }
     report_path = out_path.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2))
     log.info("Report saved to: %s", report_path)
-    return 0
+    return 0 if healthy else 1
 
 
 if __name__ == "__main__":
