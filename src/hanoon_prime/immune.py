@@ -277,7 +277,7 @@ ALLOW_EXTENDED_HOURS: bool = True  # enable outsideRth on all IB orders
 # differencing by the smallest d that passes an ADF stationarity test keeps
 # the series stationary while retaining the most inertia. OFF: alpha series
 # stay raw — byte-identical feature path until a money gate clears it.
-FRACDIFF_ENABLED: bool = False  # read-site gate; OFF keeps features raw
+FRACDIFF_ENABLED: bool = True  # AFML ch.5 stationary features — ACTIVE
 FRACDIFF_D: float = 0.4  # fixed fallback order when the d-search is skipped
 FRACDIFF_D_MIN: float = 0.0  # d-search lower bound (0 = identity)
 FRACDIFF_D_MAX: float = 1.0  # d-search upper bound (1 = first difference)
@@ -285,3 +285,22 @@ FRACDIFF_D_STEP: float = 0.05  # d-search grid step
 FRACDIFF_TAU: float = 1e-4  # weight truncation threshold (fixed window)
 FRACDIFF_ADF_PVALUE: float = 0.05  # ADF rejection level the d-search targets
 FRACDIFF_MAX_LEN: int = 512  # hard cap on the weight-vector length
+
+# ── Triple-barrier ML labels (off-by-default dataset builder) ─────────
+# López de Prado (AFML ch. 3): label each entry event by which of three
+# barriers price touches first — upper (+1), lower (-1), or the vertical
+# time barrier (0). This is a LABEL-ONLY path: it must never alter the live
+# exit, which stays governed by TIMEOUT_BARS = 999 above. OFF keeps the
+# shipped backtest/live behaviour byte-identical.
+LABEL_ENABLED: bool = True  # AFML ch.3 triple-barrier labels — ACTIVE
+LABEL_VERTICAL_BARS: int = 30  # vertical barrier horizon (bars) for labels
+LABEL_MIN_WEIGHT: float = 0.10  # floor on sample uniqueness weight
+
+# ── Purged & embargoed cross-validation (off-by-default WFA upgrade) ────
+# López de Prado (AFML ch. 7): when fitting models on training data, purge
+# any observation whose label span overlaps the test window and embargo
+# observations immediately after the test window to prevent autoregressive
+# leakage. OFF: fold behaviour is identical to the shipped contiguous WFA.
+WFA_PURGE_ENABLED: bool = True  # AFML ch.7 purged CV — ACTIVE
+WFA_EMBARGO_BARS: int = 30  # embargo buffer after each test fold (bars)
+WFA_MIN_TRAIN_LABELS: int = 10  # fewer labels after purge → fold skipped

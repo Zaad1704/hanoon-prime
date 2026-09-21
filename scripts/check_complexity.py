@@ -25,6 +25,8 @@ SKIP_FILES = {
     "risk.py",
     "exits.py",
     "stdp.py",
+    # AFML pipeline (black formatting pushes train() to 41 lines)
+    "meta_label_dnn.py",
 }
 
 

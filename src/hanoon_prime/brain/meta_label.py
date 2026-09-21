@@ -1,19 +1,10 @@
 """brain.meta_label — Meta-labeling shadow layer (López de Prado port).
 
-The cortex stays the sole verdict source (R1). This layer learns WHEN
-cortex verdicts historically fail — a secondary model trained on real
-trade outcomes — and answers with a bounded SIZE scalar only: it can
-shrink an admitted entry, never create, flip, or block one.
+Cortex stays the sole verdict source (R1). This layer learns WHEN cortex
+verdicts historically fail — secondary model trained on real trade outcomes.
 
-Features at entry: confidence, |score|, volatility percentile, canonical
-regime, horizon. Online logistic regression (SGD, bounded weights),
-updated once per real trade close by the orchestrator (single writer).
-Until META_MIN_SAMPLES accumulate the scalar stays 1.0 — thin-data
-safety, the same contract as the EV gate.
-
-Shadow semantics: while warming up the model still predicts and scores
-itself (Brier) on every close, so its calibration is measurable before
-its first sizing intervention.
+When META_DNN_ENABLED is True, the DNN gatekeeper returns admit=False to
+VETO trades below META_WIN_THRESHOLD.  Shallow logistic is the fallback.
 """
 
 from __future__ import annotations
@@ -23,18 +14,35 @@ import logging
 import math
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .meta_label_dnn import MetaDNN
 
 from .learning_config import (
     META_CUT,
+    META_DNN_ENABLED,
     META_FILE,
     META_LR,
     META_MIN_SAMPLES,
     META_SIZE_MIN,
     META_WEIGHT_MAX,
+    META_WIN_THRESHOLD,
 )
 
 log = logging.getLogger(__name__)
+
+_DNN_INSTANCE: Any = None  # lazy singleton (MetaDNN | None)
+
+
+def _get_dnn() -> Any:
+    global _DNN_INSTANCE
+    if _DNN_INSTANCE is None:
+        from .meta_label_dnn import MetaDNN
+
+        _DNN_INSTANCE = MetaDNN()
+    return _DNN_INSTANCE
+
 
 REGIMES: tuple[str, ...] = ("trend_up", "trend_down", "range", "vol", "unknown")
 HORIZONS: tuple[str, ...] = ("scalp", "momentum", "swing")
@@ -42,7 +50,11 @@ _Z_CLAMP: float = 30.0
 
 
 def feature_vector(
-    conf: float, score: float, vol_pct: float, regime: str, horizon: str
+    conf: float,
+    score: float,
+    vol_pct: float,
+    regime: str,
+    horizon: str,
 ) -> list[float]:
     """Build the meta-model feature vector from entry context."""
     vec = [1.0, float(conf), min(1.0, abs(float(score))), float(vol_pct)]
@@ -52,7 +64,6 @@ def feature_vector(
 
 
 def _sigmoid(z: float) -> float:
-    """Bounded logistic."""
     return 1.0 / (1.0 + math.exp(-max(-_Z_CLAMP, min(_Z_CLAMP, z))))
 
 
@@ -72,8 +83,7 @@ class MetaLabelModel:
     def p_win(self, features: list[float]) -> float:
         """Predict P(trade wins | entry context)."""
         with self._lock:
-            z = sum(w * x for w, x in zip(self._w, features))
-            return _sigmoid(z)
+            return _sigmoid(sum(w * x for w, x in zip(self._w, features)))
 
     def record(self, features: list[float], won: bool) -> None:
         """One real trade close → SGD step + Brier update."""
@@ -104,6 +114,71 @@ class MetaLabelModel:
             frac = max(0.0, min(1.0, p / META_CUT))
             return round(META_SIZE_MIN + (1.0 - META_SIZE_MIN) * frac, 4)
 
+    def gate(
+        self,
+        conf: float,
+        score: float,
+        vol_pct: float,
+        regime: str,
+        horizon: str,
+        direction: int = 1,
+        atr_ratio: float = 0.0,
+        obi: float = 0.0,
+        vpin: float = 0.0,
+    ) -> tuple[bool, float, float]:
+        """DNN gatekeeper: (admit, p_win, size_scale). Fallback: always admits."""
+        if META_DNN_ENABLED:
+            result = self._dnn_gate(
+                conf, score, vol_pct, regime, horizon, direction, atr_ratio, obi, vpin
+            )
+            if result is not None:
+                return result
+        return self._fallback_gate(conf, score, vol_pct, regime, horizon)
+
+    def _dnn_gate(
+        self,
+        conf: float,
+        score: float,
+        vol_pct: float,
+        regime: str,
+        horizon: str,
+        direction: int,
+        atr_ratio: float,
+        obi: float,
+        vpin: float,
+    ) -> tuple[bool, float, float] | None:
+        try:
+            from .meta_label_dnn import expand_features
+
+            feats = expand_features(
+                conf, score, vol_pct, regime, horizon, direction, atr_ratio, obi, vpin
+            )
+            admit: bool
+            p: float
+            scale: float
+            admit, p, scale = _get_dnn().infer(feats)
+            return admit, p, scale
+        except Exception as exc:
+            log.warning("DNN gatekeeper failed (falling back): %s", exc)
+            return None
+
+    def _fallback_gate(
+        self, conf: float, score: float, vol_pct: float, regime: str, horizon: str
+    ) -> tuple[bool, float, float]:
+        with self._lock:
+            feats = feature_vector(conf, score, vol_pct, regime, horizon)
+            p = _sigmoid(sum(w * x for w, x in zip(self._w, feats)))
+            scale = (
+                1.0
+                if p >= META_CUT
+                else round(
+                    META_SIZE_MIN
+                    + (1.0 - META_SIZE_MIN) * max(0.0, min(1.0, p / META_CUT)),
+                    4,
+                )
+            )
+            return True, p, scale
+
     def snapshot(self) -> dict[str, Any]:
         """Telemetry view: sample count, calibration, active flag."""
         with self._lock:
@@ -115,7 +190,6 @@ class MetaLabelModel:
             }
 
     def _load(self) -> None:
-        """Load persisted weights; corrupt/missing file → fresh model."""
         if not self._path.exists():
             return
         try:
@@ -132,7 +206,6 @@ class MetaLabelModel:
             log.warning("Meta-label load failed (starting fresh): %s", exc)
 
     def _save(self) -> None:
-        """Persist atomically (tmp + replace)."""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")

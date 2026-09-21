@@ -70,10 +70,12 @@ class Variant:
     contra: bool = False
     delib: bool = False
     halim: bool = False
+    dnn: bool = False
 
 
 VARIANTS: tuple[Variant, ...] = (
     Variant("OFF"),
+    Variant("DNN", dnn=True),
     Variant("CALIB", calibration=True),
     Variant("HYST", hysteresis=True),
     Variant("PROBE", probe=True),
@@ -85,6 +87,7 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("BLEND+THRESH", blend=True, threshold=True),
     Variant("BLEND+MOE", blend=True, moe=True),
     Variant("BLEND+SLEEP", blend=True, sleep=True),
+    Variant("BLEND+DNN", blend=True, dnn=True),
     Variant(
         "ALL-ON",
         blend=True,
@@ -98,6 +101,7 @@ VARIANTS: tuple[Variant, ...] = (
         contra=True,
         delib=True,
         halim=True,
+        dnn=True,
     ),
 )
 
@@ -159,6 +163,7 @@ def _apply_variant(v: Variant) -> dict[str, bool]:
     """Patch the roadmap gates (lazy readers + the module-imported aliases)."""
     import hanoon_prime.brain.consolidation as cons
     import hanoon_prime.brain.exit_ladder as xl
+    import hanoon_prime.brain.learning_config as lc
     import hanoon_prime.brain.orchestrator as orb
     import hanoon_prime.brain.probe_recovery as pr
     import hanoon_prime.brain.realized_ev as rev
@@ -180,6 +185,7 @@ def _apply_variant(v: Variant) -> dict[str, bool]:
         "halim_cons": cons.HALIM_EVIDENCE_LEARNING,
         "entry_regime": orb.ENTRY_REGIME_GATE,
         "entry_cost": orb.ENTRY_COST_AVERSE_GATE,
+        "dnn": lc.META_DNN_ENABLED,
     }
     orb.NEURO_BLEND_ENABLED = v.blend
     orb.DELIBERATION_TRACE_ENABLED = v.delib
@@ -199,6 +205,7 @@ def _apply_variant(v: Variant) -> dict[str, bool]:
     cons.HALIM_EVIDENCE_LEARNING = v.halim
     orb.ENTRY_REGIME_GATE = ENTRY_GATE in ("regime", "both")
     orb.ENTRY_COST_AVERSE_GATE = ENTRY_GATE in ("cost", "both")
+    lc.META_DNN_ENABLED = v.dnn
     return saved
 
 
@@ -206,6 +213,7 @@ def _restore_variant(saved: dict[str, bool]) -> None:
     """Restore the gates so an in-process consumer sees production defaults."""
     import hanoon_prime.brain.consolidation as cons
     import hanoon_prime.brain.exit_ladder as xl
+    import hanoon_prime.brain.learning_config as lc
     import hanoon_prime.brain.orchestrator as orb
     import hanoon_prime.brain.probe_recovery as pr
     import hanoon_prime.brain.realized_ev as rev
@@ -231,6 +239,7 @@ def _restore_variant(saved: dict[str, bool]) -> None:
     cons.HALIM_EVIDENCE_LEARNING = saved["halim_cons"]
     orb.ENTRY_REGIME_GATE = saved["entry_regime"]
     orb.ENTRY_COST_AVERSE_GATE = saved["entry_cost"]
+    lc.META_DNN_ENABLED = saved["dnn"]
 
 
 @dataclass

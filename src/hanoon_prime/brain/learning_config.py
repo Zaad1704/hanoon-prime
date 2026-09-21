@@ -25,6 +25,21 @@ META_CUT: float = 0.45  # p(win) below this → scalar shrinks the size
 META_SIZE_MIN: float = 0.5  # scalar floor (only ever REDUCES size)
 META_FILE: Path = STATE_DIR / "juli_meta_label.json"
 
+# ── Deep meta-labeler gatekeeper (off-by-default DNN upgrade) ─────────
+# Offline-trained MLP that replaces the shallow online logistic when
+# enabled. Trained on historical labels with purging/embargo, frozen for
+# live inference. If P(Win) < META_WIN_THRESHOLD the trade is vetoed.
+META_DNN_ENABLED: bool = (
+    True  # gate: True = DNN gatekeeper ACTIVE (trained model loaded)
+)
+META_WIN_THRESHOLD: float = 0.52  # P(Win) below this → veto entry
+META_DNN_HIDDEN: tuple[int, ...] = (32, 16)  # MLP hidden layer sizes
+META_DNN_LR: float = 0.005  # Adam learning rate for offline training
+META_DNN_EPOCHS: int = 50  # offline training epochs
+META_DNN_BATCH: int = 64  # mini-batch size
+META_DNN_WEIGHT_DECAY: float = 1e-4  # L2 regularization
+META_DNN_FILE: Path = STATE_DIR / "juli_meta_dnn.json"
+
 # ── Horizon contextual bandit (brain/horizon_bandit.py) ───────────────
 BANDIT_EPS: float = 0.10  # exploration floor per selection
 BANDIT_MIN_SAMPLES: int = 10  # trials in a cell before it can override

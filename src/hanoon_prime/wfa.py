@@ -30,7 +30,13 @@ from scipy import stats
 
 from .eyes import load_ohlcv
 from .hands import simulate_ticker
-from .immune import EDGE_LOOKBACK
+from .immune import (
+    EDGE_LOOKBACK,
+    LABEL_VERTICAL_BARS,
+    WFA_EMBARGO_BARS,
+    WFA_MIN_TRAIN_LABELS,
+    WFA_PURGE_ENABLED,
+)
 from .types import BarSeries
 
 # ── Tunables (locked once the Phase-4 protocol is registered) ───────────
@@ -94,6 +100,118 @@ def fold_windows(total_bars: int, folds: int = DEFAULT_FOLDS) -> list[tuple[int,
         end = min(end, total_bars)
         windows.append((start, end))
     return windows
+
+
+# ── Purged & embargoed cross-validation (AFML ch. 7) ─────────────────
+
+
+def purge_mask(
+    t0: np.ndarray,
+    t1: np.ndarray,
+    test_start: int,
+    test_end: int,
+) -> np.ndarray:
+    """Boolean mask: True for labels whose span does NOT overlap [test_start, test_end].
+
+    A label's span [t0, t1] overlaps the test window iff t0 <= test_end and
+    t1 >= test_start. Purging removes all such labels from the training set
+    to prevent information leakage from the test window into training.
+    """
+    overlap = (t0 <= test_end) & (t1 >= test_start)
+    return ~overlap
+
+
+def embargo_mask(t0: np.ndarray, test_end: int, embargo_bars: int) -> np.ndarray:
+    """Boolean mask: True for labels NOT in the embargo zone after test_end.
+
+    Embargo zone is [test_end, test_end + embargo_bars). Labels with entry
+    inside this range are dropped to prevent autoregressive leakage from
+    the test fold's recent past into training.
+    """
+    return (t0 < test_end) | (t0 >= test_end + embargo_bars)
+
+
+def train_test_split(
+    t0: np.ndarray,
+    t1: np.ndarray,
+    test_start: int,
+    test_end: int,
+    embargo_bars: int = WFA_EMBARGO_BARS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split labels into purged+embargoed train and test boolean masks.
+
+    A label is a "test" label if its entry t0 falls inside [test_start,
+    test_end). All other labels are candidates for training; purge and
+    embargo then filter them.
+
+    Returns (train_mask, test_mask) — boolean arrays aligned with t0/t1.
+    """
+    test_mask = (t0 >= test_start) & (t0 < test_end)
+    purge_ok = purge_mask(t0, t1, test_start, test_end)
+    embargo_ok = embargo_mask(t0, test_end, embargo_bars)
+    train_mask = purge_ok & embargo_ok & ~test_mask
+    return train_mask, test_mask
+
+
+def weight_adjusted_return(pnl: np.ndarray, weights: np.ndarray) -> float:
+    """Weighted mean return, normalized by sum of weights.
+
+    Clustered, highly correlated trade regimes receive lower uniqueness
+    weights, so they contribute proportionally less to the fold's OOS
+    performance metric.
+    """
+    if pnl.size == 0 or weights.size == 0:
+        return 0.0
+    w = weights / (np.sum(weights) + 1e-12)
+    return float(np.sum(w * pnl))
+
+
+def weight_adjusted_sharpe(pnl: np.ndarray, weights: np.ndarray) -> float:
+    """Weighted Sharpe ratio using uniqueness weights.
+
+    Down-weights clustered trades so the fold Sharpe reflects the true
+    information content of each independent sample.
+    """
+    if pnl.size < 2:
+        return 0.0
+    w = weights / (np.sum(weights) + 1e-12)
+    mu = float(np.sum(w * pnl))
+    var = float(np.sum(w * (pnl - mu) ** 2))
+    return float(mu / (np.sqrt(var) + 1e-12))
+
+
+def purged_fold_windows(
+    total_bars: int,
+    label_t0: np.ndarray,
+    label_t1: np.ndarray,
+    folds: int = DEFAULT_FOLDS,
+    embargo_bars: int = WFA_EMBARGO_BARS,
+) -> list[dict[str, Any]]:
+    """Fold windows with per-fold purge/embargo diagnostics.
+
+    Returns a list of dicts, each containing:
+      - ``test_start`` / ``test_end``: OOS window bar indices
+      - ``train_mask``: boolean mask of surviving training labels
+      - ``n_purged``: count of labels removed by purging
+      - ``n_embargoed``: count of labels removed by embargo
+    """
+    windows = fold_windows(total_bars, folds)
+    result: list[dict[str, Any]] = []
+    for start, end in windows:
+        purge_ok = purge_mask(label_t0, label_t1, start, end)
+        embargo_ok = embargo_mask(label_t0, end, embargo_bars)
+        test_mask = (label_t0 >= start) & (label_t0 < end)
+        train_mask = purge_ok & embargo_ok & ~test_mask
+        result.append(
+            {
+                "test_start": start,
+                "test_end": end,
+                "train_mask": train_mask,
+                "n_purged": int(np.sum(~purge_ok)),
+                "n_embargoed": int(np.sum(~embargo_ok & purge_ok)),
+            }
+        )
+    return result
 
 
 def _fold_sharpe(pnl: list[float]) -> float:
@@ -392,6 +510,12 @@ __all__ = [
     "verdicts",
     "deflated_sharpe",
     "pbo",
+    "purge_mask",
+    "embargo_mask",
+    "train_test_split",
+    "weight_adjusted_return",
+    "weight_adjusted_sharpe",
+    "purged_fold_windows",
     "MIN_TRADES",
     "DEFAULT_FOLDS",
 ]
