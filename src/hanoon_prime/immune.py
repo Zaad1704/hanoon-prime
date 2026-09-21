@@ -270,3 +270,18 @@ TELEMETRY_PORT: int = 8080  # HTTP health endpoint for cloudflared tunnel
 
 # ── Extended hours (pre-market 4-9:30AM ET, post-market 4-8PM ET) ──────
 ALLOW_EXTENDED_HOURS: bool = True  # enable outsideRth on all IB orders
+
+# ── Fractional differentiation (off-by-default feature transform) ──────
+# López de Prado (Advances in Financial ML, ch. 5): integer differencing
+# (I(1)) makes a random walk stationary but destroys all memory. Fractionally
+# differencing by the smallest d that passes an ADF stationarity test keeps
+# the series stationary while retaining the most inertia. OFF: alpha series
+# stay raw — byte-identical feature path until a money gate clears it.
+FRACDIFF_ENABLED: bool = False  # read-site gate; OFF keeps features raw
+FRACDIFF_D: float = 0.4  # fixed fallback order when the d-search is skipped
+FRACDIFF_D_MIN: float = 0.0  # d-search lower bound (0 = identity)
+FRACDIFF_D_MAX: float = 1.0  # d-search upper bound (1 = first difference)
+FRACDIFF_D_STEP: float = 0.05  # d-search grid step
+FRACDIFF_TAU: float = 1e-4  # weight truncation threshold (fixed window)
+FRACDIFF_ADF_PVALUE: float = 0.05  # ADF rejection level the d-search targets
+FRACDIFF_MAX_LEN: int = 512  # hard cap on the weight-vector length
