@@ -23,6 +23,7 @@ from ..immune import (
     ENTRY_COST_AVERSE_GATE,
     ENTRY_COST_CAPTURE_MULTIPLE,
     ENTRY_REGIME_GATE,
+    FRACDIFF_ENABLED,
     NEURO_BLEND_ENABLED,
     round_trip_cost_fraction,
 )
@@ -56,7 +57,7 @@ from .gate_advisor import GateAdvisor
 from .gate_guard import declared_gates, verify_decision_boundary
 from .horizon_bandit import HorizonBandit
 from .learned_exit import LearnedExitPolicy
-from .learning_config import CROSS_ASSET_MOD_BOUND, REGIME_MIN_TRADES
+from .learning_config import CROSS_ASSET_MOD_BOUND, META_DNN_ENABLED, REGIME_MIN_TRADES
 from .memory import JuliMemory
 from .meta_label import MetaLabelModel
 from .meta_label import feature_vector as meta_features
@@ -519,7 +520,53 @@ class NeuromorphicBrain:
             return Verdict(
                 ticker=ticker, action=HOLD, reason="not_sized", stage="pipeline"
             )
+        dnn_veto = self._dnn_gate_veto(ticker, snap, bars, thought)
+        if dnn_veto is not None:
+            return dnn_veto
         return self._portfolio_admit(ticker, snap, sizing, policy, thought)
+
+    def _dnn_gate_veto(
+        self,
+        ticker: str,
+        snap: dict[str, Any],
+        bars: dict[str, Any],
+        thought: SimpleNamespace,
+    ) -> Verdict | None:
+        """DNN gatekeeper veto: returns VETOED or None (admitted)."""
+        if not META_DNN_ENABLED:
+            return None
+        try:
+            prices = snap.get("prices") or []
+            price = float(prices[-1]) if prices else 0.0
+            atr_val = float(snap.get("atr", 0.0))
+            admit, p_win, _scale = self._meta.gate(
+                float(thought.confidence),
+                float(thought.score),
+                self._vol_pct(bars),
+                str(self.state.get("regime_label", "unknown")),
+                self._classify_horizon(bars),
+                direction=int(thought.direction),
+                atr_ratio=(atr_val / price if price > 0.0 else 0.0),
+                obi=float(snap.get("obi", 0.0) or 0.0),
+                vpin=float(snap.get("vpin", 0.0) or 0.0),
+            )
+            if not admit:
+                log.info(
+                    "DNN_GATEKEEPER_VETO %s p=%.3f conf=%.3f score=%.3f",
+                    ticker,
+                    p_win,
+                    thought.confidence,
+                    thought.score,
+                )
+                return Verdict(
+                    ticker=ticker,
+                    action=VETOED,
+                    reason="dnn_gatekeeper",
+                    stage="meta_dnn",
+                )
+        except Exception as exc:
+            log.debug("DNN gatekeeper error (admitting): %s", exc)
+        return None
 
     def _portfolio_admit(
         self,

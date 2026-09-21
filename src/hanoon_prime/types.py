@@ -66,6 +66,7 @@ class BarSeries:
     buy_volume: Any = None
     bid_sizes: Any = None
     ask_sizes: Any = None
+    fracdiff_close: Any = None
 
 
 @dataclass

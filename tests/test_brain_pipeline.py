@@ -8,6 +8,7 @@ rejected at the validity stage.
 import time
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from hanoon_prime.brain.orchestrator import NeuromorphicBrain
 from hanoon_prime.brain.policy.verdict import ENTER, HOLD, VETOED
@@ -125,12 +126,54 @@ def test_deliberation_coherence_disabled_is_noop():
     assert "deliberation_candidate_score" not in ctx
 
 
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", False)
 def test_valid_edge_admitted_with_size():
     b = _brain()
     v = b.decide_entry("NVD", _snap(), {}, "rth")
     assert v.action == ENTER
     assert v.sizing is not None and v.sizing.shares > 0
     assert v.stop is not None and v.target is not None
+
+
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", True)
+def test_dnn_gatekeeper_vetoes_entry():
+    """DNN gatekeeper vetoes when gate() returns admit=False."""
+    b = _brain()
+
+    def _fake_gate(*_a, **_kw):
+        return (False, 0.35, 0.6)
+
+    b._meta.gate = _fake_gate
+    v = b.decide_entry("NVD", _snap(), {}, "rth")
+    assert v.action == VETOED
+    assert v.reason == "dnn_gatekeeper"
+    assert v.stage == "meta_dnn"
+
+
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", True)
+def test_dnn_gatekeeper_admits_entry():
+    """DNN gatekeeper admits when gate() returns admit=True."""
+    b = _brain()
+
+    def _fake_gate(*_a, **_kw):
+        return (True, 0.72, 1.0)
+
+    b._meta.gate = _fake_gate
+    v = b.decide_entry("NVD", _snap(), {}, "rth")
+    assert v.action == ENTER
+
+
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", True)
+def test_dnn_gatekeeper_error_admits():
+    """DNN gatekeeper errors fall back to admitting."""
+    b = _brain()
+
+    def _bad_gate(*_a, **_kw):
+        raise RuntimeError("model corrupt")
+
+    b._meta.gate = _bad_gate
+    v = b.decide_entry("NVD", _snap(), {}, "rth")
+    assert v.action == ENTER
 
 
 def test_direction_vetoed():
@@ -163,6 +206,7 @@ def test_no_signal_is_hold():
     assert v.action == HOLD and v.reason == "no_signal"
 
 
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", False)
 def test_governor_cap_vetoes_third():
     b = _brain()
     for i in range(2):
@@ -177,6 +221,7 @@ def test_invalid_snapshot_vetoed():
     assert v.action == VETOED and v.reason == "no_data"
 
 
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", False)
 def test_probe_override_bypasses_halt():
     b = _brain()
     from hanoon_prime.brain.probe_recovery import ProbeRecovery
@@ -197,6 +242,7 @@ def test_probe_override_bypasses_halt():
     assert v.reason == "probe_recovery" and v.stage == "probe_recovery"
 
 
+@patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", False)
 def test_sizing_result_type_used_when_fake_tick_omits_it():
     """decide_entry must still size from thought when tick() has no sizing."""
     b = _brain()
