@@ -31,7 +31,7 @@ class TestWeightsHealthy:
     def test_rejects_nan(self):
         """Non-finite weights are rejected."""
         layers = [
-            (np.full((15, 4), np.nan), np.zeros(4)),
+            (np.full((7, 4), np.nan), np.zeros(4)),
             (np.ones((4, 1)), np.zeros(1)),
         ]
         ok, reason = weights_healthy(layers)
@@ -41,7 +41,7 @@ class TestWeightsHealthy:
     def test_rejects_degenerate_scale(self):
         """Weights of the historical 1e-4 scale are dead."""
         layers = [
-            (np.full((15, 4), 0.0004), np.zeros(4)),
+            (np.full((7, 4), 0.0004), np.zeros(4)),
             (np.full((4, 1), 0.0004), np.zeros(1)),
         ]
         ok, reason = weights_healthy(layers)
@@ -52,7 +52,7 @@ class TestWeightsHealthy:
         """He-init scale weights pass."""
         rng = np.random.default_rng(0)
         layers = [
-            (rng.normal(0, 0.4, (15, 4)), np.zeros(4)),
+            (rng.normal(0, 0.4, (7, 4)), np.zeros(4)),
             (rng.normal(0, 0.4, (4, 1)), np.zeros(1)),
         ]
         ok, reason = weights_healthy(layers)
@@ -70,7 +70,7 @@ class TestOutputsHealthy:
         def constant_predict(_feats: list[float]) -> float:
             return 0.3651
 
-        ok, reason = outputs_healthy(constant_predict, 15)
+        ok, reason = outputs_healthy(constant_predict, 7)
         assert not ok
         assert reason == "constant_output"
 
@@ -80,13 +80,13 @@ class TestOutputsHealthy:
         def varying_predict(feats: list[float]) -> float:
             return 1.0 / (1.0 + np.exp(-1.5 * float(feats[0])))
 
-        ok, _reason = outputs_healthy(varying_predict, 15)
+        ok, _reason = outputs_healthy(varying_predict, 7)
         assert ok
 
     def test_probe_deterministic(self):
         """Probe matrix is reproducible."""
-        a = probe_inputs(15)
-        b = probe_inputs(15)
+        a = probe_inputs(7)
+        b = probe_inputs(7)
         assert a.shape == b.shape
         assert np.allclose(a, b)
         assert a.shape[0] >= MIN_OUTPUT_SPREAD * 0  # sanity: probe is non-empty
@@ -99,14 +99,14 @@ class TestGovern:
     def test_verdict_requires_both(self):
         """Both weight and output checks must hold for healthy=True."""
         dead = [
-            (np.full((15, 4), 1e-5), np.zeros(4)),
+            (np.full((7, 4), 1e-5), np.zeros(4)),
             (np.full((4, 1), 1e-5), np.zeros(1)),
         ]
 
         def const_p(_feats: list[float]) -> float:
             return 0.5
 
-        v = govern(dead, const_p, 15)
+        v = govern(dead, const_p, 7)
         assert not v["healthy"]
         assert not v["weights_healthy"]
         assert not v["outputs_healthy"]
@@ -123,14 +123,14 @@ class TestGuardEnforcement:
         p = tmp_path / "collapsed.json"
         rng = np.random.default_rng(4)
         layers = [
-            (rng.normal(2.0, 0.3, (15, 8)), np.full(8, -60.0)),
+            (rng.normal(2.0, 0.3, (7, 8)), np.full(8, -60.0)),
             (rng.normal(2.0, 0.3, (8, 4)), np.full(4, -60.0)),
             (rng.normal(0.0, 0.3, (4, 1)), np.zeros(1)),
         ]
         p.write_text(
             json.dumps(
                 {
-                    "input_dim": 15,
+                    "input_dim": 7,
                     "hidden": [8, 4],
                     "weights": [{"w": w.tolist(), "b": b.tolist()} for w, b in layers],
                 }
@@ -139,7 +139,7 @@ class TestGuardEnforcement:
         model = MetaDNN(path=p)
         assert model._defective
         assert not model._built
-        admit, pwin, scale = model.infer([0.5] * 15)
+        admit, pwin, scale = model.infer([0.5] * 7)
         assert admit is True
         assert pwin == META_WIN_THRESHOLD
         assert scale == 1.0
@@ -149,7 +149,29 @@ class TestGuardEnforcement:
         p = tmp_path / "healthy.json"
         rng = np.random.default_rng(7)
         layers = [
-            (rng.normal(0.5, 0.4, (15, 8)), np.zeros(8)),
+            (rng.normal(0.5, 0.4, (7, 8)), np.zeros(8)),
+            (rng.normal(0.5, 0.4, (8, 4)), np.zeros(4)),
+            (rng.normal(0.5, 0.4, (4, 1)), np.zeros(1)),
+        ]
+        p.write_text(
+            json.dumps(
+                {
+                    "input_dim": 7,
+                    "hidden": [8, 4],
+                    "weights": [{"w": w.tolist(), "b": b.tolist()} for w, b in layers],
+                }
+            )
+        )
+        model = MetaDNN(path=p)
+        assert not model._defective
+        assert model._built
+
+    def test_load_rejects_dimension_mismatch(self, tmp_path: Path):
+        """Artifact trained for a different input_dim fails open (no crash wall)."""
+        p = tmp_path / "mismatch.json"
+        rng = np.random.default_rng(5)
+        layers = [
+            (rng.normal(0.5, 0.4, (7, 8)), np.zeros(8)),
             (rng.normal(0.5, 0.4, (8, 4)), np.zeros(4)),
             (rng.normal(0.5, 0.4, (4, 1)), np.zeros(1)),
         ]
@@ -163,13 +185,17 @@ class TestGuardEnforcement:
             )
         )
         model = MetaDNN(path=p)
-        assert not model._defective
-        assert model._built
+        assert model._defective
+        assert not model._built
+        admit, pwin, scale = model.infer([0.9] * 7)
+        assert admit is True
+        assert pwin == META_WIN_THRESHOLD
+        assert scale == 1.0
 
     def test_cold_model_bypasses(self, tmp_path: Path):
         """No artifact → infer admitts instead of random-vetoing."""
         model = MetaDNN(path=tmp_path / "absent.json")
-        admit, pwin, scale = model.infer([0.9] * 15)
+        admit, pwin, scale = model.infer([0.9] * 7)
         assert admit is True
         assert pwin == META_WIN_THRESHOLD
         assert scale == 1.0
@@ -180,12 +206,12 @@ class TestGuardEnforcement:
         model = MetaDNN(path=p)
         rng = np.random.default_rng(3)
         model._layers = [
-            (rng.normal(2.0, 0.3, (15, 8)), np.full(8, -60.0)),
+            (rng.normal(2.0, 0.3, (7, 8)), np.full(8, -60.0)),
             (rng.normal(2.0, 0.3, (8, 4)), np.full(4, -60.0)),
             (rng.normal(0.0, 0.3, (4, 1)), np.zeros(1)),
         ]
         model._built = True
-        X = rng.normal(0, 1, (300, 15)).astype(np.float64)
+        X = rng.normal(0, 1, (300, 7)).astype(np.float64)
         y = (X[:, 0] > 0).astype(np.float64)
         model.train(X, y, epochs=3, lr=0.005, batch_size=32)
         assert not p.exists()
@@ -206,7 +232,7 @@ class TestGuardEnforcement:
         p = tmp_path / "ok.json"
         model = MetaDNN(path=p)
         rng = np.random.default_rng(11)
-        w0 = rng.normal(5.0, 0.1, (15, 8))
+        w0 = rng.normal(5.0, 0.1, (7, 8))
         w1 = rng.normal(5.0, 0.1, (8, 4))
         w2 = rng.normal(5.0, 0.1, (4, 1))
         model._layers = [

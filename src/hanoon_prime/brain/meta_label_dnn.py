@@ -1,8 +1,13 @@
 """brain.meta_label_dnn — Deep Meta-Labeler Gatekeeper (numpy MLP).
 
 Offline-trained MLP replacing the shallow online logistic when
-``META_DNN_ENABLED`` is True.  15-dim input → 32 (ReLU) → 16 (ReLU) →
-1 (sigmoid). ~700 params. R1: emits P(Win) only, never a verdict.
+``META_DNN_ENABLED`` is True.  7-dim input → 32 (ReLU) → 16 (ReLU) →
+1 (sigmoid). ~800 params. R1: emits P(Win) only, never a verdict.
+
+Feature permutation ablation showed the 8 regime/horizon one-hot slots were
+constant in training (zero permutation importance) and dead-weighted ~24% of
+the parameter space, so they were pruned to the 7 lived continuous signals:
+[confidence, |score|, vol_pct, direction, atr_ratio, obi, vpin].
 """
 
 from __future__ import annotations
@@ -28,24 +33,26 @@ from .learning_config import (
 __all__ = ["MetaDNN"]
 log = logging.getLogger(__name__)
 
-REGIMES: tuple[str, ...] = ("trend_up", "trend_down", "range", "vol", "unknown")
-HORIZONS: tuple[str, ...] = ("scalp", "momentum", "swing")
-INPUT_DIM: int = 15  # 7 base + 5 regime + 3 horizon
+INPUT_DIM: int = (
+    7  # pruned base features: conf, |score|, vol_pct, dir, atr_ratio, obi, vpin
+)
 
 
 def expand_features(
     conf: float,
     score: float,
     vol_pct: float,
-    regime: str,
-    horizon: str,
     direction: int = 1,
     atr_ratio: float = 0.0,
     obi: float = 0.0,
     vpin: float = 0.0,
 ) -> list[float]:
-    """Expanded 15-dim feature vector for the DNN gatekeeper."""
-    vec: list[float] = [
+    """7-dim feature vector for the DNN gatekeeper.
+
+    One-hot regime/horizon slots were pruned after permutation ablation showed
+    they never vary in training and contribute zero predictive signal.
+    """
+    return [
         float(conf),
         min(1.0, abs(float(score))),
         float(vol_pct),
@@ -54,9 +61,6 @@ def expand_features(
         float(obi),
         float(vpin),
     ]
-    vec += [1.0 if regime == r else 0.0 for r in REGIMES]
-    vec += [1.0 if horizon == h else 0.0 for h in HORIZONS]
-    return vec
 
 
 def _sigmoid(z: np.ndarray) -> np.ndarray:
@@ -350,7 +354,15 @@ class MetaDNN:
         try:
             d = json.loads(self._path.read_text())
             self._hidden = tuple(d.get("hidden", self._hidden))
-            self._input_dim = int(d.get("input_dim", self._input_dim))
+            stored_dim = int(d.get("input_dim", self._input_dim))
+            if stored_dim != self._input_dim:
+                self._defective = True
+                log.critical(
+                    "DNN artifact dimension mismatch (code=%d artifact=%d) — gatekeeper bypassed",
+                    self._input_dim,
+                    stored_dim,
+                )
+                return
             self._layers = [
                 (np.array(l["w"], dtype=np.float64), np.array(l["b"], dtype=np.float64))
                 for l in d.get("weights", [])

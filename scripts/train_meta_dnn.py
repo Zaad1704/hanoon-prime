@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import numpy as np
 
 from hanoon_prime.brain.learning_config import META_DNN_FILE
-from hanoon_prime.brain.meta_label import HORIZONS, REGIMES
 from hanoon_prime.brain.meta_label_dnn import INPUT_DIM, MetaDNN
 
 WINDOW = 40
@@ -212,8 +211,8 @@ def harvest_entries(
                 obi,
                 vpin,
             ]
-            feat += [1.0, 0.0, 0.0, 0.0, 0.0]  # regime: unknown
-            feat += [1.0, 0.0, 0.0]  # horizon: scalp
+            if len(feat) != INPUT_DIM:
+                raise RuntimeError(f"feature dim {len(feat)} != INPUT_DIM {INPUT_DIM}")
             weight = max(0.1, min(1.0, 1.0 + r / TARGET_ATR_MULT))
             entries.append((feat, bool(won), weight))
             last_entry_bar = i

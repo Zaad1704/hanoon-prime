@@ -21,46 +21,30 @@ from hanoon_prime.brain.meta_label_dnn import MetaDNN, expand_features
 
 class TestExpandFeatures:
     def test_base_length(self):
-        """Expanded vector has 15 elements."""
-        feats = expand_features(0.8, 0.5, 0.3, "trend_up", "scalp")
-        assert len(feats) == 15
-
-    def test_regime_one_hot(self):
-        """Exactly one regime slot is 1.0."""
-        for regime in ("trend_up", "trend_down", "range", "vol", "unknown"):
-            feats = expand_features(0.5, 0.0, 0.0, regime, "scalp")
-            regime_slots = feats[7:12]
-            assert sum(regime_slots) == pytest.approx(1.0)
-
-    def test_horizon_one_hot(self):
-        """Exactly one horizon slot is 1.0."""
-        for h in ("scalp", "momentum", "swing"):
-            feats = expand_features(0.5, 0.0, 0.0, "range", h)
-            horizon_slots = feats[12:15]
-            assert sum(horizon_slots) == pytest.approx(1.0)
+        """Expanded vector has 7 elements (one-hots pruned)."""
+        feats = expand_features(0.8, 0.5, 0.3)
+        assert len(feats) == 7
 
     def test_direction_default(self):
         """Direction defaults to 1."""
-        feats = expand_features(0.5, 0.5, 0.5, "range", "scalp")
+        feats = expand_features(0.5, 0.5, 0.5)
         assert feats[3] == 1.0
 
     def test_direction_short(self):
         """Direction=-1 propagates."""
-        feats = expand_features(0.5, 0.5, 0.5, "range", "scalp", direction=-1)
+        feats = expand_features(0.5, 0.5, 0.5, direction=-1)
         assert feats[3] == -1.0
 
     def test_score_clamped(self):
         """|score| is clamped to [0, 1]."""
-        feats = expand_features(0.5, 5.0, 0.5, "range", "scalp")
+        feats = expand_features(0.5, 5.0, 0.5)
         assert feats[1] == pytest.approx(1.0)
-        feats = expand_features(0.5, -5.0, 0.5, "range", "scalp")
+        feats = expand_features(0.5, -5.0, 0.5)
         assert feats[1] == pytest.approx(1.0)
 
     def test_extra_features(self):
         """ATR ratio, OBI, VPIN propagate."""
-        feats = expand_features(
-            0.5, 0.5, 0.5, "range", "scalp", atr_ratio=0.15, obi=0.3, vpin=0.7
-        )
+        feats = expand_features(0.5, 0.5, 0.5, atr_ratio=0.15, obi=0.3, vpin=0.7)
         assert feats[4] == pytest.approx(0.15)
         assert feats[5] == pytest.approx(0.3)
         assert feats[6] == pytest.approx(0.7)
@@ -75,12 +59,12 @@ class TestMetaDNN:
         model = MetaDNN(path=Path("/tmp/_test_dnn_build.json"))
         model._build()
         assert len(model._layers) == len(META_DNN_HIDDEN) + 1
-        assert model._layers[0][0].shape == (15, META_DNN_HIDDEN[0])
+        assert model._layers[0][0].shape == (7, META_DNN_HIDDEN[0])
 
     def test_forward_shape(self):
         """Forward pass returns scalar output."""
         model = MetaDNN(path=Path("/tmp/_test_dnn_fwd.json"))
-        x = np.zeros((1, 15), dtype=np.float64)
+        x = np.zeros((1, 7), dtype=np.float64)
         out, cache = model.forward(x)
         assert out.shape == (1, 1)
         assert 0.0 <= float(out[0, 0]) <= 1.0
@@ -88,7 +72,7 @@ class TestMetaDNN:
     def test_predict_returns_float(self):
         """predict() returns a float in [0, 1]."""
         model = MetaDNN(path=Path("/tmp/_test_dnn_pred.json"))
-        feats = [0.5] * 15
+        feats = [0.5] * 7
         p = model.predict(feats)
         assert isinstance(p, float)
         assert 0.0 <= p <= 1.0
@@ -98,7 +82,7 @@ class TestMetaDNN:
         model = MetaDNN(path=Path("/tmp/_test_dnn_infer.json"))
         # Force high weights on first layer to get strong output
         rng = np.random.default_rng(42)
-        w0 = rng.normal(5.0, 0.1, (15, META_DNN_HIDDEN[0]))
+        w0 = rng.normal(5.0, 0.1, (7, META_DNN_HIDDEN[0]))
         b0 = np.zeros(META_DNN_HIDDEN[0])
         w1 = rng.normal(5.0, 0.1, (META_DNN_HIDDEN[0], META_DNN_HIDDEN[1]))
         b1 = np.zeros(META_DNN_HIDDEN[1])
@@ -110,7 +94,7 @@ class TestMetaDNN:
             (w2.astype(np.float64), b2),
         ]
         model._built = True
-        admit, p, scale = model.infer([0.9] * 15)
+        admit, p, scale = model.infer([0.9] * 7)
         assert admit is True
         assert p >= META_WIN_THRESHOLD
 
@@ -118,7 +102,7 @@ class TestMetaDNN:
         """Low-confidence model vetoes when P(Win) < threshold."""
         model = MetaDNN(path=Path("/tmp/_test_dnn_veto.json"))
         rng = np.random.default_rng(99)
-        w0 = rng.normal(-5.0, 0.1, (15, META_DNN_HIDDEN[0]))
+        w0 = rng.normal(-5.0, 0.1, (7, META_DNN_HIDDEN[0]))
         b0 = np.zeros(META_DNN_HIDDEN[0])
         w1 = rng.normal(-5.0, 0.1, (META_DNN_HIDDEN[0], META_DNN_HIDDEN[1]))
         b1 = np.zeros(META_DNN_HIDDEN[1])
@@ -130,7 +114,7 @@ class TestMetaDNN:
             (w2.astype(np.float64), b2),
         ]
         model._built = True
-        admit, p, scale = model.infer([0.1] * 15)
+        admit, p, scale = model.infer([0.1] * 7)
         assert admit is False
         assert p < META_WIN_THRESHOLD
         assert 0.5 <= scale <= 1.0
@@ -140,13 +124,13 @@ class TestMetaDNN:
         model = MetaDNN(path=Path("/tmp/_test_dnn_mono.json"))
         # Cold models bypass to admittance; build so infer() consults predict().
         model._built = True
-        model._layers = [(np.ones((15, 1)), np.zeros(1))]
+        model._layers = [(np.ones((7, 1)), np.zeros(1))]
         # Use fake predict to test scale calculation directly
         original_predict = model.predict
         model.predict = lambda feats: 0.3  # below threshold
-        _, _, s1 = model.infer([0.0] * 15)
+        _, _, s1 = model.infer([0.0] * 7)
         model.predict = lambda feats: 0.45  # closer to threshold
-        _, _, s2 = model.infer([0.0] * 15)
+        _, _, s2 = model.infer([0.0] * 7)
         model.predict = original_predict
         assert s1 < s2
 
@@ -154,7 +138,7 @@ class TestMetaDNN:
         """Training loop reduces BCE loss over epochs."""
         model = MetaDNN(path=Path("/tmp/_test_dnn_train.json"))
         rng = np.random.default_rng(0)
-        X = rng.normal(0, 1, (200, 15)).astype(np.float64)
+        X = rng.normal(0, 1, (200, 7)).astype(np.float64)
         y = (X[:, 0] > 0).astype(np.float64)
         losses = model.train(X, y, epochs=50, lr=0.002, batch_size=32)
         assert len(losses) == 50
@@ -168,10 +152,10 @@ class TestMetaDNN:
         p = tmp_path / "dnn_rt.json"
         model = MetaDNN(path=p)
         rng = np.random.default_rng(1)
-        X = rng.normal(0, 1, (50, 15)).astype(np.float64)
+        X = rng.normal(0, 1, (50, 7)).astype(np.float64)
         y = (X[:, 0] > 0).astype(np.float64)
         model.train(X, y, epochs=5, lr=0.01, batch_size=16)
-        feats = rng.normal(0, 1, 15).tolist()
+        feats = rng.normal(0, 1, 7).tolist()
         p1 = model.predict(feats)
         model2 = MetaDNN(path=p)
         p2 = model2.predict(feats)

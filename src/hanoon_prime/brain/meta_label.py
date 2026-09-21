@@ -129,7 +129,7 @@ class MetaLabelModel:
         """DNN gatekeeper: (admit, p_win, size_scale). Fallback: always admits."""
         if META_DNN_ENABLED:
             result = self._dnn_gate(
-                conf, score, vol_pct, regime, horizon, direction, atr_ratio, obi, vpin
+                conf, score, vol_pct, direction, atr_ratio, obi, vpin
             )
             if result is not None:
                 return result
@@ -140,8 +140,6 @@ class MetaLabelModel:
         conf: float,
         score: float,
         vol_pct: float,
-        regime: str,
-        horizon: str,
         direction: int,
         atr_ratio: float,
         obi: float,
@@ -151,7 +149,7 @@ class MetaLabelModel:
             from .meta_label_dnn import expand_features
 
             feats = expand_features(
-                conf, score, vol_pct, regime, horizon, direction, atr_ratio, obi, vpin
+                conf, score, vol_pct, direction, atr_ratio, obi, vpin
             )
             admit: bool
             p: float
