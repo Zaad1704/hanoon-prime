@@ -340,7 +340,7 @@ class NeuromorphicBrain:
         prices = snap.get("prices") or []  # array-safe (plain list)
         t0 = time.perf_counter_ns()
         try:
-            alpha = compute_alpha_from_snap(snap)
+            alpha = compute_alpha_from_snap(snap, ticker=ticker)
             bars = entry_bars(snap, prices, self.state.get("regime_label", "unknown"))
             result = self.tick(
                 alpha,

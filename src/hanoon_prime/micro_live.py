@@ -139,7 +139,7 @@ class MicroLiveGuard:
         (compute_alpha_from_snap → fresh static-weights Cortex), so this is
         the 1:1 "paper would have said" counterpart to a live verdict.
         """
-        alpha = compute_alpha_from_snap(snap)
+        alpha = compute_alpha_from_snap(snap, ticker=ticker)
         cortex = Cortex()  # static INDICATOR_WEIGHTS, fresh (no learning state)
         thought: Thought = cortex.evaluate(alpha)
         action = _ACTION_BY_DIRECTION.get(thought.direction, HOLD_ACTION)
@@ -178,7 +178,7 @@ class MicroLiveGuard:
         live_score: float,
     ) -> MicroLiveGuardState:
         """Evaluate one live entry proposal against the full guard stack."""
-        if not compute_alpha_from_snap(snap):
+        if not compute_alpha_from_snap(snap, ticker=ticker):
             return self._state(ticker, True, "insufficient_snapshot", None)
 
         base = self.baseline_signal(ticker, snap)

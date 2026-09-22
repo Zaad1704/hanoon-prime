@@ -44,7 +44,9 @@ def _fmt_verdict(v: Verdict) -> str:
     return f"{v.ticker}:{v.action}({v.score:.3f},{side})[{where}]"
 
 
-def compute_alpha_from_snap(snap: dict[str, Any]) -> dict[str, float]:
+def compute_alpha_from_snap(
+    snap: dict[str, Any], ticker: str | None = None
+) -> dict[str, float]:
     """Compute all indicators from a snapshot (core + higher-order)."""
     kw: dict[str, Any] = {}
     for k, u in ATTRS:
@@ -52,7 +54,9 @@ def compute_alpha_from_snap(snap: dict[str, Any]) -> dict[str, float]:
         kw[k] = [] if v is None else (v if isinstance(v, list) else list(v))
     if len(kw["close"]) < 20:
         return {}
-    alpha = compute_all_alpha(BarSeries(**kw))
+    bars = BarSeries(**kw)
+    bars.ticker = ticker
+    alpha = compute_all_alpha(bars)
     return alpha if alpha else (compute_alpha(**kw) or {})
 
 
