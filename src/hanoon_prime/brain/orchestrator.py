@@ -1027,6 +1027,18 @@ class NeuromorphicBrain:
         while self._shadow_pending:
             self._learn_from_shadow(self._shadow_pending.popleft())
 
+    def _meta_scale(
+        self, ctx: dict[str, Any], canon: str, horizon: str, bars: dict[str, Any] | None
+    ) -> float:
+        """Return meta sizing scalar: DNN path when live, fallback to stats."""
+        if META_DNN_ENABLED and self._meta.dnn_p_win > 0.0:
+            from .meta_label_dnn import calculate_meta_size_scale
+
+            return calculate_meta_size_scale(self._meta.dnn_p_win)
+        return self._meta.size_scalar(
+            ctx["confidence"], ctx["stabilized"], self._vol_pct(bars), canon, horizon
+        )
+
     def _scale_admitted_size(
         self,
         ctx: dict[str, Any],
@@ -1043,19 +1055,9 @@ class NeuromorphicBrain:
         sizing.shares = _scale_shares(
             sizing.shares, self._bounded_thinker_risk_scalar()
         )
-        if META_DNN_ENABLED:
-            from .meta_label_dnn import calculate_meta_size_scale
-
-            meta_scale = calculate_meta_size_scale(self._meta.dnn_p_win)
-        else:
-            meta_scale = self._meta.size_scalar(
-                ctx["confidence"],
-                ctx["stabilized"],
-                self._vol_pct(bars),
-                canon,
-                horizon,
-            )
-        sizing.shares = _scale_shares(sizing.shares, meta_scale)
+        sizing.shares = _scale_shares(
+            sizing.shares, self._meta_scale(ctx, canon, horizon, bars)
+        )
         strat_id = str(ctx.get("strategy", DEFAULT_STRATEGY))
         if strat_id != DEFAULT_STRATEGY:
             sizing.shares = _scale_shares(
