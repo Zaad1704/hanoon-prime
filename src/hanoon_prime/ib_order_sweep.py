@@ -1,10 +1,8 @@
 """hanoon_prime.ib_order_sweep — resting-order sweep for IB protection.
 
-Validates JULI_* OCA groups, self-heals broken ones, and clears stale
-non-OCA resting orders (queued exits, orphaned bracket legs) that would
-otherwise fire unintended fills at the next open.
+Validates JULI_* OCA groups, self-heals broken ones, clears stale
+non-OCA resting orders, and cancels orphaned bracket legs.
 """
-
 from __future__ import annotations
 
 import logging
@@ -12,19 +10,13 @@ import math
 from typing import Any
 
 log = logging.getLogger(__name__)
-
-# Minimum target move (fraction of price) so OCA targets never collapse
-# onto the stop leg for penny / stale-ATR instruments.
 MIN_TARGET_PCT: float = 0.04
-
-# Position side an IB closing action closes (+1 long-exit SELL, -1 short-exit BUY).
 _CLOSING_SIDE: dict[str, int] = {"SELL": 1, "BUY": -1}
-
 _ACTIVE_STATUSES = {"PendingSubmit", "PreSubmitted", "Submitted", "Active"}
 
 
 def _pair_prices(trades: list[Any]) -> tuple[float | None, float | None]:
-    """Extract (stop, target) from an STP+LMT pair (None when absent)."""
+    """Extract (stop, target) from an STP+LMT pair."""
 
     def _price(order_type: str) -> float | None:
         for t in trades:
@@ -38,11 +30,7 @@ def _pair_prices(trades: list[Any]) -> tuple[float | None, float | None]:
 
 
 def _prices_sensible(action: str, stop: float | None, target: float | None) -> bool:
-    """Target must be beyond the stop in the closing direction (no degeneracy).
-
-    A long-exit (SELL) lift requires target > stop; a short-exit (BUY)
-    lift requires target < stop. Pairs without prices are accepted.
-    """
+    """Target must be beyond the stop in the closing direction."""
     if stop is None or target is None:
         return True
     if not (math.isfinite(stop) and math.isfinite(target)):
@@ -61,12 +49,7 @@ def _is_valid_protection(trades: list[Any]) -> bool:
 
 
 def sweep_zombies(ib_client: Any, known_pending: set[str] | None = None) -> None:
-    """Validate JULI_* OCA groups, fix broken ones, and clear stale orders.
-
-    Cancelled/filled OCA legs staying visible in openTrades() is valid —
-    filtering them avoids an infinite SWEEP loop. ``known_pending`` marks
-    acquisition parents still awaited.
-    """
+    """Validate JULI_* OCA groups, fix broken ones, and clear stale/orphaned orders."""
     try:
         all_trades = ib_client.openTrades()
     except Exception:
@@ -96,6 +79,7 @@ def sweep_zombies(ib_client: Any, known_pending: set[str] | None = None) -> None
             )
             _cancel_oca(ib_client, trades)
     _sweep_stale_orders(ib_client, all_trades, known_pending)
+    _sweep_orphan_brackets(ib_client, all_trades, known_pending)
 
 
 def _held_sizes(ib_client: Any) -> dict[str, float] | None:
@@ -125,12 +109,7 @@ def _order_qty(order: Any) -> float:
 def _sweep_stale_orders(
     ib_client: Any, all_trades: list[Any], known_pending: set[str] | None = None
 ) -> None:
-    """Cancel stale non-OCA resting orders left by earlier cycles.
-
-    A PreSubmitted MKT whose quantity no longer matches the current IB
-    position would fire an unintended partial/oversized exit at the next
-    open; a BUY limit for a flat symbol is an orphaned bracket leg.
-    """
+    """Cancel stale non-OCA resting orders left by earlier cycles."""
     held = _held_sizes(ib_client)
     if held is None:
         return
@@ -168,6 +147,30 @@ def _cancel_order(ib_client: Any, t: Any, tag: str) -> None:
         )
     except Exception as exc:
         log.warning("%s cancel failed: %s", tag, exc)
+
+
+def _sweep_orphan_brackets(
+    ib_client: Any, all_trades: list[Any], known_pending: set[str] | None = None
+) -> None:
+    """Cancel bracket children whose parent never filled (penny-stock defense)."""
+    held = _held_sizes(ib_client)
+    if held is None:
+        return
+    pending = known_pending or set()
+    for t in all_trades:
+        o = t.order
+        if o.ocaGroup and o.ocaGroup.startswith("JULI_"):
+            continue
+        if t.orderStatus.status not in _ACTIVE_STATUSES:
+            continue
+        sym = t.contract.symbol if t.contract else ""
+        if not sym or sym in pending:
+            continue
+        is_leg = o.orderType in ("LMT", "STP", "STPLMT") and (
+            o.parentId > 0 or (o.ocaGroup and not o.ocaGroup.startswith("JULI_"))
+        )
+        if is_leg and held.get(sym, 0.0) == 0.0:
+            _cancel_order(ib_client, t, "ORPHAN-BRACKET")
 
 
 def _get_oca_orders(ib_client: Any, sym: str) -> list[Any]:

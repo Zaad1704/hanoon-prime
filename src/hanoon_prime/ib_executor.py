@@ -105,7 +105,22 @@ class IBExecutor:
             shares = max(1, int(raw))
             stop = max(0.01, round(price - d * ATR_STOP_MULT * atr, 2))
             target = max(0.01, round(price + d * ATR_TARGET_MULT * atr, 2))
+            min_sep = max(0.01, round(0.02 * price, 2))
+            if abs(stop - target) < min_sep:
+                log.warning(
+                    "DEGENERATE FALLBACK %s: atr=%.4f stop=%.2f target=%.2f — skipping",
+                    ticker, atr, stop, target,
+                )
+                return
         if shares <= 0:
+            return
+        if not math.isfinite(stop) or not math.isfinite(target):
+            return
+        if abs(stop - target) < 0.01 * max(1.0, price):
+            log.warning(
+                "DEGENERATE BRACKET %s: stop=%.2f target=%.2f price=%.2f — skipping",
+                ticker, stop, target, price,
+            )
             return
         action = "BUY" if d > 0 else "SELL"
         if action == "SELL" and not TRADING_CONFIG.is_direction_allowed(action):
