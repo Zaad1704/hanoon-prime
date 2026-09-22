@@ -80,6 +80,14 @@ class MetaLabelModel:
         self._brier_sum: float = 0.0
         self._load()
 
+    @property
+    def dnn_p_win(self) -> float:
+        """Last DNN P(Win) from the most recent gate() call (0.0 if unavailable)."""
+        try:
+            return float(_get_dnn()._last_p_win)
+        except Exception:
+            return 0.0
+
     def p_win(self, features: list[float]) -> float:
         """Predict P(trade wins | entry context)."""
         with self._lock:

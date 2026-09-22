@@ -75,6 +75,21 @@ def expand_features(
     ]
 
 
+def calculate_meta_size_scale(p_win: float, threshold: float = 0.52) -> float:
+    """Dynamic Kelly bet sizing: P(Win) -> allocation scalar m in [0, 1].
+
+    Uses de Prado's continuous sizing function:
+        m = max(0, (p_win - threshold) / (1 - threshold))
+    At threshold (0.52) -> m = 0.0 (marginal admission, minimal allocation).
+    At 0.76 -> m = 0.50 (half allocation).
+    At 1.00 -> m = 1.00 (full allocation).
+    """
+    if p_win < threshold:
+        return 0.0
+    scale = (p_win - threshold) / (1.0 - threshold)
+    return round(max(0.0, min(1.0, scale)), 4)
+
+
 def _sigmoid(z: np.ndarray) -> np.ndarray:
     result: np.ndarray = 1.0 / (1.0 + np.exp(-np.clip(z, -30.0, 30.0)))
     return result
@@ -184,7 +199,6 @@ class MetaDNN:
 
         p = self.predict(features)
         admit = p >= META_WIN_THRESHOLD
-        frac = max(0.0, min(1.0, p / META_WIN_THRESHOLD))
         self._eval_count += 1
         if not admit:
             self._veto_count += 1
@@ -193,7 +207,7 @@ class MetaDNN:
         self._veto_window.append(0 if admit else 1)
         if len(self._veto_window) > 100:
             self._veto_window = self._veto_window[-100:]
-        return admit, p, round(0.5 + 0.5 * frac, 4)
+        return admit, p, calculate_meta_size_scale(p)
 
     def guard_status(self) -> dict[str, Any]:
         """Ironclad guard verdict for telemetry."""

@@ -1046,9 +1046,14 @@ class NeuromorphicBrain:
             sizing.shares, self._bounded_thinker_risk_scalar()
         )
         vol_pct = self._vol_pct(bars)
-        meta_scale = self._meta.size_scalar(
-            ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
-        )
+        if META_DNN_ENABLED:
+            from .meta_label_dnn import calculate_meta_size_scale
+
+            meta_scale = calculate_meta_size_scale(self._meta.dnn_p_win)
+        else:
+            meta_scale = self._meta.size_scalar(
+                ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
+            )
         sizing.shares = _scale_shares(sizing.shares, meta_scale)
         strat_id = str(ctx.get("strategy", DEFAULT_STRATEGY))
         if strat_id != DEFAULT_STRATEGY:

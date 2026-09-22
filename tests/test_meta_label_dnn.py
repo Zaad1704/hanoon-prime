@@ -14,7 +14,11 @@ from hanoon_prime.brain.learning_config import (
     META_DNN_HIDDEN,
     META_WIN_THRESHOLD,
 )
-from hanoon_prime.brain.meta_label_dnn import MetaDNN, expand_features
+from hanoon_prime.brain.meta_label_dnn import (
+    MetaDNN,
+    calculate_meta_size_scale,
+    expand_features,
+)
 
 # ── Feature expansion ────────────────────────────────────────────────
 
@@ -126,7 +130,7 @@ class TestMetaDNN:
         admit, p, scale = model.infer([0.1] * 9)
         assert admit is False
         assert p < META_WIN_THRESHOLD
-        assert 0.5 <= scale <= 1.0
+        assert scale == 0.0  # de Prado: below threshold -> zero allocation
 
     def test_size_scale_monotonic(self):
         """size_scale increases as P(Win) approaches threshold."""
@@ -138,10 +142,15 @@ class TestMetaDNN:
         original_predict = model.predict
         model.predict = lambda feats: 0.3  # below threshold
         _, _, s1 = model.infer([0.0] * 9)
-        model.predict = lambda feats: 0.45  # closer to threshold
+        model.predict = lambda feats: 0.45  # still below threshold
         _, _, s2 = model.infer([0.0] * 9)
+        model.predict = lambda feats: 0.60  # above threshold
+        _, _, s3 = model.infer([0.0] * 9)
         model.predict = original_predict
-        assert s1 < s2
+        # Below threshold: both zero; above threshold: positive scale
+        assert s1 == 0.0
+        assert s2 == 0.0
+        assert s3 > 0.0
 
     def test_train_reduces_loss(self):
         """Training loop reduces BCE loss over epochs."""
@@ -235,3 +244,40 @@ class TestMetaLabelGate:
         finally:
             lc.META_DNN_ENABLED = old
             ml.META_DNN_ENABLED = old
+
+
+# ── Dynamic Kelly bet sizing ────────────────────────────────────────
+
+
+class TestCalculateMetaSizeScale:
+    def test_below_threshold(self):
+        """P(Win) below threshold returns 0.0 (vetoed)."""
+        assert calculate_meta_size_scale(0.519) == 0.0
+        assert calculate_meta_size_scale(0.0) == 0.0
+        assert calculate_meta_size_scale(-0.1) == 0.0
+
+    def test_at_threshold(self):
+        """P(Win) at threshold returns 0.0 (marginal admission)."""
+        assert calculate_meta_size_scale(0.52) == 0.0
+
+    def test_half_allocation(self):
+        """P(Win) = 0.76 returns 0.5 (half allocation)."""
+        assert calculate_meta_size_scale(0.76) == pytest.approx(0.5, abs=0.001)
+
+    def test_full_allocation(self):
+        """P(Win) = 1.0 returns 1.0 (full allocation)."""
+        assert calculate_meta_size_scale(1.0) == 1.0
+
+    def test_monotonic(self):
+        """Size scale is strictly monotonically increasing above threshold."""
+        scales = [
+            calculate_meta_size_scale(p) for p in [0.52, 0.60, 0.70, 0.80, 0.90, 1.0]
+        ]
+        assert scales == sorted(scales)
+        assert all(s > 0 for s in scales[1:])
+
+    def test_custom_threshold(self):
+        """Custom threshold shifts the scale function."""
+        assert calculate_meta_size_scale(0.60, threshold=0.55) == pytest.approx(
+            (0.60 - 0.55) / (1.0 - 0.55), abs=0.001
+        )
