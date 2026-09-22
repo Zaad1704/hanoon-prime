@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..edge import kelly_fraction, score_to_win_prob
+from ..fracdiff import get_ticker_d
 from ..immune import (
     KELLY_FRACTION,
     MAX_CONCURRENT_POSITIONS,
@@ -38,6 +39,22 @@ def _ev_scale(gate: dict[str, Any]) -> float:
     if gate["should_enter"]:
         return 1.0
     return 0.75 if gate["ev"] > 0.0 else 0.5
+
+
+D_STAR_STOP_SCALE: float = 0.4  # d* range [0.05, 0.65] maps to stop scale [0.8, 1.2]
+
+
+def d_star_stop_adjustment(ticker: str | None) -> float:
+    """Scale ATR stop/target multipliers based on per-ticker d*.
+
+    Low d* (persistent, e.g. 0.05) → tighter stop (0.8x).
+    High d* (volatile, e.g. 0.65) → wider stop (1.2x).
+    Neutral d* (0.35) → no adjustment (1.0x).
+    """
+    if not ticker:
+        return 1.0
+    d = get_ticker_d(ticker)
+    return float(max(0.8, min(1.2, 1.0 + (d - 0.35) * D_STAR_STOP_SCALE / 0.35)))
 
 
 @dataclass
@@ -105,15 +122,21 @@ class RiskEngine:
         atr: float,
         kelly: float,
         horizon: str = "scalp",
+        ticker: str | None = None,
     ) -> tuple[int, float, float]:
         """Compute (shares, stop, target) under all notional/loss caps.
 
         Stop/target multipliers are per-horizon (scalp keeps the prime
-        2×/6× ATR; longer horizons widen both, preserving 3:1 R:R).
+        2x/6x ATR; longer horizons widen both, preserving 3:1 R:R).
+        d*-aware adjustment: low d* (persistent) tightens stops, high d*
+        (volatile) widens stops.
         """
         direction = 1 if score > 0 else -1
         hp = params_for(horizon)
         stop_mult, target_mult = hp.atr_stop_mult, hp.atr_target_mult
+        d_adj = d_star_stop_adjustment(ticker)
+        stop_mult *= d_adj
+        target_mult *= d_adj
         risk_per_share = atr * stop_mult
         max_by_notional = MAX_POSITION_NOTIONAL / entry_price
         max_by_loss = MAX_LOSS_PER_TRADE / risk_per_share
@@ -156,6 +179,7 @@ class RiskEngine:
         high: list[float] | None = None,
         low: list[float] | None = None,
         horizon: str = "scalp",
+        ticker: str | None = None,
     ) -> SizingResult:
         """Mechanical limits + advisory realized-EV sizing (brain-first).
 
@@ -207,6 +231,7 @@ class RiskEngine:
             adjusted_ev_scale,
             gate["reason"],
             quality_penalty=quality_penalty,
+            ticker=ticker,
         )
 
     def _compose_result(
@@ -220,9 +245,10 @@ class RiskEngine:
         ev_scale: float,
         ev_reason: str,
         quality_penalty: float = 0.0,
+        ticker: str | None = None,
     ) -> SizingResult:
         """Mechanical size + sub-rounding guard + advisory EV scale."""
-        shares, stop, target = self._size(score, entry_price, atr, kelly, horizon)
+        shares, stop, target = self._size(score, entry_price, atr, kelly, horizon, ticker)
         # Sub-rounding guard (mechanical, not a gate): when Kelly sizing
         # buys less than one share the edge is below rounding noise.
         max_by_kelly = MAX_POSITION_NOTIONAL * kelly / entry_price

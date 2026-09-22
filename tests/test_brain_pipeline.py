@@ -265,3 +265,50 @@ def test_weak_conviction_direction_is_no_signal_not_a_veto():
     assert r.action == HOLD
     assert r.reason == "no_signal"
     assert r.stage == "veto_gate"
+
+
+class TestCorrelationScalar:
+    def test_no_holdings_returns_1(self):
+        from hanoon_prime.brain.policy.portfolio_gate import correlation_scalar
+
+        assert correlation_scalar("AAPL", {}) == 1.0
+
+    def test_uncorrelated_returns_1(self):
+        from hanoon_prime.brain.policy.portfolio_gate import correlation_scalar
+
+        holdings = {"MSFT": 100.0}
+        corrs = {"AAPL_MSFT": 0.5}
+        assert correlation_scalar("AAPL", holdings, corrs) == 1.0
+
+    def test_correlated_returns_penalty(self):
+        from hanoon_prime.brain.policy.portfolio_gate import correlation_scalar
+
+        holdings = {"MSFT": 100.0}
+        corrs = {"AAPL_MSFT": 0.8}
+        assert correlation_scalar("AAPL", holdings, corrs) == 0.5
+
+    def test_reverse_key_also_works(self):
+        from hanoon_prime.brain.policy.portfolio_gate import correlation_scalar
+
+        holdings = {"MSFT": 100.0}
+        corrs = {"MSFT_AAPL": 0.75}
+        assert correlation_scalar("AAPL", holdings, corrs) == 0.5
+
+
+class TestDStarStopAdjustment:
+    def test_unknown_ticker_returns_1(self):
+        from hanoon_prime.brain.risk import d_star_stop_adjustment
+
+        assert d_star_stop_adjustment(None) == 1.0
+
+    def test_low_d_star_tightens_stop(self):
+        from hanoon_prime.brain.risk import d_star_stop_adjustment
+
+        d = d_star_stop_adjustment("AAPL")  # d*=0.05
+        assert d < 1.0  # tighter stop
+
+    def test_high_d_star_widens_stop(self):
+        from hanoon_prime.brain.risk import d_star_stop_adjustment
+
+        d = d_star_stop_adjustment("UNKNOWN")  # DEFAULT d=0.40
+        assert d > 1.0  # wider stop

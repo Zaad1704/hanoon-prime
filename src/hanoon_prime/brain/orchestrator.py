@@ -601,6 +601,9 @@ class NeuromorphicBrain:
             price,
             float(policy.get("risk_scalar", 1.0)),
             float(policy.get("exposure", 0.0)),
+            ticker=ticker,
+            holdings=policy.get("holdings"),
+            correlations=policy.get("correlations"),
         )
         if shares <= 0:
             return Verdict(
@@ -632,6 +635,7 @@ class NeuromorphicBrain:
             float(snap.get("atr", 1.0)),
             open_count,
             horizon=horizon,
+            ticker=_ticker,
         )
 
     @staticmethod
@@ -860,7 +864,7 @@ class NeuromorphicBrain:
         self._tag_ctx(ctx, horizon, hz_reason, canon, strat_id, strat_reason)
         self._publish_meta(ctx)
         self._deliberation_coherence(ctx, _r, hm, eb, ticker)
-        sizing = self._maybe_size(ctx, entry_price, atr, open_positions)
+        sizing = self._maybe_size(ctx, entry_price, atr, open_positions, ticker=ticker)
         self._scale_admitted_size(ctx, sizing, canon, horizon, bars)
         self._store_decision(ticker, alpha, ctx["stabilized"], ctx["confidence"])
         self._remember_decision(ticker, canon, horizon, self._vol_pct(bars))
@@ -1334,6 +1338,7 @@ class NeuromorphicBrain:
         entry_price: float,
         atr: float,
         open_positions: int,
+        ticker: str | None = None,
     ) -> SizingResult:
         """Size position if score clears the dynamic threshold.
 
@@ -1353,6 +1358,7 @@ class NeuromorphicBrain:
             atr,
             open_positions,
             horizon=horizon,
+            ticker=ticker,
         )
 
     def _build_tick_result(
