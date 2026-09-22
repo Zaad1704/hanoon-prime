@@ -57,6 +57,10 @@ def expand_features(
     they never vary in training and contribute zero predictive signal. tf5_align
     defaults to 0.0 (neutral trend) and tf15_vol to 1.0 (neutral expansion) so
     cold ranges degrade gracefully before live wiring.
+
+    Diagnostic note: 8-dim (tf5 only) and 9-dim training both collapsed
+    (constant_output, 35.7% OOS). tf5_align is redundant with atr_ratio.
+    The live gate uses 7-dim until a retrained model earns its place.
     """
     return [
         float(conf),
