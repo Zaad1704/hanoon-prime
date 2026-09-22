@@ -54,12 +54,12 @@ class TestExpandFeatures:
         assert feats[6] == pytest.approx(0.7)
 
     def test_mtf_features(self):
-        """MTF features propagate: tf5_align and tf15_vol."""
-        feats = expand_features(0.5, 0.5, 0.5, tf5_align=0.42, tf15_vol=1.7)
+        """Entropy features propagate: price_entropy and vol_entropy."""
+        feats = expand_features(0.5, 0.5, 0.5, price_entropy=0.42, vol_entropy=0.7)
         assert feats[7] == pytest.approx(0.42)
-        assert feats[8] == pytest.approx(1.7)
+        assert feats[8] == pytest.approx(0.7)
         neutral = expand_features(0.5, 0.5, 0.5)
-        assert neutral[7] == pytest.approx(0.0)
+        assert neutral[7] == pytest.approx(1.0)
         assert neutral[8] == pytest.approx(1.0)
 
 

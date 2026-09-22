@@ -1,20 +1,22 @@
 """brain.mtf — Multi-Timeframe DNN feature math (single source of truth).
 
 Offline trainer (``scripts/train_meta_dnn.py``) and the live snapshot
-generator (``ib_cycle.py``) MUST compute OBI / VPIN / tf5 / tf15 features
+generator (``ib_cycle.py``) MUST compute OBI / VPIN / entropy features
 through THESE functions — any divergence silently corrupts P(Win) at
 inference.  Low-level resampling and per-bar signals live in
-``brain.mtf_resample``; this module adds the composite trend/volatility
-features and re-exports the full public API.
+``brain.mtf_resample``; this module adds the composite features and
+re-exports the full public API.
 
 Cold / insufficient-history degradation (identical offline + live):
-  * obi / vpin -> 0.0 (neutral)   * tf5_align -> 0.0 (neutral)
-  * tf15_vol   -> 1.0 (neutral)
-Warm-up (1-min bars): tf5 = (EMA21 + 2 buckets) x 5 = 115;
-tf15 = (ATR14 + SMA20 = 34 buckets) x 15 = 510.
+  * obi / vpin          -> 0.0 (neutral)
+  * price_entropy       -> 1.0 (max entropy = random)
+  * volume_entropy      -> 1.0 (max entropy = random)
+Warm-up (1-min bars): 50 bars minimum for entropy window.
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 
@@ -33,59 +35,80 @@ from .mtf_resample import (
 
 MTF5_BUCKET: int = 5
 MTF15_BUCKET: int = 15
-TF5_EMA_FAST: int = 9
-TF5_EMA_SLOW: int = 21
-TF5_ATR_PERIOD: int = 14
-TF15_ATR_PERIOD: int = 14
-TF15_SMA_PERIOD: int = 20
-MTF_MIN_BARS: int = (TF15_ATR_PERIOD + TF15_SMA_PERIOD) * MTF15_BUCKET + 30
+ENTROPY_WINDOW: int = 50
+ENTROPY_MIN_BARS: int = 60
 
 
-# ── Trend alignment (5-min) ────────────────────────────────────────────────
+# ── Shannon Entropy features ───────────────────────────────────────────────
 
 
-def compute_tf5_trend_alignment(
+def compute_price_entropy(
     close: list[float] | np.ndarray,
-    high: list[float] | np.ndarray,
-    low: list[float] | np.ndarray,
+    window: int = ENTROPY_WINDOW,
     end: int | None = None,
 ) -> float:
-    """5-min EMA-fan alignment in [-1, 1]: (EMA21 - EMA9) / ATR14.
+    """Shannon entropy of price direction over trailing window.
 
-    0.0 (neutral) when fewer than (TF5_EMA_SLOW + 2) buckets are available.
+    Classifies each bar as +1 (up), -1 (down), or 0 (flat), then computes
+    H = -sum(p * log2(p)) over the window.  Returns 1.0 (max entropy)
+    when fewer than 10 bars are available (neutral degradation).
     """
-    bc, bh, bl, _ = bucket_bars(close, high, low, close, bucket=MTF5_BUCKET, end=end)
-    if len(bc) < TF5_EMA_SLOW + 2:
-        return 0.0
-    fast = _ema(bc, TF5_EMA_FAST)
-    slow = _ema(bc, TF5_EMA_SLOW)
-    atr = _bucket_atr(bc, bh, bl, TF5_ATR_PERIOD)
-    if atr <= 0.0:
-        atr = 1e-12
-    return float(np.clip((fast[-1] - slow[-1]) / atr, -1.0, 1.0))
-
-
-# ── Volatility expansion (15-min) ──────────────────────────────────────────
-
-
-def compute_tf15_vol_expansion(
-    close: list[float] | np.ndarray,
-    high: list[float] | np.ndarray,
-    low: list[float] | np.ndarray,
-    end: int | None = None,
-) -> float:
-    """15-min volatility expansion: ATR15 / SMA20(ATR15), clipped [0.5, 3.0].
-
-    1.0 (neutral) when fewer than (ATR_period + SMA_period) buckets exist.
-    """
-    bc, bh, bl, _ = bucket_bars(close, high, low, close, bucket=MTF15_BUCKET, end=end)
-    if len(bc) < TF15_ATR_PERIOD + TF15_SMA_PERIOD:
+    arr = np.asarray(close, dtype=float).ravel()
+    n = end if end is not None else len(arr)
+    if n < 10:
         return 1.0
-    atrs = _bucket_atr_series(bc, bh, bl, TF15_ATR_PERIOD)
-    last = atrs[-1]
-    base = float(np.mean(atrs[-TF15_SMA_PERIOD:])) + 1e-12
-    ratio = last / base
-    return float(np.clip(ratio, 0.5, 3.0))
+    start = max(0, n - window)
+    diffs = np.diff(arr[start:n])
+    if len(diffs) == 0:
+        return 1.0
+    up = float(np.sum(diffs > 0))
+    down = float(np.sum(diffs < 0))
+    flat = float(np.sum(diffs == 0))
+    total = up + down + flat
+    if total <= 0:
+        return 1.0
+    probs = []
+    for count in (up, down, flat):
+        if count > 0:
+            p = count / total
+            probs.append(p * math.log2(p))
+    h = -sum(probs)
+    max_h = math.log2(3)
+    return float(h / max_h) if max_h > 0 else 1.0
+
+
+def compute_volume_entropy(
+    volume: list[float] | np.ndarray,
+    window: int = ENTROPY_WINDOW,
+    end: int | None = None,
+) -> float:
+    """Shannon entropy of volume change direction over trailing window.
+
+    Classifies each bar's volume change as +1 (above median), -1 (below),
+    then computes normalized entropy.  Returns 1.0 when insufficient data.
+    """
+    arr = np.asarray(volume, dtype=float).ravel()
+    n = end if end is not None else len(arr)
+    if n < 10:
+        return 1.0
+    start = max(0, n - window)
+    vols = arr[start:n]
+    if len(vols) < 3:
+        return 1.0
+    median = float(np.median(vols))
+    above = float(np.sum(vols > median))
+    below = float(np.sum(vols <= median))
+    total = above + below
+    if total <= 0:
+        return 1.0
+    probs = []
+    for count in (above, below):
+        if count > 0:
+            p = count / total
+            probs.append(p * math.log2(p))
+    h = -sum(probs)
+    max_h = math.log2(2)
+    return float(h / max_h) if max_h > 0 else 1.0
 
 
 # ── Public API (re-exports everything) ─────────────────────────────────────
@@ -93,14 +116,10 @@ def compute_tf15_vol_expansion(
 __all__ = [
     "MTF5_BUCKET",
     "MTF15_BUCKET",
-    "TF5_EMA_FAST",
-    "TF5_EMA_SLOW",
-    "TF5_ATR_PERIOD",
-    "TF15_ATR_PERIOD",
-    "TF15_SMA_PERIOD",
-    "MTF_MIN_BARS",
+    "ENTROPY_WINDOW",
+    "ENTROPY_MIN_BARS",
     "compute_obi",
     "compute_vpin",
-    "compute_tf5_trend_alignment",
-    "compute_tf15_vol_expansion",
+    "compute_price_entropy",
+    "compute_volume_entropy",
 ]

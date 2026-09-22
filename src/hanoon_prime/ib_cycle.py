@@ -22,9 +22,9 @@ from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
 from .brain.mtf import (
     compute_obi,
-    compute_tf15_vol_expansion,
-    compute_tf5_trend_alignment,
+    compute_price_entropy,
     compute_vpin,
+    compute_volume_entropy,
 )
 from .brain.policy.verdict import ENTER, Verdict
 from .config import TRADING_CONFIG
@@ -448,12 +448,8 @@ class BotCycleMixin:
         base["prices"], base["volumes"] = list(a["close"]), list(a["volume"])
         base["obi"] = compute_obi(a["high"], a["low"], a["close"])
         base["vpin"] = compute_vpin(a["volume"], a["close"])
-        base["tf5_align"] = compute_tf5_trend_alignment(
-            a["close"], a["high"], a["low"]
-        )
-        base["tf15_vol"] = compute_tf15_vol_expansion(
-            a["close"], a["high"], a["low"]
-        )
+        base["price_entropy"] = compute_price_entropy(a["close"])
+        base["vol_entropy"] = compute_volume_entropy(a["volume"])
         return base
 
     def _cycle(self, poll: float, pnl: Any) -> None:

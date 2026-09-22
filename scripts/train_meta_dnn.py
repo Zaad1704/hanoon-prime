@@ -30,8 +30,8 @@ from hanoon_prime.brain.learning_config import META_DNN_FILE
 from hanoon_prime.brain.meta_label_dnn import INPUT_DIM, MetaDNN, expand_features
 from hanoon_prime.brain.mtf import (
     compute_obi,
-    compute_tf5_trend_alignment,
-    compute_tf15_vol_expansion,
+    compute_price_entropy,
+    compute_volume_entropy,
     compute_vpin,
 )
 
@@ -195,8 +195,8 @@ def harvest_entries(
             atr_ratio = atr / entry_price if entry_price > 0 else 0.0
             obi = _compute_obi(high, low, close, i)
             vpin = _compute_vpin(volume, close, i)
-            tf5_align = compute_tf5_trend_alignment(close, high, low, end=i)
-            tf15_vol = compute_tf15_vol_expansion(close, high, low, end=i)
+            price_entropy = compute_price_entropy(close, end=i + 1)
+            vol_entropy = compute_volume_entropy(volume, end=i + 1)
             feat = expand_features(
                 confidence,
                 score,
@@ -205,8 +205,8 @@ def harvest_entries(
                 atr_ratio,
                 obi,
                 vpin,
-                tf5_align,
-                tf15_vol,
+                price_entropy,
+                vol_entropy,
             )
             if len(feat) != INPUT_DIM:
                 raise RuntimeError(f"feature dim {len(feat)} != INPUT_DIM {INPUT_DIM}")

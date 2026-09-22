@@ -36,7 +36,7 @@ __all__ = ["MetaDNN"]
 log = logging.getLogger(__name__)
 
 INPUT_DIM: int = (
-    9  # conf, |score|, vol_pct, dir, atr_ratio, obi, vpin, tf5_align, tf15_vol
+    9  # conf, |score|, vol_pct, dir, atr_ratio, obi, vpin, price_entropy, vol_entropy
 )
 
 
@@ -48,19 +48,14 @@ def expand_features(
     atr_ratio: float = 0.0,
     obi: float = 0.0,
     vpin: float = 0.0,
-    tf5_align: float = 0.0,
-    tf15_vol: float = 1.0,
+    price_entropy: float = 1.0,
+    vol_entropy: float = 1.0,
 ) -> list[float]:
     """9-dim feature vector for the DNN gatekeeper.
 
-    One-hot regime/horizon slots were pruned after permutation ablation showed
-    they never vary in training and contribute zero predictive signal. tf5_align
-    defaults to 0.0 (neutral trend) and tf15_vol to 1.0 (neutral expansion) so
+    Shannon entropy replaces tf5/tf15 (which proved redundant with atr_ratio
+    and collapsed in training).  Entropy defaults to 1.0 (max/random) so
     cold ranges degrade gracefully before live wiring.
-
-    Diagnostic note: 8-dim (tf5 only) and 9-dim training both collapsed
-    (constant_output, 35.7% OOS). tf5_align is redundant with atr_ratio.
-    The live gate uses 7-dim until a retrained model earns its place.
     """
     return [
         float(conf),
@@ -70,8 +65,8 @@ def expand_features(
         float(atr_ratio),
         float(obi),
         float(vpin),
-        float(tf5_align),
-        float(tf15_vol),
+        float(price_entropy),
+        float(vol_entropy),
     ]
 
 
