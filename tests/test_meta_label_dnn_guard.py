@@ -142,7 +142,7 @@ class TestGuardEnforcement:
         admit, pwin, scale = model.infer([0.5] * 9)
         assert admit is True
         assert pwin == META_WIN_THRESHOLD
-        assert scale == 1.0
+        assert scale == 0.0  # de Prado: collapsed -> minimal allocation
 
     def test_load_accepts_healthy_artifact(self, tmp_path: Path):
         """Healthy artifact on disk → loaded and active, not bypassed."""
@@ -190,15 +190,15 @@ class TestGuardEnforcement:
         admit, pwin, scale = model.infer([0.9] * 9)
         assert admit is True
         assert pwin == META_WIN_THRESHOLD
-        assert scale == 1.0
+        assert scale == 0.0  # de Prado: defective -> minimal allocation
 
     def test_cold_model_bypasses(self, tmp_path: Path):
-        """No artifact → infer admitts instead of random-vetoing."""
+        """No artifact -> infer admits instead of random-vetoing."""
         model = MetaDNN(path=tmp_path / "absent.json")
         admit, pwin, scale = model.infer([0.9] * 9)
         assert admit is True
         assert pwin == META_WIN_THRESHOLD
-        assert scale == 1.0
+        assert scale == 0.0  # de Prado: cold model -> minimal allocation
 
     def test_train_refuses_to_save_collapsed(self, tmp_path: Path):
         """Training that stays collapsed must NOT write the artifact."""

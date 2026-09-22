@@ -6,9 +6,12 @@ Guarantees under test:
   - the transform is causal (no future leakage)
   - a random walk is non-stationary, but its FracDiff (d < 1) is stationary
   - find_min_d returns the smallest stationary order and keeps memory
+  - per-ticker d* config loads/saves/falls back correctly
 """
 
 from __future__ import annotations
+
+import json
 
 import numpy as np
 import pytest
@@ -18,8 +21,11 @@ from hanoon_prime.fracdiff import (
     find_min_d,
     fracdiff,
     fracdiff_weights,
+    get_ticker_d,
     is_stationary,
+    load_d_config,
     memory_retention,
+    save_d_config,
 )
 
 
@@ -115,3 +121,39 @@ class TestFindMinD:
         step = 0.1
         d, _ = find_min_d(random_walk, step=step)
         assert abs(d / step - round(d / step)) < 1e-6
+
+
+class TestDConfig:
+    def test_load_missing_file_returns_default(self, tmp_path):
+        cfg = load_d_config(tmp_path / "absent.json")
+        assert cfg == {"DEFAULT": 0.4}
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        p = tmp_path / "d_config.json"
+        cfg = {"DEFAULT": 0.40, "AAPL": 0.35, "NVDA": 0.50}
+        save_d_config(cfg, p)
+        loaded = load_d_config(p)
+        assert loaded["DEFAULT"] == pytest.approx(0.40)
+        assert loaded["AAPL"] == pytest.approx(0.35)
+        assert loaded["NVDA"] == pytest.approx(0.50)
+
+    def test_get_ticker_d_returns_ticker_value(self, tmp_path):
+        p = tmp_path / "d_config.json"
+        save_d_config({"DEFAULT": 0.40, "AAPL": 0.30}, p)
+        assert get_ticker_d("AAPL", load_d_config(p)) == pytest.approx(0.30)
+
+    def test_get_ticker_d_falls_back_to_default(self, tmp_path):
+        p = tmp_path / "d_config.json"
+        save_d_config({"DEFAULT": 0.45}, p)
+        assert get_ticker_d("MSFT", load_d_config(p)) == pytest.approx(0.45)
+
+    def test_get_ticker_d_none_returns_default(self, tmp_path):
+        p = tmp_path / "d_config.json"
+        save_d_config({"DEFAULT": 0.40}, p)
+        assert get_ticker_d(None, load_d_config(p)) == pytest.approx(0.40)
+
+    def test_load_corrupted_file_returns_default(self, tmp_path):
+        p = tmp_path / "bad.json"
+        p.write_text("{invalid json")
+        cfg = load_d_config(p)
+        assert cfg == {"DEFAULT": 0.4}

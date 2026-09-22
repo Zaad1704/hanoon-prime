@@ -1031,28 +1031,25 @@ class NeuromorphicBrain:
         horizon: str,
         bars: dict[str, Any] | None,
     ) -> None:
-        """Scale an ADMITTED entry's size by advisor + meta-label factors.
-
-        Advisory by construction — it tunes sizing only, never produces or
-        flips a verdict (R1).
-        """
+        """Scale an ADMITTED entry's size by advisory factors (R1: sizing only)."""
         if not sizing.risk_pass:
             return
         if self._advisor.is_tightening():
             sizing.shares = _scale_shares(sizing.shares, GATE_CLOSED_SIZE_SCALAR)
-        # Affective (fear/greed) + metacog scalars all stay within
-        # [RISK_FLOOR, RISK_CEIL]; advisory, never a verdict (R1).
         sizing.shares = _scale_shares(
             sizing.shares, self._bounded_thinker_risk_scalar()
         )
-        vol_pct = self._vol_pct(bars)
         if META_DNN_ENABLED:
             from .meta_label_dnn import calculate_meta_size_scale
 
             meta_scale = calculate_meta_size_scale(self._meta.dnn_p_win)
         else:
             meta_scale = self._meta.size_scalar(
-                ctx["confidence"], ctx["stabilized"], vol_pct, canon, horizon
+                ctx["confidence"],
+                ctx["stabilized"],
+                self._vol_pct(bars),
+                canon,
+                horizon,
             )
         sizing.shares = _scale_shares(sizing.shares, meta_scale)
         strat_id = str(ctx.get("strategy", DEFAULT_STRATEGY))

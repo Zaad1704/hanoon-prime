@@ -205,7 +205,7 @@ class TestMetaLabelGate:
         assert isinstance(admit, bool)
         assert isinstance(p, float)
         assert 0.0 <= p <= 1.0
-        assert 0.5 <= scale <= 1.0
+        assert 0.0 <= scale <= 1.0  # de Prado: scale in [0, 1]
 
     def test_gate_fallback_when_dnn_disabled(self, tmp_path: Path):
         """When META_DNN_ENABLED is False, gate() falls back to shallow logistic."""

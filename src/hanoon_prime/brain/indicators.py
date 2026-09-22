@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 
 from ..cerebellum import compute_alpha as compute_core_alpha
-from ..fracdiff import fracdiff
-from ..immune import FRACDIFF_D, FRACDIFF_ENABLED
+from ..fracdiff import find_min_d, fracdiff, get_ticker_d, load_d_config, save_d_config
+from ..immune import FRACDIFF_ENABLED
 from ..types import BarSeries
 from .indicators_core import compute_osc_signals
 from .indicators_core_tech import compute_flow_signals
@@ -66,7 +66,8 @@ def compute_all_alpha(bars: BarSeries) -> dict[str, float]:
             import numpy as np
 
             close_arr = np.asarray(bars.close, dtype=float).ravel()
-            fd = fracdiff(close_arr, FRACDIFF_D)
+            d_val = get_ticker_d(getattr(bars, "ticker", None))
+            fd = fracdiff(close_arr, d_val)
             if fd is not None and len(fd) > 0:
                 bars.fracdiff_close = fd
         except Exception as exc:

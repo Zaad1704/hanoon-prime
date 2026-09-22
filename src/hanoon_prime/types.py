@@ -67,6 +67,7 @@ class BarSeries:
     bid_sizes: Any = None
     ask_sizes: Any = None
     fracdiff_close: Any = None
+    ticker: str | None = None
 
 
 @dataclass

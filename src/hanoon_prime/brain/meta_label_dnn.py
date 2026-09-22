@@ -140,6 +140,9 @@ class MetaDNN:
         self._veto_window: list[int] = []
         self._scaler_mean: np.ndarray | None = None
         self._scaler_std: np.ndarray | None = None
+        self._p_win_history: list[float] = []
+        self._feature_zero_counts: dict[str, int] = {"obi": 0, "vpin": 0}
+        self._last_size_scale: float = 0.0
         self._load()
 
     def _build(self) -> None:
@@ -189,21 +192,47 @@ class MetaDNN:
         import time
 
         if self._defective or not self._built:
+            scale = calculate_meta_size_scale(META_WIN_THRESHOLD)
             self._eval_count += 1
             self._last_p_win = META_WIN_THRESHOLD
             self._last_eval_ts = time.time()
+            self._last_size_scale = scale
+            self._p_win_history.append(META_WIN_THRESHOLD)
+            if len(self._p_win_history) > 50:
+                self._p_win_history = self._p_win_history[-50:]
+            obi_val = float(features[5]) if len(features) > 5 else 0.0
+            vpin_val = float(features[6]) if len(features) > 6 else 0.0
+            self._feature_zero_counts["obi"] = (
+                self._feature_zero_counts["obi"] + 1 if abs(obi_val) < 1e-12 else 0
+            )
+            self._feature_zero_counts["vpin"] = (
+                self._feature_zero_counts["vpin"] + 1 if abs(vpin_val) < 1e-12 else 0
+            )
             self._veto_window.append(0)
             if len(self._veto_window) > 100:
                 self._veto_window = self._veto_window[-100:]
-            return True, META_WIN_THRESHOLD, 1.0
+            return True, META_WIN_THRESHOLD, scale
 
         p = self.predict(features)
         admit = p >= META_WIN_THRESHOLD
+        scale = calculate_meta_size_scale(p)
         self._eval_count += 1
         if not admit:
             self._veto_count += 1
         self._last_p_win = p
         self._last_eval_ts = time.time()
+        self._last_size_scale = scale
+        self._p_win_history.append(p)
+        if len(self._p_win_history) > 50:
+            self._p_win_history = self._p_win_history[-50:]
+        obi_val = float(features[5]) if len(features) > 5 else 0.0
+        vpin_val = float(features[6]) if len(features) > 6 else 0.0
+        self._feature_zero_counts["obi"] = (
+            self._feature_zero_counts["obi"] + 1 if abs(obi_val) < 1e-12 else 0
+        )
+        self._feature_zero_counts["vpin"] = (
+            self._feature_zero_counts["vpin"] + 1 if abs(vpin_val) < 1e-12 else 0
+        )
         self._veto_window.append(0 if admit else 1)
         if len(self._veto_window) > 100:
             self._veto_window = self._veto_window[-100:]
@@ -224,6 +253,20 @@ class MetaDNN:
         verdict["active"] = True
         verdict["bypassed"] = False
         return verdict
+
+    def _drift_zscore(self) -> float:
+        """Z-score of live P(Win) mean vs OOS training baseline.
+
+        OOS baseline: mu=0.364, std=0.089 (from purged 5-fold CV).
+        |Z| > 2.5 signals distribution shift / regime drift.
+        """
+        OOS_MEAN = 0.364
+        OOS_STD = 0.089
+        n = len(self._p_win_history)
+        if n < 5 or OOS_STD < 1e-12:
+            return 0.0
+        live_mean = sum(self._p_win_history) / n
+        return round((live_mean - OOS_MEAN) / OOS_STD, 4)
 
     def live_snapshot(self) -> dict[str, Any]:
         """Telemetry view of DNN gatekeeper live state."""
@@ -262,6 +305,9 @@ class MetaDNN:
             "cv_folds": report.get("folds"),
             "train_epochs": META_DNN_EPOCHS,
             "last_train_ts": report.get("train_ts"),
+            "drift_zscore": self._drift_zscore(),
+            "feature_zero_streak": dict(self._feature_zero_counts),
+            "last_size_scale": round(self._last_size_scale, 4),
         }
 
     def train(

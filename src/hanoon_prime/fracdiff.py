@@ -1,26 +1,25 @@
 """hanoon_prime.fracdiff — fractional differentiation for stationarity.
 
-López de Prado (Advances in Financial ML, ch. 5): integer differencing (I(1))
-turns a random walk stationary but destroys every bit of memory. Fractionally
-differencing by the SMALLEST ``d`` whose result passes an Augmented
-Dickey-Fuller test keeps the series stationary while preserving the most
-long-memory inertia — exactly the trade the 5-indicator cortex wants.
-
-Weights are the binomial expansion of ``(1 - B) ** d``::
-
-    w_0 = 1,  w_k = -w_{k-1} * (d - k + 1) / k
-
-The window is FIXED (truncated once ``|w_k| < tau``), never expanding, so the
-transform is causal and carries no future information. This module is a pure
-feature transform: it never produces a verdict (R1) and the read site stays
-OFF via ``FRACDIFF_ENABLED`` until a money gate clears it.
+López de Prado (AFML ch. 5): fractionally differencing by the smallest ``d``
+whose result passes ADF keeps the series stationary while preserving memory.
+Weights: ``(1 - B) ** d`` binomial expansion, truncated at ``|w_k| < tau``.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
+
 import numpy as np
 
-from .immune import FRACDIFF_ADF_PVALUE, FRACDIFF_D_STEP, FRACDIFF_MAX_LEN, FRACDIFF_TAU
+from .immune import (
+    FRACDIFF_ADF_PVALUE,
+    FRACDIFF_D,
+    FRACDIFF_D_STEP,
+    FRACDIFF_MAX_LEN,
+    FRACDIFF_TAU,
+)
 
 # MacKinnon (1994) asymptotic critical values for the ADF t-statistic
 # (constant, no trend). Finite-sample response-surface corrections are NOT
@@ -155,3 +154,41 @@ def find_min_d(
         if is_stationary(transformed, alpha=alpha):
             return float(d), transformed
     return 1.0, fracdiff(x, 1.0, tau=tau)
+
+
+log = logging.getLogger(__name__)
+_D_CONFIG_PATH: Path = (
+    Path(__file__).resolve().parent.parent.parent / "runtime" / "fracdiff_d_config.json"
+)
+
+
+def load_d_config(path: Path | None = None) -> dict[str, float]:
+    """Load per-ticker d* config from JSON."""
+    p = path or _D_CONFIG_PATH
+    if not p.exists():
+        return {"DEFAULT": FRACDIFF_D}
+    try:
+        data = json.loads(p.read_text())
+        result: dict[str, float] = {"DEFAULT": float(data.get("DEFAULT", FRACDIFF_D))}
+        for k, v in data.items():
+            if k != "DEFAULT":
+                result[k.upper()] = float(v)
+        return result
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        log.debug("FracDiff d-config load failed: %s", exc)
+        return {"DEFAULT": FRACDIFF_D}
+
+
+def save_d_config(cfg: dict[str, float], path: Path | None = None) -> None:
+    """Persist per-ticker d* config to JSON."""
+    p = path or _D_CONFIG_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cfg, indent=2) + "\n")
+
+
+def get_ticker_d(ticker: str | None, config: dict[str, float] | None = None) -> float:
+    """Look up d* for a ticker, falling back to DEFAULT."""
+    cfg = config if config is not None else load_d_config()
+    if ticker and ticker.upper() in cfg:
+        return cfg[ticker.upper()]
+    return cfg.get("DEFAULT", FRACDIFF_D)
