@@ -20,6 +20,12 @@ from ._ib_sync import read_account_summary
 from ._telegram import error_notify, postmortem, recovered, shutdown, trade_hold
 from .account_equity import resolve_account_equity
 from .brain.horizons import holds_through_close
+from .brain.mtf import (
+    compute_obi,
+    compute_tf15_vol_expansion,
+    compute_tf5_trend_alignment,
+    compute_vpin,
+)
 from .brain.policy.verdict import ENTER, Verdict
 from .config import TRADING_CONFIG
 from .monitor.sleep_manager import SleepManager, SleepState
@@ -440,6 +446,14 @@ class BotCycleMixin:
         ):
             base[f"{k}_arr"] = a[k]
         base["prices"], base["volumes"] = list(a["close"]), list(a["volume"])
+        base["obi"] = compute_obi(a["high"], a["low"], a["close"])
+        base["vpin"] = compute_vpin(a["volume"], a["close"])
+        base["tf5_align"] = compute_tf5_trend_alignment(
+            a["close"], a["high"], a["low"]
+        )
+        base["tf15_vol"] = compute_tf15_vol_expansion(
+            a["close"], a["high"], a["low"]
+        )
         return base
 
     def _cycle(self, poll: float, pnl: Any) -> None:

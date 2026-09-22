@@ -2,10 +2,10 @@
 """Feature permutation ablation for the DNN gatekeeper.
 
 Loads the trained ``MetaDNN`` artifact and measures Mean-Decrease-style
-sensitivity on the pooled purged OOS test folds: for each of the 15 input
-features, that feature's column is randomly shuffled N times (all other
-columns and the frozen model untouched) and the resulting weighted BCE loss,
-accuracy and P(Win) spread are compared against baseline.
+sensitivity on the pooled purged OOS test folds: for each input feature, that
+feature's column is randomly shuffled N times (all other columns and the frozen
+model untouched) and the resulting weighted BCE loss, accuracy and P(Win)
+spread are compared against baseline.
 
     * delta_loss ~ 0  -> dead slot (permutation cannot change predictions)
     * large positive  -> the model genuinely leans on that feature
@@ -45,14 +45,8 @@ FEATURE_NAMES: list[str] = [
     "atr_ratio",
     "obi",
     "vpin",
-    "regime:unknown",
-    "regime:trend_up",
-    "regime:trend_down",
-    "regime:range",
-    "regime:volatile",
-    "horizon:scalp",
-    "horizon:momentum",
-    "horizon:swing",
+    "tf5_trend_align",
+    "tf15_vol_expansion",
 ]
 
 

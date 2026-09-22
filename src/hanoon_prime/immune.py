@@ -230,7 +230,11 @@ EDGE_PERMUTATIONS: int = 500
 EDGE_MIN_SAMPLES: int = 200
 
 # ── IB Gateway streaming (R6: hard-coded, no env bypass) ──────────────
-LOOKBACK_BARS: int = EDGE_LOOKBACK + 20  # hist buffer to seed z-score window
+# Retention must cover the DNN multi-timeframe horizon: tf15 vol expansion
+# needs (ATR14 + SMA20) x 15-min buckets = 34 x 15 = 510 1-min bars, plus
+# margin for a forming bucket. ~1.2 MB across ~40 tickers — negligible.
+MTF_MIN_BARS: int = 510  # min 1-min bars for the slowest DNN feature
+LOOKBACK_BARS: int = MTF_MIN_BARS + 30  # hist buffer = z-score window + MTF
 DEPTH_ROWS: int = 5  # order book DOM levels per side (5 max)
 IB_HOST: str = "127.0.0.1"  # IB Gateway / TWS default local host
 IB_PAPER_PORT: int = 4002  # IB Gateway paper port (TWS paper: 7497)

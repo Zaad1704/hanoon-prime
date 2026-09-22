@@ -125,11 +125,21 @@ class MetaLabelModel:
         atr_ratio: float = 0.0,
         obi: float = 0.0,
         vpin: float = 0.0,
+        tf5_align: float = 0.0,
+        tf15_vol: float = 1.0,
     ) -> tuple[bool, float, float]:
         """DNN gatekeeper: (admit, p_win, size_scale). Fallback: always admits."""
         if META_DNN_ENABLED:
             result = self._dnn_gate(
-                conf, score, vol_pct, direction, atr_ratio, obi, vpin
+                conf,
+                score,
+                vol_pct,
+                direction,
+                atr_ratio,
+                obi,
+                vpin,
+                tf5_align,
+                tf15_vol,
             )
             if result is not None:
                 return result
@@ -144,12 +154,22 @@ class MetaLabelModel:
         atr_ratio: float,
         obi: float,
         vpin: float,
+        tf5_align: float = 0.0,
+        tf15_vol: float = 1.0,
     ) -> tuple[bool, float, float] | None:
         try:
             from .meta_label_dnn import expand_features
 
             feats = expand_features(
-                conf, score, vol_pct, direction, atr_ratio, obi, vpin
+                conf,
+                score,
+                vol_pct,
+                direction,
+                atr_ratio,
+                obi,
+                vpin,
+                tf5_align,
+                tf15_vol,
             )
             admit: bool
             p: float

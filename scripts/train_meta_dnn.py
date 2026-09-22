@@ -27,7 +27,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import numpy as np
 
 from hanoon_prime.brain.learning_config import META_DNN_FILE
-from hanoon_prime.brain.meta_label_dnn import INPUT_DIM, MetaDNN
+from hanoon_prime.brain.meta_label_dnn import INPUT_DIM, MetaDNN, expand_features
+from hanoon_prime.brain.mtf import (
+    compute_obi,
+    compute_tf5_trend_alignment,
+    compute_tf15_vol_expansion,
+    compute_vpin,
+)
 
 WINDOW = 40
 ATR_PERIOD = 14
@@ -91,27 +97,14 @@ def _compute_atr(
     return float(np.mean(tr))
 
 
-def _compute_obi(high: list, low: list, close: list, i: int, period: int = 20) -> float:
-    """Order-book imbalance proxy from bar geometry."""
-    if i < period:
-        return 0.0
-    h = np.asarray(high[i - period + 1 : i + 1], dtype=float)
-    l = np.asarray(low[i - period + 1 : i + 1], dtype=float)
-    c = np.asarray(close[i - period + 1 : i + 1], dtype=float)
-    upper = c - l
-    lower = h - c
-    total = upper + lower + 1e-12
-    return float(np.clip(np.mean((upper - lower) / total), -1.0, 1.0))
+def _compute_obi(high: list, low: list, close: list, i: int) -> float:
+    """Route to the shared feature source of truth (brain.mtf)."""
+    return compute_obi(high, low, close, end=i)
 
 
-def _compute_vpin(volume: list, close: list, i: int, period: int = 20) -> float:
-    """VPIN proxy from volume and price direction."""
-    if i < period:
-        return 0.0
-    v = np.asarray(volume[i - period + 1 : i + 1], dtype=float)
-    c = np.asarray(close[i - period + 1 : i + 1], dtype=float)
-    signed = np.where(np.diff(c, prepend=c[0]) >= 0, v, -v)
-    return float(np.clip(np.mean(signed / (np.mean(v) + 1e-12)), -1.0, 1.0))
+def _compute_vpin(volume: list, close: list, i: int) -> float:
+    """Route to the shared feature source of truth (brain.mtf)."""
+    return compute_vpin(volume, close, end=i)
 
 
 def _triple_barrier_outcome(
@@ -202,15 +195,19 @@ def harvest_entries(
             atr_ratio = atr / entry_price if entry_price > 0 else 0.0
             obi = _compute_obi(high, low, close, i)
             vpin = _compute_vpin(volume, close, i)
-            feat = [
+            tf5_align = compute_tf5_trend_alignment(close, high, low, end=i)
+            tf15_vol = compute_tf15_vol_expansion(close, high, low, end=i)
+            feat = expand_features(
                 confidence,
-                min(1.0, abs(score)),
+                score,
                 vol_pct,
-                float(direction),
+                int(direction),
                 atr_ratio,
                 obi,
                 vpin,
-            ]
+                tf5_align,
+                tf15_vol,
+            )
             if len(feat) != INPUT_DIM:
                 raise RuntimeError(f"feature dim {len(feat)} != INPUT_DIM {INPUT_DIM}")
             weight = max(0.1, min(1.0, 1.0 + r / TARGET_ATR_MULT))

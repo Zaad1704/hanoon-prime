@@ -1,13 +1,15 @@
 """brain.meta_label_dnn — Deep Meta-Labeler Gatekeeper (numpy MLP).
 
 Offline-trained MLP replacing the shallow online logistic when
-``META_DNN_ENABLED`` is True.  7-dim input → 32 (ReLU) → 16 (ReLU) →
-1 (sigmoid). ~800 params. R1: emits P(Win) only, never a verdict.
+``META_DNN_ENABLED`` is True.  9-dim input → 32 (ReLU) → 16 (ReLU) →
+1 (sigmoid). ~1k params. R1: emits P(Win) only, never a verdict.
 
 Feature permutation ablation showed the 8 regime/horizon one-hot slots were
 constant in training (zero permutation importance) and dead-weighted ~24% of
 the parameter space, so they were pruned to the 7 lived continuous signals:
-[confidence, |score|, vol_pct, direction, atr_ratio, obi, vpin].
+[confidence, |score|, vol_pct, direction, atr_ratio, obi, vpin]. Multi-timeframe
+features (tf5 trend alignment, tf15 vol expansion) are appended under the same
+permission gate — they wire live ONLY after permutation ablation earns them.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ __all__ = ["MetaDNN"]
 log = logging.getLogger(__name__)
 
 INPUT_DIM: int = (
-    7  # pruned base features: conf, |score|, vol_pct, dir, atr_ratio, obi, vpin
+    9  # conf, |score|, vol_pct, dir, atr_ratio, obi, vpin, tf5_align, tf15_vol
 )
 
 
@@ -46,11 +48,15 @@ def expand_features(
     atr_ratio: float = 0.0,
     obi: float = 0.0,
     vpin: float = 0.0,
+    tf5_align: float = 0.0,
+    tf15_vol: float = 1.0,
 ) -> list[float]:
-    """7-dim feature vector for the DNN gatekeeper.
+    """9-dim feature vector for the DNN gatekeeper.
 
     One-hot regime/horizon slots were pruned after permutation ablation showed
-    they never vary in training and contribute zero predictive signal.
+    they never vary in training and contribute zero predictive signal. tf5_align
+    defaults to 0.0 (neutral trend) and tf15_vol to 1.0 (neutral expansion) so
+    cold ranges degrade gracefully before live wiring.
     """
     return [
         float(conf),
@@ -60,6 +66,8 @@ def expand_features(
         float(atr_ratio),
         float(obi),
         float(vpin),
+        float(tf5_align),
+        float(tf15_vol),
     ]
 
 
