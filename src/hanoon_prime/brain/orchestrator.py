@@ -382,6 +382,10 @@ class NeuromorphicBrain:
             return Verdict(
                 ticker=ticker, action=HOLD, reason="no_signal", stage="pipeline"
             )
+        if direction > 0 and score < 0:
+            return Verdict(
+                ticker=ticker, action=HOLD, reason="no_signal", stage="pipeline"
+            )
         return SimpleNamespace(direction=direction, score=score, confidence=confidence)
 
     def _veto(
