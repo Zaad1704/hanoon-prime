@@ -147,17 +147,18 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "mean_reversion": 0.02,
     "trend_strength": 0.02,
     "sr_proximity": 0.02,
-    "elliott_wave": 0.02,
+    "elliott_wave": 0.01,
     "institutional_wave": 0.02,
-    "keltner_position": 0.02,
-    "vw_macd_hist": 0.02,
+    "keltner_position": 0.01,
+    "vw_macd_hist": 0.01,
     "microstructure": 0.02,
-    "fib_proximity": 0.02,
+    "fib_proximity": 0.01,
     "kelly_fraction": 0.01,
     # Live-only tape key (absent in bar-only alpha → skipped by present-set
-    # scoring; keeps DEFAULT_WEIGHTS sum in the weight-enforcer repair bound
-    # [0.90, 1.10] and the regression_guard [0.80, 1.20]).
-    "absorption": 0.06,
+    # scoring). Tied-top with institutional_flow; five weak technicals were
+    # trimmed so the sum stays at 1.10 (enforcer repair [0.90, 1.10],
+    # regression_guard [0.80, 1.20]).
+    "absorption": 0.10,
 }
 
 # ── Guardians ────────────────────────────────────────────────────────

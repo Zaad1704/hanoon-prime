@@ -55,7 +55,7 @@ _PRIORS: list[tuple[str, str, str, str, str, str, str, float, float, float]] = [
         "Liquid ticker, live tape only — no OHLCV backtest equivalent.",
         "unknown",
         0.9,
-        0.02,
+        0.03,  # at STRATEGY_SCORE_MOD_BOUND — applied only when bandit picks it
         0.55,
     ),
 ]

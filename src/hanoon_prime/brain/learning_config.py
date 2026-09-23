@@ -159,6 +159,11 @@ ABSORPTION_VOL_RATIO: float = 2.0  # dominant/suppressed print-volume ratio
 ABSORPTION_BID_HOLD_POLLS: int = 3  # consecutive quote polls the level holds
 ABSORPTION_SIGNAL_MIN: float = 0.15  # min |absorption| to count as active
 ABSORPTION_SCALP_MIN: float = 0.25  # |absorption| that forces scalp horizon
+# Bounded score boost at the scalp floor: signed by absorption so +abs pushes
+# long and −abs pushes short. |mod| ≤ ABSORPTION_SCORE_MOD (|abs| ≤ 1).
+# Same magnitude as CONSENSUS_BOOST_MAX / CROSS_ASSET_MOD_BOUND — stronger
+# than HALIM, weaker than episodic; never a gate, never a verdict (R1).
+ABSORPTION_SCORE_MOD: float = 0.04
 ABSORPTION_BREAK_FACTOR: float = 0.5  # exit when |now| < factor × |entry|
 ABSORPTION_TARGET_TICKS: float = 8.0  # mid of the 5–10 tick scalp target
 ABSORPTION_TICK_SIZE: float = 0.01  # US equity tick (fixed-tick override)

@@ -1256,6 +1256,20 @@ class NeuromorphicBrain:
             + strat_mod
         )
 
+    @staticmethod
+    def _absorption_score_mod(alpha: dict[str, float], mods: float) -> float:
+        """Add a bounded absorption score boost when the scalp floor clears.
+
+        Signed by absorption (+ pushes long, − pushes short). Gates and
+        cortex verdicts (R1) are untouched — this only shapes the raw score.
+        """
+        from ..absorption import is_absorption_active
+        from .learning_config import ABSORPTION_SCALP_MIN, ABSORPTION_SCORE_MOD
+
+        if not is_absorption_active(alpha, ABSORPTION_SCALP_MIN):
+            return mods
+        return mods + float(alpha.get("absorption", 0.0)) * ABSORPTION_SCORE_MOD
+
     def _score_pipeline(
         self,
         ticker: str,
@@ -1279,6 +1293,7 @@ class NeuromorphicBrain:
         mods = self._compute_mods(
             halim, episodic, nash_op, ticker, cross, advisor_delta, thinker_mod
         )
+        mods = self._absorption_score_mod(alpha, mods)
         raw = blended * regime_mul + somatic + precision * mods
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
         return {

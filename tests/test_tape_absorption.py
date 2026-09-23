@@ -240,3 +240,38 @@ def test_seeded_priors_include_mm_absorption():
     prior = next(p for p in seeded_priors() if p["name"] == "mm-absorption")
     assert prior["source"] == "seeded"
     assert prior["score_mod"] > 0.0
+    from hanoon_prime.brain.learning_config import (  # noqa: PLC0415
+        STRATEGY_SCORE_MOD_BOUND,
+    )
+
+    assert prior["score_mod"] <= STRATEGY_SCORE_MOD_BOUND
+
+
+def test_absorption_weight_is_tied_top_and_sum_in_bounds():
+    """Absorption sits at the top tier; DEFAULT_WEIGHTS stays repair-safe."""
+    from hanoon_prime.brain.config import DEFAULT_WEIGHTS  # noqa: PLC0415
+
+    w = DEFAULT_WEIGHTS["absorption"]
+    assert w >= 0.10
+    assert w == max(DEFAULT_WEIGHTS.values())
+    total = sum(DEFAULT_WEIGHTS.values())
+    assert 0.90 <= total <= 1.10
+
+
+def test_absorption_score_mod_bounded_signed():
+    """Score boost only at the scalp floor; signed; never exceeds the bound."""
+    from hanoon_prime.brain.learning_config import (  # noqa: PLC0415
+        ABSORPTION_SCALP_MIN,
+        ABSORPTION_SCORE_MOD,
+    )
+    from hanoon_prime.brain.orchestrator import NeuromorphicBrain  # noqa: PLC0415
+
+    mod = NeuromorphicBrain._absorption_score_mod
+    assert mod({}, 0.1) == 0.1
+    assert mod({ABSORPTION_KEY: 0.10}, 0.1) == 0.1  # below scalp floor
+    assert mod({ABSORPTION_KEY: 1.0}, 0.0) == ABSORPTION_SCORE_MOD
+    assert mod({ABSORPTION_KEY: -1.0}, 0.0) == -ABSORPTION_SCORE_MOD
+    at_floor = ABSORPTION_SCALP_MIN
+    boosted = mod({ABSORPTION_KEY: at_floor}, 0.0)
+    assert abs(boosted) <= ABSORPTION_SCORE_MOD + 1e-12
+    assert abs(boosted) > 0.0
