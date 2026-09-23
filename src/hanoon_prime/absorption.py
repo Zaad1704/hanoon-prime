@@ -65,4 +65,33 @@ def is_absorption_active(alpha: dict[str, float], floor: float) -> bool:
     return abs(float(alpha.get(ABSORPTION_KEY, 0.0))) >= floor
 
 
-__all__ = ["ABSORPTION_KEY", "detect_absorption", "is_absorption_active"]
+def absorption_flow_direction(alpha: dict[str, float], floor: float) -> int:
+    """Flow side of active absorption: ``+1`` long, ``−1`` short, ``0`` off.
+
+    Sign follows the detector (``+1`` = sell-side / MM buying → bullish).
+    Below ``floor`` or missing key → ``0`` so bar-only alpha never forces
+    a direction (Design A).
+    """
+    if not is_absorption_active(alpha, floor):
+        return 0
+    return 1 if float(alpha.get(ABSORPTION_KEY, 0.0)) > 0.0 else -1
+
+
+def absorption_flow_blocked(
+    alpha: dict[str, float], direction: int, floor: float
+) -> bool:
+    """True when active absorption fights ``direction`` (cortex off-flow).
+
+    Zero direction never blocks. Pure predicate — never emits verdicts (R1).
+    """
+    flow = absorption_flow_direction(alpha, floor)
+    return flow != 0 and direction != 0 and flow * direction < 0
+
+
+__all__ = [
+    "ABSORPTION_KEY",
+    "absorption_flow_blocked",
+    "absorption_flow_direction",
+    "detect_absorption",
+    "is_absorption_active",
+]

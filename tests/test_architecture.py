@@ -40,6 +40,7 @@ DECISION_REASONS = (
     "no_signal",
     "session_disabled",
     "direction_rejected",
+    "flow_rejected",
     "low_penny_score",
     "halted",
     "daily_loss_limit",

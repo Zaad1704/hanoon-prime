@@ -259,7 +259,7 @@ def test_absorption_weight_is_tied_top_and_sum_in_bounds():
 
 
 def test_absorption_score_mod_bounded_signed():
-    """Score boost only at the scalp floor; signed; never exceeds the bound."""
+    """Score boost only at the scalp floor, only when flow-aligned."""
     from hanoon_prime.brain.learning_config import (  # noqa: PLC0415
         ABSORPTION_SCALP_MIN,
         ABSORPTION_SCORE_MOD,
@@ -267,11 +267,140 @@ def test_absorption_score_mod_bounded_signed():
     from hanoon_prime.brain.orchestrator import NeuromorphicBrain  # noqa: PLC0415
 
     mod = NeuromorphicBrain._absorption_score_mod
-    assert mod({}, 0.1) == 0.1
-    assert mod({ABSORPTION_KEY: 0.10}, 0.1) == 0.1  # below scalp floor
-    assert mod({ABSORPTION_KEY: 1.0}, 0.0) == ABSORPTION_SCORE_MOD
-    assert mod({ABSORPTION_KEY: -1.0}, 0.0) == -ABSORPTION_SCORE_MOD
+    assert mod({}, 0.1, score=0.5) == 0.1
+    assert mod({ABSORPTION_KEY: 0.10}, 0.1, score=0.5) == 0.1  # below scalp floor
+    # Flow-aligned: +abs with positive score, −abs with negative score.
+    assert mod({ABSORPTION_KEY: 1.0}, 0.0, score=0.5) == ABSORPTION_SCORE_MOD
+    assert mod({ABSORPTION_KEY: -1.0}, 0.0, score=-0.5) == -ABSORPTION_SCORE_MOD
+    # Counter-flow / zero score: no boost (Design A).
+    assert mod({ABSORPTION_KEY: 1.0}, 0.0, score=-0.5) == 0.0
+    assert mod({ABSORPTION_KEY: -1.0}, 0.0, score=0.5) == 0.0
+    assert mod({ABSORPTION_KEY: 1.0}, 0.0, score=0.0) == 0.0
     at_floor = ABSORPTION_SCALP_MIN
-    boosted = mod({ABSORPTION_KEY: at_floor}, 0.0)
+    boosted = mod({ABSORPTION_KEY: at_floor}, 0.0, score=0.4)
     assert abs(boosted) <= ABSORPTION_SCORE_MOD + 1e-12
     assert abs(boosted) > 0.0
+
+
+# ── Design A: absorption flow gate ────────────────────────────────────
+
+
+def test_absorption_flow_direction_sign_and_floor():
+    """Flow side is sign(abs) at/above floor; 0 when inactive/missing."""
+    from hanoon_prime.absorption import absorption_flow_direction  # noqa: PLC0415
+
+    assert absorption_flow_direction({}, ABSORPTION_SIGNAL_MIN) == 0
+    assert (
+        absorption_flow_direction({ABSORPTION_KEY: 0.20}, ABSORPTION_SCALP_MIN) == 0
+    )  # SIGNAL_MIN < 0.20 < SCALP_MIN
+    assert absorption_flow_direction({ABSORPTION_KEY: 0.20}, ABSORPTION_SIGNAL_MIN) == 1
+    assert (
+        absorption_flow_direction({ABSORPTION_KEY: -0.8}, ABSORPTION_SIGNAL_MIN) == -1
+    )
+    assert absorption_flow_direction({ABSORPTION_KEY: 1.0}, ABSORPTION_SIGNAL_MIN) == 1
+
+
+def test_absorption_flow_gate_blocks_counter_cortex():
+    """Active absorption + opposite cortex direction → block; else pass."""
+    from hanoon_prime.absorption import absorption_flow_blocked  # noqa: PLC0415
+
+    floor = ABSORPTION_SIGNAL_MIN
+    # +abs = MM buying = long flow; short cortex opposes → block.
+    assert absorption_flow_blocked({ABSORPTION_KEY: 0.8}, -1, floor) is True
+    assert absorption_flow_blocked({ABSORPTION_KEY: 0.8}, 1, floor) is False
+    # −abs = MM selling = short flow; long cortex opposes → block.
+    assert absorption_flow_blocked({ABSORPTION_KEY: -0.8}, 1, floor) is True
+    assert absorption_flow_blocked({ABSORPTION_KEY: -0.8}, -1, floor) is False
+    # Inactive / missing / zero direction → never blocks.
+    assert absorption_flow_blocked({}, -1, floor) is False
+    assert absorption_flow_blocked({ABSORPTION_KEY: 0.10}, -1, floor) is False
+    assert absorption_flow_blocked({ABSORPTION_KEY: 0.8}, 0, floor) is False
+
+
+def test_decide_entry_flow_rejects_counter_absorption():
+    """decide_entry vetoes cortex that fights active absorption (Design A)."""
+    import time
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from hanoon_prime.absorption import ABSORPTION_KEY
+    from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+    from hanoon_prime.brain.policy.verdict import VETOED
+    from hanoon_prime.brain.shared_state import DEFAULT_POLICY_STATE
+
+    b = NeuromorphicBrain(enable_neuromorphic=False)
+    # Sell-side absorption (+) = bullish flow; cortex says SELL → block.
+    b.tick = lambda alpha, ticker, **kw: {
+        "price": 100.0,
+        "verdict": "SELL",
+        "signals": {"entry": 1.0},
+        "thought": SimpleNamespace(score=-0.9, direction=-1, confidence=0.5),
+    }
+    b.state.update(
+        policy_state={
+            **DEFAULT_POLICY_STATE,
+            "equity_synced": True,
+            "equity": 100_000.0,
+        },
+        account_feed={"equity": 100_000.0, "daily_pnl": 0.0, "positions": {}},
+    )
+    # direction_mode both so only the flow gate can veto this short.
+    b.trading_policy = replace(b.trading_policy, direction_mode="both")
+    b._last_alpha["NVD"] = {ABSORPTION_KEY: 0.8}
+    snap = {
+        "prices": [1.0] * 40,
+        "bid": 100.0,
+        "ask": 100.1,
+        "mid": 100.05,
+        "last": 100.0,
+        "ts": time.time(),
+        "volume": 1000,
+    }
+    v = b.decide_entry("NVD", snap, {}, "rth")
+    assert v.action == VETOED
+    assert v.reason == "flow_rejected"
+    assert v.score == -0.9  # cortex conviction survives onto the veto
+
+
+def test_decide_entry_flow_allows_aligned_absorption():
+    """Aligned cortex + active absorption is not flow-vetoed (Design A)."""
+    import time
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from hanoon_prime.absorption import ABSORPTION_KEY
+    from hanoon_prime.brain.orchestrator import NeuromorphicBrain
+    from hanoon_prime.brain.policy.verdict import ENTER
+    from hanoon_prime.brain.shared_state import DEFAULT_POLICY_STATE
+
+    b = NeuromorphicBrain(enable_neuromorphic=False)
+    b.tick = lambda alpha, ticker, **kw: {
+        "price": 100.0,
+        "verdict": "BUY",
+        "signals": {"entry": 1.0},
+        "thought": SimpleNamespace(score=0.9, direction=1, confidence=0.5),
+    }
+    b.state.update(
+        policy_state={
+            **DEFAULT_POLICY_STATE,
+            "equity_synced": True,
+            "equity": 100_000.0,
+        },
+        account_feed={"equity": 100_000.0, "daily_pnl": 0.0, "positions": {}},
+    )
+    b.trading_policy = replace(b.trading_policy, direction_mode="both")
+    b._last_alpha["NVD"] = {ABSORPTION_KEY: 0.8}
+    snap = {
+        "prices": [1.0] * 40,
+        "bid": 100.0,
+        "ask": 100.1,
+        "mid": 100.05,
+        "last": 100.0,
+        "ts": time.time(),
+        "volume": 1000,
+    }
+    with patch("hanoon_prime.brain.orchestrator.META_DNN_ENABLED", False):
+        v = b.decide_entry("NVD", snap, {}, "rth")
+    assert v.action == ENTER
+    assert v.reason != "flow_rejected"

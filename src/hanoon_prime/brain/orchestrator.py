@@ -414,6 +414,25 @@ class NeuromorphicBrain:
             direction=direction,
         )
 
+    def _absorption_flow_gate(
+        self, ticker: str, thought: SimpleNamespace
+    ) -> Verdict | None:
+        """Design A: active absorption forces the cortex onto the MM's side.
+
+        +abs = MM buying the bid → only longs admit; −abs = MM selling the
+        ask → only shorts admit. Counter-flow cortex → VETOED (flow_rejected).
+        Absent/inactive alpha never blocks (bar-only path stays identical).
+        """
+        from ..absorption import absorption_flow_blocked
+        from .learning_config import ABSORPTION_SIGNAL_MIN
+
+        alpha = self._last_alpha.get(ticker) or {}  # array-safe
+        if not absorption_flow_blocked(
+            alpha, int(thought.direction), ABSORPTION_SIGNAL_MIN
+        ):
+            return None
+        return self._veto(ticker, thought, "flow_rejected", direction=thought.direction)
+
     def _apply_fast_gates(
         self,
         ticker: str,
@@ -422,9 +441,12 @@ class NeuromorphicBrain:
         policy: dict[str, Any],
         session: str,
     ) -> Verdict | None:
-        """Session/direction/penny/safety gates; None = admitted through."""
+        """Session/direction/flow/penny/safety gates; None = admitted through."""
         if not self.trading_policy.is_session_active(session):
             return self._veto(ticker, thought, "session_disabled")
+        flow_veto = self._absorption_flow_gate(ticker, thought)
+        if flow_veto is not None:
+            return flow_veto
         side = "BUY" if thought.direction > 0 else "SELL"
         if not self.trading_policy.is_direction_allowed(side):
             # Enforce the no-signal floor at the emitter: a direction veto
@@ -1257,16 +1279,23 @@ class NeuromorphicBrain:
         )
 
     @staticmethod
-    def _absorption_score_mod(alpha: dict[str, float], mods: float) -> float:
-        """Add a bounded absorption score boost when the scalp floor clears.
+    def _absorption_score_mod(
+        alpha: dict[str, float], mods: float, score: float = 0.0
+    ) -> float:
+        """Bounded absorption score boost only when the lean is flow-aligned.
 
-        Signed by absorption (+ pushes long, − pushes short). Gates and
+        +abs raises a positive score; −abs deepens a negative score; a
+        counter-flow or zero lean gets no boost (Design A). Gates and
         cortex verdicts (R1) are untouched — this only shapes the raw score.
         """
-        from ..absorption import is_absorption_active
+        from ..absorption import absorption_flow_direction
         from .learning_config import ABSORPTION_SCALP_MIN, ABSORPTION_SCORE_MOD
 
-        if not is_absorption_active(alpha, ABSORPTION_SCALP_MIN):
+        flow = absorption_flow_direction(alpha, ABSORPTION_SCALP_MIN)
+        if flow == 0:
+            return mods
+        lean = 1 if score > 0 else (-1 if score < 0 else 0)
+        if lean * flow <= 0:
             return mods
         return mods + float(alpha.get("absorption", 0.0)) * ABSORPTION_SCORE_MOD
 
@@ -1293,7 +1322,7 @@ class NeuromorphicBrain:
         mods = self._compute_mods(
             halim, episodic, nash_op, ticker, cross, advisor_delta, thinker_mod
         )
-        mods = self._absorption_score_mod(alpha, mods)
+        mods = self._absorption_score_mod(alpha, mods, blended)
         raw = blended * regime_mul + somatic + precision * mods
         stabilized, dyn_reason, final_dir = self._stabilize(raw, nash_pred)
         return {
