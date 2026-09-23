@@ -3,6 +3,7 @@
 Validates JULI_* OCA groups, self-heals broken ones, clears stale
 non-OCA resting orders, and cancels orphaned bracket legs.
 """
+
 from __future__ import annotations
 
 import logging
@@ -167,7 +168,8 @@ def _sweep_orphan_brackets(
         if not sym or sym in pending:
             continue
         is_leg = o.orderType in ("LMT", "STP", "STPLMT") and (
-            o.parentId > 0 or (o.ocaGroup and not o.ocaGroup.startswith("JULI_"))
+            getattr(o, "parentId", 0) > 0
+            or (o.ocaGroup and not o.ocaGroup.startswith("JULI_"))
         )
         if is_leg and held.get(sym, 0.0) == 0.0:
             _cancel_order(ib_client, t, "ORPHAN-BRACKET")

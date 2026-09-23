@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -265,8 +266,15 @@ class HalimAdapter:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result: dict[str, Any] = json.loads(resp.read().decode())
                 return result
+        except urllib.error.HTTPError as e:
+            # Service answered but refused (e.g. 503 system_asleep) — expected
+            # during sleep sessions, not an outage.
+            log.debug("HALIM query rejected: %s", e)
+            return {"ok": False, "reason": str(e)}
         except Exception as e:
-            log.debug("HALIM query failed: %s", e)
+            # Connection-level failure (stopped/black-holed :8765): surface it
+            # as a warning so a System 2 outage is visible in the log stream.
+            log.warning("HALIM query failed: %s", e)
             return {"ok": False, "reason": str(e)}
 
     def analyze_trade(self, trade_data: dict[str, Any]) -> dict[str, Any]:

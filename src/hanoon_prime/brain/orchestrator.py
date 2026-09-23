@@ -350,7 +350,9 @@ class NeuromorphicBrain:
                 open_positions=open_count,
                 bars=bars,
             )
-            check_tick_latency(t0, ticker)
+            # Publish fast-path latency into shared state so the telemetry
+            # frame carries a real tick_latency_us next to the S2 fields.
+            self.state.update(tick_latency_us=round(check_tick_latency(t0, ticker), 1))
         except Exception as e:
             self.note_eval_failure(ticker, e)
             log.warning("Entry eval failed for %s: %s", ticker, e)
@@ -638,6 +640,7 @@ class NeuromorphicBrain:
             float(prices[-1]),
             float(snap.get("atr", 1.0)),
             open_count,
+            alpha=self._last_alpha.get(_ticker) or None,
             horizon=horizon,
             ticker=_ticker,
         )
@@ -849,18 +852,15 @@ class NeuromorphicBrain:
         _r, rl, rr, hm, _, _ = self._get_regime_data()
         _r, rl = self._local_regime_fallback(rl)
         canon = self._canonical_regime(rl)
-        # Cross-asset lead-lag (SPY/QQQ/IWM/VXX refs via shared state).
         cross = self._cross_asset.update(
             ticker, entry_price, self.state.get("ref_prices")
         ).modifier
         cross = max(-CROSS_ASSET_MOD_BOUND, min(CROSS_ASSET_MOD_BOUND, cross))
-        # Horizon: mechanical classifier, bandit may override from realized
-        # data (bounded, advisory — shapes patience/sizing, never verdicts).
         horizon = self._classify_horizon(bars)
         horizon, hz_reason = self._bandit.select(canon, horizon)
+        horizon, hz_reason = self._absorption_scalp(alpha, horizon, hz_reason)
         self._apply_regime_weights(canon)
         strat_id, strat_reason = self._strategy_select(canon, ticker)
-        # Episodic k-NN modifier queried LIVE (excitation − inhibition).
         eb = self._episodic_bias(alpha, canon, horizon, ticker)
         self.state.update(episodic_bias=eb)
         hm = max(-HALIM_MOD_BOUND, min(HALIM_MOD_BOUND, float(hm or 0.0)))
@@ -868,7 +868,9 @@ class NeuromorphicBrain:
         self._tag_ctx(ctx, horizon, hz_reason, canon, strat_id, strat_reason)
         self._publish_meta(ctx)
         self._deliberation_coherence(ctx, _r, hm, eb, ticker)
-        sizing = self._maybe_size(ctx, entry_price, atr, open_positions, ticker=ticker)
+        sizing = self._maybe_size(
+            ctx, entry_price, atr, open_positions, ticker=ticker, alpha=alpha
+        )
         self._scale_admitted_size(ctx, sizing, canon, horizon, bars)
         self._store_decision(ticker, alpha, ctx["stabilized"], ctx["confidence"])
         self._remember_decision(ticker, canon, horizon, self._vol_pct(bars))
@@ -876,6 +878,18 @@ class NeuromorphicBrain:
             nash_modifier=ctx["nash_op"], nash_win_prob=ctx["nash_win_prob"]
         )
         return self._build_tick_result(ticker, VerdictLabels(rl, rr, hm), ctx, sizing)
+
+    @staticmethod
+    def _absorption_scalp(
+        alpha: dict[str, float], horizon: str, hz_reason: str
+    ) -> tuple[str, str]:
+        """Force scalp when |absorption| clears the floor (bounded, not a verdict)."""
+        from ..absorption import is_absorption_active
+        from .learning_config import ABSORPTION_SCALP_MIN
+
+        if is_absorption_active(alpha, ABSORPTION_SCALP_MIN):
+            return "scalp", "absorption_scalp"
+        return horizon, hz_reason
 
     def _tag_ctx(
         self,
@@ -1345,12 +1359,14 @@ class NeuromorphicBrain:
         atr: float,
         open_positions: int,
         ticker: str | None = None,
+        alpha: dict[str, float] | None = None,
     ) -> SizingResult:
         """Size position if score clears the dynamic threshold.
 
         Per-horizon patience scales the bar (longer horizons accept a
         slightly lower score; scalp keeps the full bar). Mechanical, not
-        a gate — it shapes the sizing bar only.
+        a gate — it shapes the sizing bar only. ``alpha`` feeds the
+        absorption fixed-tick stop/target override when present.
         """
         score = float(ctx["stabilized"])
         horizon = str(ctx.get("horizon", "scalp"))
@@ -1363,6 +1379,7 @@ class NeuromorphicBrain:
             entry_price,
             atr,
             open_positions,
+            alpha=alpha,
             horizon=horizon,
             ticker=ticker,
         )
@@ -1690,12 +1707,15 @@ class NeuromorphicBrain:
         win_rate: float = 0.5,
         stop_price: Optional[float] = None,
         force_exit: bool = False,
+        absorption_now: Optional[float] = None,
     ) -> ExitSignal:
         """Check if position should be exited via the 3-tier exit ladder.
 
         Exit-likelihood not passed is derived from the pillar signal;
         win_rate not passed falls back to the realized win rate. TIER1
         stays dormant until a stop_price/force_exit is supplied.
+        ``absorption_now`` (live tape) enables Phase-4 absorption-break
+        invalidation inside TIER3.
         """
         return self._exit_ladder.evaluate(
             ticker,
@@ -1706,6 +1726,7 @@ class NeuromorphicBrain:
             win_rate=win_rate,
             stop_price=stop_price,
             force_exit=force_exit,
+            absorption_now=absorption_now,
         )
 
     def snapshot(self) -> dict[str, Any]:

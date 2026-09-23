@@ -31,6 +31,12 @@ from .config import (
     VWAP_CHASE_PENALTY_MAX,
 )
 from .horizons import params_for
+from .learning_config import (
+    ABSORPTION_SCALP_MIN,
+    ABSORPTION_STOP_ATR,
+    ABSORPTION_TARGET_TICKS,
+    ABSORPTION_TICK_SIZE,
+)
 from .realized_ev import RealizedStats, ev_gate_should_enter
 
 
@@ -49,7 +55,7 @@ def d_star_stop_adjustment(ticker: str | None) -> float:
 
     Low d* (persistent, e.g. 0.05) → tighter stop (0.8x).
     High d* (volatile, e.g. 0.65) → wider stop (1.2x).
-    Neutral d* (0.35) → no adjustment (1.0x).
+    Neutral d* (the midpoint of the d* range) → no adjustment (1.0x).
     """
     if not ticker:
         return 1.0
@@ -123,13 +129,15 @@ class RiskEngine:
         kelly: float,
         horizon: str = "scalp",
         ticker: str | None = None,
+        absorption: float = 0.0,
     ) -> tuple[int, float, float]:
         """Compute (shares, stop, target) under all notional/loss caps.
 
         Stop/target multipliers are per-horizon (scalp keeps the prime
         2x/6x ATR; longer horizons widen both, preserving 3:1 R:R).
         d*-aware adjustment: low d* (persistent) tightens stops, high d*
-        (volatile) widens stops.
+        (volatile) widens stops. Strong absorption overrides with a fixed
+        tick target + tighter ATR stop (MM scalp profile).
         """
         direction = 1 if score > 0 else -1
         hp = params_for(horizon)
@@ -145,8 +153,16 @@ class RiskEngine:
         shares = max(
             1, int(min(max_by_notional, max_by_loss, max_by_kelly, max_by_penny))
         )
-        stop = round(entry_price - direction * stop_mult * atr, 2)
-        target = round(entry_price + direction * target_mult * atr, 2)
+        if abs(absorption) >= ABSORPTION_SCALP_MIN:
+            stop = round(entry_price - direction * ABSORPTION_STOP_ATR * atr, 2)
+            target = round(
+                entry_price
+                + direction * ABSORPTION_TARGET_TICKS * ABSORPTION_TICK_SIZE,
+                2,
+            )
+        else:
+            stop = round(entry_price - direction * stop_mult * atr, 2)
+            target = round(entry_price + direction * target_mult * atr, 2)
         return shares, stop, target
 
     def _preflight(
@@ -232,6 +248,7 @@ class RiskEngine:
             gate["reason"],
             quality_penalty=quality_penalty,
             ticker=ticker,
+            absorption=float(alpha.get("absorption", 0.0)) if alpha else 0.0,
         )
 
     def _compose_result(
@@ -246,9 +263,12 @@ class RiskEngine:
         ev_reason: str,
         quality_penalty: float = 0.0,
         ticker: str | None = None,
+        absorption: float = 0.0,
     ) -> SizingResult:
         """Mechanical size + sub-rounding guard + advisory EV scale."""
-        shares, stop, target = self._size(score, entry_price, atr, kelly, horizon, ticker)
+        shares, stop, target = self._size(
+            score, entry_price, atr, kelly, horizon, ticker, absorption
+        )
         # Sub-rounding guard (mechanical, not a gate): when Kelly sizing
         # buys less than one share the edge is below rounding noise.
         max_by_kelly = MAX_POSITION_NOTIONAL * kelly / entry_price

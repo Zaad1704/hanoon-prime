@@ -154,6 +154,10 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "microstructure": 0.02,
     "fib_proximity": 0.02,
     "kelly_fraction": 0.01,
+    # Live-only tape key (absent in bar-only alpha → skipped by present-set
+    # scoring; keeps DEFAULT_WEIGHTS sum in the weight-enforcer repair bound
+    # [0.90, 1.10] and the regression_guard [0.80, 1.20]).
+    "absorption": 0.06,
 }
 
 # ── Guardians ────────────────────────────────────────────────────────
@@ -204,4 +208,6 @@ NASH_PENALTY_MAX: float = 0.15  # max bounded score penalty from pattern memory
 # ── IRONYCLADE: trade sources that may update the realized learning loop ───
 # Paper / synthetic / backtest fills are excluded so the live EV gate only
 # learns from real execution (rebuild brain_engine.py:447).
-_IRONYCLADE: frozenset[str] = frozenset({"real_trade", "ib_fill", "ib_paper", "reconciled_exit"})
+_IRONYCLADE: frozenset[str] = frozenset(
+    {"real_trade", "ib_fill", "ib_paper", "reconciled_exit"}
+)

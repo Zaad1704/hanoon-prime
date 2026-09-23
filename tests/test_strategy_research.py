@@ -1,4 +1,5 @@
 """tests/test_strategy_research — strategy research system tests."""
+
 from __future__ import annotations
 
 import json
@@ -186,3 +187,29 @@ def test_maybe_run_ingests_into_registry(tmp_path):
     sr._last_run = 0.0
     ingested = sr.maybe_run(query_fn=_fake_query(_ok_payload()))
     assert reg.count() == n_before + len(ingested)
+
+
+def test_registry_force_seeds_priors_at_capacity(tmp_path):
+    """A full pool of researched strategies still admits seeded priors."""
+    from hanoon_prime.brain.learning_config import STRATEGY_MAX_POOL
+    from hanoon_prime.brain.strategy_priors import seeded_priors
+
+    reg = _reg(tmp_path)
+    while reg.count() < STRATEGY_MAX_POOL:
+        assert reg.ingest(
+            {
+                "name": f"fill-{reg.count()}",
+                "entry": "go",
+                "exit": "stop",
+                "risk": "stop",
+            }
+        )
+    for prior in seeded_priors():
+        assert reg.get(_slug_id(prior["name"])) is not None, prior["name"]
+    assert reg.count() <= STRATEGY_MAX_POOL
+
+
+def _slug_id(name: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]

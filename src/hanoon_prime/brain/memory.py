@@ -77,15 +77,13 @@ class JuliMemory:
     def add_episode(
         self, vector: list[float], outcome: float, ticker: str = ""
     ) -> None:
-        """Store one pattern episode with its outcome."""
+        """Store one pattern episode (rejects T/TEST harness tickers)."""
+        if ticker in ("T", "TEST"):
+            log.warning("Rejected test episode for ticker=%r", ticker)
+            return
         with self._lock:
             self._episodes.append(
-                {
-                    "vector": vector,
-                    "outcome": outcome,
-                    "ticker": ticker,
-                    "ts": time.time(),
-                }
+                dict(vector=vector, outcome=outcome, ticker=ticker, ts=time.time())
             )
             if len(self._episodes) > EPISODIC_CAPACITY:
                 self._episodes = self._episodes[-EPISODIC_CAPACITY:]

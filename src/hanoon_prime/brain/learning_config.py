@@ -149,3 +149,19 @@ RESEARCH_TOPICS: tuple[str, ...] = (
     "momentum continuation patterns",
     "range suppression fade",
 )
+
+# ── MM absorption tape + strategy (tape.py / absorption.py) ────────────
+# Time & Sales rolling windows (seconds) for signed CVD.
+ABSORPTION_CVD_FAST: float = 5.0  # fast CVD window
+ABSORPTION_CVD_SLOW: float = 30.0  # slow CVD window (context)
+ABSORPTION_DELTA_THETA: float = 0.30  # |cvd_fast| floor to qualify
+ABSORPTION_VOL_RATIO: float = 2.0  # dominant/suppressed print-volume ratio
+ABSORPTION_BID_HOLD_POLLS: int = 3  # consecutive quote polls the level holds
+ABSORPTION_SIGNAL_MIN: float = 0.15  # min |absorption| to count as active
+ABSORPTION_SCALP_MIN: float = 0.25  # |absorption| that forces scalp horizon
+ABSORPTION_BREAK_FACTOR: float = 0.5  # exit when |now| < factor × |entry|
+ABSORPTION_TARGET_TICKS: float = 8.0  # mid of the 5–10 tick scalp target
+ABSORPTION_TICK_SIZE: float = 0.01  # US equity tick (fixed-tick override)
+ABSORPTION_STOP_ATR: float = 1.5  # tighter ATR stop for absorption scalps
+TAPE_PRINT_MAXLEN: int = 512  # rolling print ring per ticker
+TAPE_QUOTE_MAXLEN: int = 64  # rolling bid/ask ring per ticker

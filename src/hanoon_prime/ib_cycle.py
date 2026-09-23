@@ -450,7 +450,18 @@ class BotCycleMixin:
         base["vpin"] = compute_vpin(a["volume"], a["close"])
         base["price_entropy"] = compute_price_entropy(a["close"])
         base["vol_entropy"] = compute_volume_entropy(a["volume"])
+        self._inject_tape(base, sym)
         return base
+
+    def _inject_tape(self, base: dict[str, Any], sym: str) -> None:
+        """Merge live tape metrics + absorption into the snapshot in place."""
+        metrics = self.streamer.tapes.metrics(sym)
+        if not metrics:
+            return
+        from .absorption import detect_absorption
+
+        base.update(metrics)
+        base.update(detect_absorption(metrics))
 
     def _cycle(self, poll: float, pnl: Any) -> None:
         """One main loop iteration."""

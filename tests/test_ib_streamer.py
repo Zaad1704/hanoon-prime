@@ -343,3 +343,27 @@ class TestBatchRotation:
             s.subscribe_many(tickers)
             s.unsubscribe_many(tickers)
             assert len(s.contracts) <= MAX_PARKED
+
+
+class TestResubscribeTape:
+    """resubscribe rebinds the tape handler to the NEW ticker object."""
+
+    def test_resubscribe_rebinds_tape(self):
+        """Handler is re-registered on the NEW ticker (buffer preserved)."""
+        s = IBStreamer(MagicMock())
+        s.contracts["TSLA"] = MagicMock()
+        s.buffers["TSLA"] = StreamBuffer("TSLA")
+        s.tapes.for_ticker("TSLA").record_print(1.0, 100.0, 1.0, 99.0, 101.0)
+        old = MagicMock(name="old_tk")
+        s.ticker_subs["TSLA"] = old
+        s.depth_subs["TSLA"] = None
+        s._tape_attached.add("TSLA")
+        new = MagicMock(name="new_tk")
+        new.updateEvent.__iadd__.return_value = new.updateEvent  # Event-like +=
+        s.ib.reqMktData.return_value = new
+        s.resubscribe("TSLA")
+        assert s.ticker_subs["TSLA"] is new
+        assert "TSLA" in s._tape_attached
+        new.updateEvent.__iadd__.assert_called()
+        # prints survive the rebind
+        assert len(s.tapes.for_ticker("TSLA").prints) == 1

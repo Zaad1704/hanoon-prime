@@ -182,7 +182,7 @@ class JuliBrain:
             shares = float(info.get("shares", 0.0) or 0.0)
             ib_pnl = (cur - float(entry)) * direction * shares if entry > 0 else 0.0
             # fmt: off
-            sig = self.brain.check_exit(t, cur, ib_pnl=ib_pnl, direction=direction, stop_price=info.get("stop_price") or None)
+            sig = self.brain.check_exit(t, cur, ib_pnl=ib_pnl, direction=direction, stop_price=info.get("stop_price") or None, absorption_now=(float(snap["absorption"]) if "absorption" in snap else None))
             # fmt: on
             if sig.should_exit:
                 exits.append({"ticker": t, "reason": sig.reason, "type": sig.exit_type})

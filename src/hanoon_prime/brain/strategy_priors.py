@@ -46,6 +46,18 @@ _PRIORS: list[tuple[str, str, str, str, str, str, str, float, float, float]] = [
         0.0,
         0.5,
     ),
+    (
+        "mm-absorption",
+        "Trade with market-makers when one-sided flow fails to move the level.",
+        "Active absorption signal (|absorption| >= floor), scalp only.",
+        "Exit when absorption level breaks (signal collapses/flips) or 5-10 tick target.",
+        "Tighter 1.5xATR stop; fixed-tick target override; forced scalp horizon.",
+        "Liquid ticker, live tape only — no OHLCV backtest equivalent.",
+        "unknown",
+        0.9,
+        0.02,
+        0.55,
+    ),
 ]
 
 

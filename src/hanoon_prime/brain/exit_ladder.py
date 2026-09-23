@@ -65,10 +65,11 @@ class ExitLadder:
         win_rate: float = 0.5,
         stop_price: Optional[float] = None,
         force_exit: bool = False,
+        absorption_now: Optional[float] = None,
     ) -> ExitSignal:
-        """Run TIER1→TIER2→TIER3; the first decisive tier wins. Unset
-        exit_likelihood derives from the policy pillar signal and the 0.5
-        default win_rate is overridden by the win-rate provider.
+        """Run TIER1→TIER2→TIER3; first decisive tier wins. Unset exit_likelihood
+        derives from the policy pillar signal; ``absorption_now`` is forwarded
+        to TIER3 so a broken absorption level exits immediately.
         """
         exit_likelihood, win_rate = self._resolve_defaults(
             ticker, current_price, direction, exit_likelihood, win_rate
@@ -91,7 +92,7 @@ class ExitLadder:
             return ExitSignal(False, "hysteresis (pending)", "hold")
         if tier2.exit_type == "watch":
             return tier2
-        return self._tier3(ticker, current_price, ib_pnl, direction)
+        return self._tier3(ticker, current_price, ib_pnl, direction, absorption_now)
 
     def _resolve_defaults(
         self,
@@ -166,10 +167,21 @@ class ExitLadder:
         return ExitSignal(False, "", "hold")
 
     def _tier3(
-        self, ticker: str, current_price: float, ib_pnl: float, direction: int
+        self,
+        ticker: str,
+        current_price: float,
+        ib_pnl: float,
+        direction: int,
+        absorption_now: Optional[float] = None,
     ) -> ExitSignal:
         """Mechanical safety nets (the existing ExitPolicy)."""
-        return self._policy.evaluate(ticker, current_price, ib_pnl, direction)
+        return self._policy.evaluate(
+            ticker,
+            current_price,
+            ib_pnl,
+            direction,
+            absorption_now=absorption_now,
+        )
 
 
 __all__ = ["ExitLadder"]

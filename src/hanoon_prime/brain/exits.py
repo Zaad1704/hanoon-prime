@@ -23,7 +23,8 @@ from .config import (
     GIVEBACK_KEEP_RATIO,
     STALE_EXIT_MINUTES,
 )
-from .exit_checks import ExitSignal, check_consolidation
+from .exit_checks import ExitSignal, check_absorption_break
+from .exit_checks import check_consolidation
 from .exit_checks import check_giveback as _giveback
 from .exit_checks import check_profit_lock as _profit_lock
 from .exit_checks import check_stale as _stale
@@ -345,17 +346,24 @@ class ExitPolicy:
         ib_unrealized_pnl: float = 0.0,
         direction: int = 1,
         exit_pillars: dict[str, float] | None = None,
+        absorption_now: float | None = None,
     ) -> ExitSignal:
         """Evaluate exit conditions for one position.
 
         Enhanced with 8 exit pillars for nuanced timing.
         If exit_pillars dict is provided, combines pillar scores with
         mechanical exits (profit-lock, giveback, stale, consolidation).
+        When ``absorption_now`` is provided (live tape), an absorption
+        entry whose level broke exits immediately (Phase 4 invalidation).
         """
         if ticker not in self._entry_ts:
             return ExitSignal()
         self._update_peaks(ticker, current_price, ib_unrealized_pnl, direction)
-
+        if absorption_now is not None:
+            entry_abs = float(self._entry_alpha.get(ticker, {}).get("absorption", 0.0))
+            abs_sig = check_absorption_break(entry_abs, absorption_now)
+            if abs_sig.should_exit:
+                return abs_sig
         # Standard mechanical exits
         for check in (
             self._check_profit_lock,

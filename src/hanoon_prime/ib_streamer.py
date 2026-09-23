@@ -18,6 +18,7 @@ import numpy as np
 from .eyes import rolling_atr
 from .ib_compat import ib
 from .immune import DEPTH_ROWS, EDGE_LOOKBACK, LOOKBACK_BARS
+from .tape import TapeBook
 from .types import BarSeries
 
 log = logging.getLogger(__name__)
@@ -123,6 +124,39 @@ class IBStreamer:
         # socket thread) enqueue; the main cycle drains. Must stay cheap.
         self.signal_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self._pnl_singles: dict[str, Any] = {}
+        self.tapes = TapeBook()  # MM absorption: rolling T&S + L1 holds
+        self._tape_attached: set[str] = set()
+
+    def attach_tape(self, ticker: str) -> None:
+        """Record prints/quotes into the absorption tape (idempotent).
+
+        Classified from last/bid/ask on each updateEvent — works with
+        plain L1 streaming (no tickByTick subscription required).
+        """
+        tk = self.ticker_subs.get(ticker)
+        if tk is None or ticker in self._tape_attached:
+            return
+        buf = self.tapes.for_ticker(ticker)
+        last_seen = {"price": -1.0, "size": 0.0}
+
+        def _on_tape(_t: Any) -> None:
+            try:
+                bid = float(_t.bid or 0.0)
+                ask = float(_t.ask or 0.0)
+                last = float(_t.last or _t.close or 0.0)
+                size = float(_t.lastSize or 0.0)
+                ts = _t.time.timestamp() if getattr(_t, "time", None) else time.time()
+                if bid > 0.0 and ask > 0.0:
+                    buf.record_quote(ts, bid, ask)
+                if last > 0.0 and size > 0.0 and last != last_seen["price"]:
+                    buf.record_print(ts, last, size, bid, ask)
+                    last_seen["price"] = last
+                    last_seen["size"] = size
+            except Exception as exc:
+                log.debug("tape %s error: %s", ticker, exc)
+
+        tk.updateEvent += _on_tape
+        self._tape_attached.add(ticker)
 
     def attach_exit_watcher(self, ticker: str, check: Any) -> None:
         """Push exit signals on every tick for an open position.
@@ -194,6 +228,8 @@ class IBStreamer:
         self._minutely.pop(ticker, None)
         self.last_data_ts.pop(ticker, None)
         self.last_seen.pop(ticker, None)
+        self.tapes.drop(ticker)
+        self._tape_attached.discard(ticker)
         self._trim_parked()
         log.debug("Unsubscribed %s (GC)", ticker)
 
@@ -209,6 +245,8 @@ class IBStreamer:
             self._minutely.pop(t, None)
             self.last_data_ts.pop(t, None)
             self.last_seen.pop(t, None)
+            self.tapes.drop(t)
+            self._tape_attached.discard(t)
         self._trim_parked()
         if count:
             log.info("Feed: -%d unsubscribed, pool=%d", count, len(self.ticker_subs))
@@ -233,6 +271,8 @@ class IBStreamer:
         for t in parked[: len(self.contracts) - MAX_PARKED]:
             self.contracts.pop(t, None)
             self.buffers.pop(t, None)
+            self.tapes.drop(t)
+            self._tape_attached.discard(t)
 
     def subscribe(self, ticker: str) -> None:
         """Subscribe to live market data + order book depth."""
@@ -247,6 +287,7 @@ class IBStreamer:
         # DOM (Level 2) not supported for US equities without subscription.
         # Skip silently to avoid IB error 10092 flooding logs.
         self.depth_subs[ticker] = None
+        self.attach_tape(ticker)
         log.debug("Subscribed to %s (mkt data)", ticker)
 
     def subscribe_many(self, tickers: list[str]) -> int:
@@ -275,6 +316,7 @@ class IBStreamer:
                 self.contracts[t], "", False, False
             )
             self.depth_subs[t] = None
+            self.attach_tape(t)
         log.info(
             "Feed: +%d subscribed, pool=%d/%d (stats)",
             len(tickers),
@@ -304,6 +346,9 @@ class IBStreamer:
         self.ticker_subs[ticker] = self.ib.reqMktData(
             self.contracts[ticker], "", False, False
         )
+        # New Ticker object → rebind tape handler (buffer is preserved).
+        self._tape_attached.discard(ticker)
+        self.attach_tape(ticker)
         log.info("Resubscribed to %s (mkt data)", ticker)
 
     def seed_history(self, ticker: str) -> None:

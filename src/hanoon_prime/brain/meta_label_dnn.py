@@ -153,7 +153,7 @@ class MetaDNN:
         """Compute mean/std from training data for input normalization."""
         self._scaler_mean = np.mean(X, axis=0)
         self._scaler_std = np.std(X, axis=0)
-        self._scaler_std[self._scaler_std < 1e-8] = 1.0
+        self._scaler_std = np.where(self._scaler_std < 1e-8, 1.0, self._scaler_std)
 
     def _transform(self, X: np.ndarray) -> np.ndarray:
         """Apply Z-score normalization using fitted scaler."""
@@ -316,6 +316,11 @@ class MetaDNN:
         weight_decay: float = META_DNN_WEIGHT_DECAY,
     ) -> list[float]:
         """Mini-batch Adam training loop. Returns per-epoch BCE losses."""
+        # A retrain IS the recovery path from a defective artifact: clear the
+        # flag so the post-train guard probe evaluates real forward passes
+        # (predict() short-circuits to a constant while _defective is set,
+        # which would brand every freshly-trained model constant_output).
+        self._defective = False
         self._build()
         self._fit_scaler(X)
         Xs = self._transform(X)

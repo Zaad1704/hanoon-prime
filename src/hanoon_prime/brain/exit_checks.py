@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 
 from .config import CONSOLIDATION_PULSES, PROFIT_LOCK_TIERS
+from .learning_config import ABSORPTION_BREAK_FACTOR, ABSORPTION_SIGNAL_MIN
 
 
 @dataclass
@@ -23,6 +24,30 @@ class ExitSignal:
     reason: str = ""
     exit_type: str = "hold"
     exit_score: float = 0.0  # Pillar combination score (0-1) when should_exit=True
+
+
+def check_absorption_break(
+    entry_absorption: float,
+    current_absorption: float,
+) -> ExitSignal:
+    """Exit when an absorption setup's level breaks (signal collapses/flips).
+
+    Entry was only absorption-classified when |entry| cleared the signal
+    floor; break = sign flip or |now| below the break factor × |entry|.
+    """
+    if abs(entry_absorption) < ABSORPTION_SIGNAL_MIN:
+        return ExitSignal()
+    broken = current_absorption * entry_absorption <= 0.0
+    broken = broken or abs(current_absorption) < ABSORPTION_BREAK_FACTOR * abs(
+        entry_absorption
+    )
+    if broken:
+        return ExitSignal(
+            True,
+            f"absorption_break {entry_absorption:+.2f}->{current_absorption:+.2f}",
+            "absorption_break",
+        )
+    return ExitSignal()
 
 
 def check_profit_lock(entry: float, peak_pnl: float, pnl: float) -> ExitSignal:

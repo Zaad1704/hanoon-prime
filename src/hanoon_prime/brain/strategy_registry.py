@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import STATE_DIR
 from .learning_config import (
     STRATEGY_FILE,
     STRATEGY_MAX_POOL,
@@ -29,34 +28,24 @@ log = logging.getLogger(__name__)
 _VALID_REGIMES = frozenset({"trend_up", "trend_down", "range", "vol", "unknown"})
 
 
-def _clamp(x: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, float(x)))
-
-
 def _slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
     return (slug or "strategy")[:48]
 
 
-def _bundle(candidate: dict[str, Any]) -> tuple[float, float, float]:
-    get = candidate.get
+def _clean(c: dict[str, Any], key: str, n: int) -> str:
+    return str(c.get(key, ""))[:n]
+
+
+def _bundle(c: dict[str, Any]) -> tuple[float, float, float]:
+    lo, hi, sb = STRATEGY_SIZING_MIN, STRATEGY_SIZING_MAX, STRATEGY_SCORE_MOD_BOUND
+    get = c.get
     try:
-        sizing = _clamp(
-            float(get("sizing", 1.0)), STRATEGY_SIZING_MIN, STRATEGY_SIZING_MAX
-        )
-        score_mod = _clamp(
-            float(get("score_mod", 0.0)),
-            -STRATEGY_SCORE_MOD_BOUND,
-            STRATEGY_SCORE_MOD_BOUND,
-        )
-        conf = max(0.0, min(1.0, float(get("confidence", 0.4))))
-        return sizing, score_mod, conf
+        s = max(lo, min(hi, float(get("sizing", 1.0))))
+        m = max(-sb, min(sb, float(get("score_mod", 0.0))))
+        return s, m, max(0.0, min(1.0, float(get("confidence", 0.4))))
     except (TypeError, ValueError):
         return (1.0, 0.0, 0.4)
-
-
-def _clean(candidate: dict[str, Any], key: str, n: int) -> str:
-    return str(candidate.get(key, ""))[:n]
 
 
 class StrategyRegistry:
@@ -78,19 +67,18 @@ class StrategyRegistry:
     def ids_for(self, regime: str) -> list[str]:
         """Strategy ids applicable to a canonical regime (unknown = any)."""
         with self._lock:
-            return [
-                sid
-                for sid, item in self._strategies.items()
-                if regime in ("unknown", "any")
-                or item.get("regime") in (regime, "unknown", "any")
-            ]
+            ok: tuple[str, ...] = ("unknown", "any")
+            if regime in ok:
+                return list(self._strategies)
+            ok = (*ok, regime)
+            return [s for s, i in self._strategies.items() if i.get("regime") in ok]
 
     def nudge_for(self, strategy_id: str) -> dict[str, float]:
         """Bounded nudge bundle: sizing scalar + score modifier."""
         with self._lock:
-            item = self._strategies.get(strategy_id) or {}  # array-safe
-            sizing, score_mod, _cf = _bundle(item)
-            return {"sizing": sizing, "score_mod": score_mod}
+            item = self._strategies.get(strategy_id)
+            size, mod, _ = _bundle(item if item is not None else {})
+            return {"sizing": size, "score_mod": mod}
 
     def count(self) -> int:
         """Number of strategies in the library."""
@@ -106,7 +94,7 @@ class StrategyRegistry:
         regime = str(candidate.get("regime", "unknown"))
         if regime not in _VALID_REGIMES:
             regime = "unknown"
-        sizing, score_mod, conf = _bundle(candidate)
+        size, mod, conf = _bundle(candidate)
         with self._lock:
             if self._strategies.get(sid):
                 return sid
@@ -117,8 +105,8 @@ class StrategyRegistry:
                 "name": name,
                 "regime": regime,
                 "thesis": _clean(candidate, "thesis", 300),
-                "sizing": sizing,
-                "score_mod": score_mod,
+                "sizing": size,
+                "score_mod": mod,
                 "confidence": conf,
                 "source": _clean(candidate, "source", 80) or "halim_research",
                 "trials": 0,
@@ -160,19 +148,17 @@ class StrategyRegistry:
     def _load_or_seed(self) -> None:
         """Load persisted library; missing/corrupt → seeded priors."""
         if not self._path.exists():
+            self._strategies = {}
             self._seed()
             self._save()
             return
         try:
-            d = json.loads(self._path.read_text())
-            pool = d.get("strategies") if isinstance(d, dict) else None
-            if isinstance(pool, dict):
-                for sid, item in pool.items():
-                    r = str(item.get("regime", "unknown"))
-                    item["regime"] = r if r in _VALID_REGIMES else "unknown"
-                    s, m, _cf = _bundle(item)
-                    item["sizing"], item["score_mod"] = s, m
-                    self._strategies[str(sid)] = item
+            pool = json.loads(self._path.read_text()).get("strategies")
+            for sid, item in pool.items() if isinstance(pool, dict) else ():
+                r = str(item.get("regime", "unknown"))
+                item["regime"] = r if r in _VALID_REGIMES else "unknown"
+                item["sizing"], item["score_mod"], _ = _bundle(item)
+                self._strategies[str(sid)] = item
             self._seed()
         except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
             self._strategies = {}
@@ -180,9 +166,24 @@ class StrategyRegistry:
             self._save()
 
     def _seed(self) -> None:
-        """Ensure the educated priors are always present."""
+        """Ensure seeded priors are present (evict research if pool full)."""
         for prior in seeded_priors():
+            if self.ingest(prior) is not None:
+                continue
+            sid = _slug(_clean(prior, "name", 80).strip())
+            res = {
+                k: v for k, v in self._strategies.items() if v.get("source") != "seeded"
+            }
+            if not sid or self._strategies.get(sid) or not res:
+                continue
+            victim = min(res, key=lambda k: self._rank(res[k]))
+            del self._strategies[victim]
             self.ingest(prior)
+            log.info("strategy seed evicted %s for %s", victim, sid)
+
+    @staticmethod
+    def _rank(v: dict[str, Any]) -> tuple[int, float]:
+        return int(v.get("trials", 0)), float(v.get("created_at", 0.0))
 
     def _save(self) -> None:
         """Persist atomically (tmp + replace)."""

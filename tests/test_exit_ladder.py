@@ -24,7 +24,7 @@ class _FakePolicy:
         self.calls: list = []
         self._sig = signal
 
-    def evaluate(self, ticker, current_price, ib_pnl=0.0, direction=1):
+    def evaluate(self, ticker, current_price, ib_pnl=0.0, direction=1, **_kwargs):
         self.calls.append((ticker, current_price, ib_pnl, direction))
         return self._sig
 

@@ -44,6 +44,22 @@ def _fmt_verdict(v: Verdict) -> str:
     return f"{v.ticker}:{v.action}({v.score:.3f},{side})[{where}]"
 
 
+def _inject_tape_alpha(alpha: dict[str, float], snap: dict[str, Any]) -> None:
+    """Merge tape-derived absorption keys when the snapshot carries them.
+
+    Absorption is live-only (T&S + L1 hold): bar-only snapshots omit the
+    keys so backtest weighting stays byte-identical.
+    """
+    from .absorption import detect_absorption
+
+    metrics: dict[str, float] = {
+        k: float(snap[k])
+        for k in ("cvd_fast", "vol_buy", "vol_sell", "bid_held", "ask_held")
+        if k in snap and snap[k] is not None
+    }
+    alpha.update(detect_absorption(metrics))
+
+
 def compute_alpha_from_snap(
     snap: dict[str, Any], ticker: str | None = None
 ) -> dict[str, float]:
@@ -57,7 +73,10 @@ def compute_alpha_from_snap(
     bars = BarSeries(**kw)
     bars.ticker = ticker
     alpha = compute_all_alpha(bars)
-    return alpha if alpha else (compute_alpha(**kw) or {})
+    if not alpha:
+        alpha = compute_alpha(**kw) or {}
+    _inject_tape_alpha(alpha, snap)
+    return alpha
 
 
 def entry_bars(
@@ -79,11 +98,17 @@ def entry_bars(
     }
 
 
-def check_tick_latency(t0: int, ticker: str) -> None:
-    """Warn only on real stalls (>=25ms); sub-ms JIT noise is expected."""
+def check_tick_latency(t0: int, ticker: str) -> float:
+    """Return eval latency in microseconds; warn only on stalls (>=25ms).
+
+    Sub-ms JIT noise is expected, so the warning threshold stays at 25ms;
+    the returned value is published to BrainState as ``tick_latency_us``
+    for the telemetry frame (Phase 4 fast-path metric).
+    """
     latency_us = (time.perf_counter_ns() - t0) / 1000.0
     if latency_us > 25_000.0:
         log.warning("Tick latency spike: %.0f us for %s", latency_us, ticker)
+    return latency_us
 
 
 class JuliFeed:
