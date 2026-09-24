@@ -26,17 +26,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from scipy import stats
 
 from .eyes import load_ohlcv
 from .hands import simulate_ticker
-from .immune import (
-    EDGE_LOOKBACK,
-    LABEL_VERTICAL_BARS,
-    WFA_EMBARGO_BARS,
-    WFA_MIN_TRAIN_LABELS,
-    WFA_PURGE_ENABLED,
-)
+from .immune import EDGE_LOOKBACK, WFA_EMBARGO_BARS
 from .types import BarSeries
 
 # ── Tunables (locked once the Phase-4 protocol is registered) ───────────
@@ -126,11 +121,11 @@ def fold_windows(total_bars: int, folds: int = DEFAULT_FOLDS) -> list[tuple[int,
 
 
 def purge_mask(
-    t0: np.ndarray,
-    t1: np.ndarray,
+    t0: npt.NDArray[np.int_],
+    t1: npt.NDArray[np.int_],
     test_start: int,
     test_end: int,
-) -> np.ndarray:
+) -> npt.NDArray[np.bool_]:
     """Boolean mask: True for labels whose span does NOT overlap [test_start, test_end].
 
     A label's span [t0, t1] overlaps the test window iff t0 <= test_end and
@@ -141,7 +136,9 @@ def purge_mask(
     return ~overlap
 
 
-def embargo_mask(t0: np.ndarray, test_end: int, embargo_bars: int) -> np.ndarray:
+def embargo_mask(
+    t0: npt.NDArray[np.int_], test_end: int, embargo_bars: int
+) -> npt.NDArray[np.bool_]:
     """Boolean mask: True for labels NOT in the embargo zone after test_end.
 
     Embargo zone is [test_end, test_end + embargo_bars). Labels with entry
@@ -152,12 +149,12 @@ def embargo_mask(t0: np.ndarray, test_end: int, embargo_bars: int) -> np.ndarray
 
 
 def train_test_split(
-    t0: np.ndarray,
-    t1: np.ndarray,
+    t0: npt.NDArray[np.int_],
+    t1: npt.NDArray[np.int_],
     test_start: int,
     test_end: int,
     embargo_bars: int = WFA_EMBARGO_BARS,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.bool_]]:
     """Split labels into purged+embargoed train and test boolean masks.
 
     A label is a "test" label if its entry t0 falls inside [test_start,
@@ -173,7 +170,9 @@ def train_test_split(
     return train_mask, test_mask
 
 
-def weight_adjusted_return(pnl: np.ndarray, weights: np.ndarray) -> float:
+def weight_adjusted_return(
+    pnl: npt.NDArray[np.float64], weights: npt.NDArray[np.float64]
+) -> float:
     """Weighted mean return, normalized by sum of weights.
 
     Clustered, highly correlated trade regimes receive lower uniqueness
@@ -186,7 +185,9 @@ def weight_adjusted_return(pnl: np.ndarray, weights: np.ndarray) -> float:
     return float(np.sum(w * pnl))
 
 
-def weight_adjusted_sharpe(pnl: np.ndarray, weights: np.ndarray) -> float:
+def weight_adjusted_sharpe(
+    pnl: npt.NDArray[np.float64], weights: npt.NDArray[np.float64]
+) -> float:
     """Weighted Sharpe ratio using uniqueness weights.
 
     Down-weights clustered trades so the fold Sharpe reflects the true
@@ -202,8 +203,8 @@ def weight_adjusted_sharpe(pnl: np.ndarray, weights: np.ndarray) -> float:
 
 def purged_fold_windows(
     total_bars: int,
-    label_t0: np.ndarray,
-    label_t1: np.ndarray,
+    label_t0: npt.NDArray[np.int_],
+    label_t1: npt.NDArray[np.int_],
     folds: int = DEFAULT_FOLDS,
     embargo_bars: int = WFA_EMBARGO_BARS,
 ) -> list[dict[str, Any]]:
@@ -310,7 +311,7 @@ def trial_pnl_by_ticker(
     return {t: [p for w in folds for p in w.pnl] for t, folds in results.items()}
 
 
-def _pooled_returns(results: dict[str, list[FoldResult]]) -> np.ndarray:
+def _pooled_returns(results: dict[str, list[FoldResult]]) -> npt.NDArray[np.float64]:
     """Pool every admissible ticker's OOS trade returns into one array."""
     vals: list[float] = []
     for ticker, folds in results.items():
@@ -416,7 +417,7 @@ def pbo(results: dict[str, list[FoldResult]]) -> float:
     return float(overfit / max(total, 1))
 
 
-def _rank_performance(mat: np.ndarray) -> np.ndarray:
+def _rank_performance(mat: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     """Rank each trial's mean OOS return within its split (ties→average)."""
     means = np.mean(mat, axis=1) if mat.ndim == 2 else np.asarray([[0.0]])
     order = np.asarray(stats.rankdata(-means))  # higher return → smaller rank

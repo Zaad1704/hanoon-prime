@@ -424,7 +424,7 @@ def _process_bar(
     return position, state.last_z, trade
 
 
-def _coerce_bars(bars: BarSeries | dict) -> BarSeries:
+def _coerce_bars(bars: BarSeries | dict[str, Any]) -> BarSeries:
     """Coerce a raw OHLCV dict into a BarSeries (test fixtures hand these).
 
     Accepts the same dict shape eyes.load_csv_dict returns; arrays are
@@ -439,8 +439,7 @@ def _coerce_bars(bars: BarSeries | dict) -> BarSeries:
         volume = np.asarray(bars["volume"], dtype=float)
     except (KeyError, TypeError) as exc:
         raise TypeError(
-            "bars must be a BarSeries or a dict with "
-            "close/high/low/volume keys"
+            "bars must be a BarSeries or a dict with " "close/high/low/volume keys"
         ) from exc
     return BarSeries(
         close=close,
@@ -453,7 +452,7 @@ def _coerce_bars(bars: BarSeries | dict) -> BarSeries:
 
 def simulate_ticker(
     ticker: str,
-    bars: BarSeries | dict,
+    bars: BarSeries | dict[str, Any],
     window: int = EDGE_LOOKBACK,
     brain: Optional[Hippocampus] = None,
     hooks: Optional[SimHooks] = None,

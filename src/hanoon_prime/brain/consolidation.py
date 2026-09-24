@@ -577,7 +577,7 @@ class ConsolidationEngine:
         acting on a PENDING_HUMAN_APPROVAL retrain request.
         """
         try:
-            from .self_correction_policy import CorrectionJournal
+            from .self_correction_journal import CorrectionJournal
 
             items = CorrectionJournal().drain()
             if not items:

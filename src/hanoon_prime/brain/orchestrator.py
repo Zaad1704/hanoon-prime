@@ -23,7 +23,6 @@ from ..immune import (
     ENTRY_COST_AVERSE_GATE,
     ENTRY_COST_CAPTURE_MULTIPLE,
     ENTRY_REGIME_GATE,
-    FRACDIFF_ENABLED,
     NEURO_BLEND_ENABLED,
     round_trip_cost_fraction,
 )
@@ -57,7 +56,7 @@ from .gate_advisor import GateAdvisor
 from .gate_guard import declared_gates, verify_decision_boundary
 from .horizon_bandit import HorizonBandit
 from .learned_exit import LearnedExitPolicy
-from .learning_config import CROSS_ASSET_MOD_BOUND, META_DNN_ENABLED, REGIME_MIN_TRADES
+from .learning_config import CROSS_ASSET_MOD_BOUND, META_DNN_ENABLED
 from .memory import JuliMemory
 from .meta_label import MetaLabelModel
 from .meta_label import feature_vector as meta_features
@@ -1299,6 +1298,24 @@ class NeuromorphicBrain:
             return mods
         return mods + float(alpha.get("absorption", 0.0)) * ABSORPTION_SCORE_MOD
 
+    def _neuro_blend(
+        self, base_score: float, cal_adj: float, neuro_score: float
+    ) -> float:
+        """Blend cortex+calibration with the neuromorphic term when enabled."""
+        if NEURO_BLEND_ENABLED:
+            return (1 - NEURO_BLEND) * (
+                base_score + cal_adj
+            ) + NEURO_BLEND * neuro_score
+        # NEURO_BLEND_ENABLED=False: the neuromorphic term is dead —
+        # _compute_neuro_score() returns 0.0 above — so the legacy
+        # formula was a fixed 0.7x damping of every cortex score for
+        # zero neuro contribution. With the gate off the cortex score
+        # passes through un-damped, restoring the designed meaning of
+        # the dynamics.threshold band [0.45, 0.70] and PENNY_SCORE_BAR.
+        # Re-enabling the gate restores the 0.7/0.3 blend exactly.
+        # (FIX-2026-09-23-06)
+        return base_score + cal_adj
+
     def _score_pipeline(
         self,
         ticker: str,
@@ -1317,20 +1334,7 @@ class NeuromorphicBrain:
         nash_op = self._compute_nash_mod(nash_pred)
         neuro_score = self._compute_neuro_score(alpha, ticker)
         cal_adj = self._calibration_nudge(base.score)
-        if NEURO_BLEND_ENABLED:
-            blended = (1 - NEURO_BLEND) * (
-                base.score + cal_adj
-            ) + NEURO_BLEND * neuro_score
-        else:
-            # NEURO_BLEND_ENABLED=False: the neuromorphic term is dead —
-            # _compute_neuro_score() returns 0.0 above — so the legacy
-            # formula was a fixed 0.7x damping of every cortex score for
-            # zero neuro contribution. With the gate off the cortex score
-            # passes through un-damped, restoring the designed meaning of
-            # the dynamics.threshold band [0.45, 0.70] and PENNY_SCORE_BAR.
-            # Re-enabling the gate restores the 0.7/0.3 blend exactly.
-            # (FIX-2026-09-23-06)
-            blended = base.score + cal_adj
+        blended = self._neuro_blend(base.score, cal_adj, neuro_score)
         advisor_delta = self._advisor.threshold_delta()
         mods = self._compute_mods(
             halim, episodic, nash_op, ticker, cross, advisor_delta, thinker_mod
@@ -1659,7 +1663,6 @@ class NeuromorphicBrain:
         self._reflect_close(
             ticker, won, pnl_pct, direction, regime, score, rpe_surprise
         )
-        weights = self._weights_for(regime)
         self._wversion += 1
         self._apply_regime_weights(regime)
         self._realized.add_outcome(score, won, pnl_pct, direction)

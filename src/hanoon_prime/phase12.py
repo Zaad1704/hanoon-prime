@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from .eyes import load_ohlcv
+from .types import F64Array
 from .wfa import FoldResult, fold_windows
 
 LOOKBACK: int = 5  # trailing sessions used for the rank signal
@@ -23,8 +24,8 @@ FOLDS: int = 6
 
 
 def _session_open_close(
-    ts: list[str], open_: np.ndarray, close: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    ts: list[str], open_: F64Array, close: F64Array
+) -> tuple[F64Array, F64Array]:
     """First-open/last-close per calendar date from 1-min bars."""
     o_s, c_s, last = [], [], ""
     for t, o, c in zip(ts, open_, close):
@@ -45,7 +46,7 @@ def load_daily(path: str) -> dict[str, Any]:
     return {"open": o, "close": c}
 
 
-def _signal(soc: np.ndarray) -> np.ndarray:
+def _signal(soc: F64Array) -> F64Array:
     """Trailing LOOKBACK-session log return per session (feeds NEXT session)."""
     out = np.full(len(soc), np.nan)
     for i in range(LOOKBACK, len(soc)):
@@ -55,7 +56,7 @@ def _signal(soc: np.ndarray) -> np.ndarray:
     return out
 
 
-def _book(scores: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray] | None:
+def _book(scores: F64Array, n: int) -> tuple[F64Array, F64Array] | None:
     """(long_mask, short_mask) for one session from its cross-sectional scores."""
     valid = ~np.isnan(scores)
     if int(valid.sum()) < 2 * K:
@@ -74,7 +75,7 @@ def _fold_pnl(
     ticker: str,
     tickers: list[str],
     daily: dict[str, dict[str, Any]],
-    per_sess: list[tuple[np.ndarray, np.ndarray] | None],
+    per_sess: list[tuple[F64Array, F64Array] | None],
     start: int,
     end: int,
 ) -> list[float]:
@@ -94,10 +95,10 @@ def _fold_pnl(
 
 
 def _session_books(
-    tickers: list[str], sig_arr: dict[str, np.ndarray], n_sess: int
-) -> list[tuple[np.ndarray, np.ndarray] | None]:
+    tickers: list[str], sig_arr: dict[str, F64Array], n_sess: int
+) -> list[tuple[F64Array, F64Array] | None]:
     """Book per session (signal from s-1 close; first session never trades)."""
-    per_sess: list[tuple[np.ndarray, np.ndarray] | None] = [None]
+    per_sess: list[tuple[F64Array, F64Array] | None] = [None]
     for s in range(1, n_sess):
         prev = np.asarray([sig_arr[t][s - 1] for t in tickers], dtype=float)
         per_sess.append(_book(prev, len(tickers)))
@@ -132,9 +133,7 @@ def run_spread(
                 fold=k,
                 start=start,
                 end=end,
-                trades=list(
-                    pnl := _fold_pnl(ticker, tickers, daily, per_sess, start, end)
-                ),
+                trades=(pnl := _fold_pnl(ticker, tickers, daily, per_sess, start, end)),
                 ev_per_trade=float(np.mean(pnl)) if pnl else 0.0,
                 sharpe=0.0,
                 pnl=pnl,
@@ -147,7 +146,10 @@ def run_spread(
 
 
 def _decile_cells(
-    sig: dict[str, np.ndarray], oc: dict[str, np.ndarray], s: int, deciles: int
+    sig: dict[str, F64Array],
+    oc: dict[str, F64Array],
+    s: int,
+    deciles: int,
 ) -> list[tuple[float, int]]:
     """(mean O→C, decile) per valid ticker for session s, ranked by signal."""
     vals: list[tuple[float, float]] = []
@@ -183,8 +185,7 @@ def monotonicity_profile(
         return {}
 
     n_sess = min(n_ticks.values())
-    cells = [0.0] * deciles
-    denom = [0] * deciles
+    cells, denom = [0.0] * deciles, [0] * deciles
     for s in range(1, n_sess):
         for mean_oc, d in _decile_cells(sig, oc, s, deciles):
             cells[d] += mean_oc

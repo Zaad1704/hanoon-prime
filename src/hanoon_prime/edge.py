@@ -24,7 +24,6 @@ from .immune import (
     FIXED_FEE,
     PRIOR_BOTTOM,
     PRIOR_TOP,
-    PRIOR_TOP_MAX,
     TARGET_R_R,
 )
 

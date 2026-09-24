@@ -330,15 +330,20 @@ class TestPhase2System1Sanity:
         assert exc._pending_parent == set()
 
     def test_corrupt_dnn_artifact_degrades_without_crash(self, tmp_path, monkeypatch):
-        """Corrupt Meta-DNN weight file → gate degrades, never raises."""
+        """Corrupt Meta-DNN weight file → FAIL-CLOSED block, never raises.
+
+        Regression: FIX-2026-09-23-13
+        Regression: FIX-2026-09-23-15
+        """
         p = tmp_path / "dnn.json"
         p.write_text("{definitely not json!!")
         dnn = MetaDNN(path=p)  # must not raise
-        admit, p_win, _scale = dnn.infer(
+        admit, p_win, scale = dnn.infer(
             expand_features(0.8, 0.9, 0.5, 1, 0.02, 0.1, 0.3)
         )
-        assert admit is True
-        assert 0.0 <= p_win <= 1.0
+        assert admit is False
+        assert p_win == 0.5
+        assert scale == 0.0
 
         model = MetaLabelModel(path=tmp_path / "meta.json")
         monkeypatch.setattr("hanoon_prime.brain.meta_label.META_DNN_ENABLED", True)
@@ -354,10 +359,14 @@ class TestPhase2System1Sanity:
             obi=0.1,
             vpin=0.3,
         )
-        assert admit2 is True  # defect tolerated: admit at threshold, no veto-cascade
+        assert admit2 is False  # fail-closed: no usable model
 
     def test_dnn_exception_falls_back_to_rule_heuristics(self, tmp_path, monkeypatch):
-        """Weights unreadable at call time → shallow rule-based gate, no crash."""
+        """Weights unreadable at call time → FAIL-CLOSED block, no crash.
+
+        Regression: FIX-2026-09-23-13
+        Regression: FIX-2026-09-23-15
+        """
 
         def _boom():
             raise RuntimeError("weights gone")
@@ -376,7 +385,7 @@ class TestPhase2System1Sanity:
             obi=0.1,
             vpin=0.3,
         )
-        assert admit is True
+        assert admit is False
         assert 0.0 <= p <= 1.0
         assert 0.0 <= scale <= 1.0
 

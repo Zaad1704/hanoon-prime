@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ._telegram import safety_halt, shutdown, startup
+from ._telegram import startup
 from ._telegram_chat import TelegramChat
 from .brain.shared_state import BrainState
 from .config import TRADING_CONFIG

@@ -23,8 +23,8 @@ import pytest
 import hanoon_prime.brain.self_correction as sc
 from hanoon_prime.brain.meta_label_dnn import DNN_ABSTAIN_P_WIN, MetaDNN
 from hanoon_prime.brain.self_correction import CalibrationMonitor, PredictionLedger
+from hanoon_prime.brain.self_correction_journal import CorrectionJournal
 from hanoon_prime.brain.self_correction_policy import (
-    CorrectionJournal,
     DeratingPolicy,
     apply_derating,
     evaluate_weight,

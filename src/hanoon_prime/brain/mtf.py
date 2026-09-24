@@ -19,17 +19,9 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import numpy.typing as npt
 
-from .mtf_resample import (
-    _bucket_atr,
-    _bucket_atr_series,
-    _bucket_true_ranges,
-    _ema,
-    _window,
-    bucket_bars,
-    compute_obi,
-    compute_vpin,
-)
+from .mtf_resample import compute_obi, compute_vpin
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -43,7 +35,7 @@ ENTROPY_MIN_BARS: int = 60
 
 
 def compute_price_entropy(
-    close: list[float] | np.ndarray,
+    close: list[float] | npt.NDArray[np.float64],
     window: int = ENTROPY_WINDOW,
     end: int | None = None,
 ) -> float:
@@ -78,7 +70,7 @@ def compute_price_entropy(
 
 
 def compute_volume_entropy(
-    volume: list[float] | np.ndarray,
+    volume: list[float] | npt.NDArray[np.float64],
     window: int = ENTROPY_WINDOW,
     end: int | None = None,
 ) -> float:

@@ -14,31 +14,31 @@ Transport model (v2):
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
-import hmac
 import secrets
 import subprocess
 import sys
 import threading
 import time
 import warnings
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, cast
 from urllib.parse import urlparse
 
 from ._ib_marks import mark_positions
-from .inspection.notify import manifest_notify
-from .config import TRADING_CONFIG
 from .brain.learning_telemetry import consolidation, exploration, learning_state
+from .config import TRADING_CONFIG
 from .immune import (
     DAILY_LOSS_LIMIT,
     KILL_DAILY_LOSS_LIMIT,
     TELEMETRY_AUTH_ENABLED,
     TELEMETRY_PORT,
 )
+from .inspection.notify import manifest_notify
 from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
@@ -1682,9 +1682,12 @@ class TelemetryAPI:
         # fixtures (and any external harness) work without start().
         _H.bot = bot
         _H.journal_path = journal_path
+        _H.cache = self._cache
+        _H.cache_lock = self._cache_lock
         _H.extra_cache = {}
         _H.extra_lock = threading.Lock()
         _H.inspection_builder = None
+        _H.on_mutation = None
 
     # ── wiring ──────────────────────────────────────────────────────────
 
@@ -1788,7 +1791,9 @@ class TelemetryAPI:
                 self._token_path(),
             )
         else:
-            log.warning("telemetry bearer auth OFF — POST mutations DISABLED (fail-closed)")
+            log.warning(
+                "telemetry bearer auth OFF — POST mutations DISABLED (fail-closed)"
+            )
         log.info(
             "TelemetryAPI live on http://127.0.0.1:%s (SSE /stream, /snapshot)",
             TELEMETRY_PORT,

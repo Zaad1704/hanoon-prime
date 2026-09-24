@@ -6,14 +6,15 @@ from typing import Any
 
 import numpy as np
 
-from .phase12 import LOOKBACK, K, load_daily
+from .phase12 import LOOKBACK, K, _book, load_daily
+from .types import F64Array
 from .wfa import FoldResult, fold_windows
 
 BETA_LOOKBACK: int = 63  # trailing sessions used for the rolling OLS beta
 FOLDS: int = 6
 
 
-def _session_beta(close: np.ndarray, spy_close: np.ndarray) -> np.ndarray:
+def _session_beta(close: F64Array, spy_close: F64Array) -> F64Array:
     out = np.full(len(close), np.nan)
     name5 = _trailing_return(close)
     spy5 = _trailing_return(spy_close)
@@ -33,7 +34,7 @@ def _session_beta(close: np.ndarray, spy_close: np.ndarray) -> np.ndarray:
     return out
 
 
-def _trailing_return(close: np.ndarray) -> np.ndarray:
+def _trailing_return(close: F64Array) -> F64Array:
     out = np.full(len(close), np.nan)
     for i in range(LOOKBACK, len(close)):
         prev = close[i - LOOKBACK]
@@ -44,9 +45,9 @@ def _trailing_return(close: np.ndarray) -> np.ndarray:
 
 def _residual_signal(
     tickers: list[str], daily: dict[str, dict[str, Any]], n_sess: int
-) -> dict[str, np.ndarray]:
+) -> dict[str, F64Array]:
     spy_close = daily["SPY"]["close"]
-    out: dict[str, np.ndarray] = {}
+    out: dict[str, F64Array] = {}
     for t in tickers:
         if t == "SPY":
             continue
@@ -62,24 +63,11 @@ def _residual_signal(
     return out
 
 
-def _book(scores: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray] | None:
-    valid = ~np.isnan(scores)
-    if int(valid.sum()) < 2 * K:
-        return None
-    idx = np.argsort(scores, kind="mergesort")
-    valid_idx = [i for i in idx if valid[i]]
-    long_ = np.zeros(n, dtype=bool)
-    short_ = np.zeros(n, dtype=bool)
-    for take, mask in ((valid_idx[-K:], long_), (valid_idx[:K], short_)):
-        mask[take] = True
-    return long_, short_
-
-
 def _fold_pnl(
     ticker: str,
     tickers: list[str],
     daily: dict[str, dict[str, Any]],
-    per_sess: list[tuple[np.ndarray, np.ndarray] | None],
+    per_sess: list[tuple[F64Array, F64Array] | None],
     start: int,
     end: int,
 ) -> list[float]:
@@ -100,9 +88,9 @@ def _fold_pnl(
 
 
 def _books(
-    tickers: list[str], sig: dict[str, np.ndarray], n_sess: int
-) -> list[tuple[np.ndarray, np.ndarray] | None]:
-    per_sess: list[tuple[np.ndarray, np.ndarray] | None] = [None]
+    tickers: list[str], sig: dict[str, F64Array], n_sess: int
+) -> list[tuple[F64Array, F64Array] | None]:
+    per_sess: list[tuple[F64Array, F64Array] | None] = [None]
     for s in range(1, n_sess):
         prev = np.asarray([sig[t][s] for t in tickers], dtype=float)
         per_sess.append(_book(prev, len(tickers)))

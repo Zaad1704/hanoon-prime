@@ -556,3 +556,43 @@ CONTRACT. All producers, consumers, and tests updated to triples.
   `self_correction_policy.py` (derating + journal, 193 lines) so the
   200-line contract survives Black formatting; both modules are fully
   typed, documented, and covered by the no-training-machinery guard.
+
+## 2026-09-24 — src-2 merge: R3 self-correction split, fail-closed DNN tests, telemetry cache isolation
+
+### FIX-2026-09-23-14 — telemetry snapshot cache leaked across suite files; FakeBot safety-net/halt state overridden
+- **Symptom:** in a full-suite run, `tests/test_telemetry.py` failed
+  5 assertions (`daily_pnl` 0.0 instead of −50.0, `enabled` not
+  sticking after POST, `halted`/`verdicts`/`risk_scalar` reading stale
+  values) while the same file passed in isolation or with any single
+  neighbor. Cause: `_H.cache` (class-level snapshot shared by
+  `BaseHTTPRequestHandler`) was left populated by earlier files that
+  called `TelemetryAPI.start()` / `_make_handler`; snapshot-keyed routes
+  (`/health`, `/safety-net`, `/risk`, `/verdicts`) then preferred the
+  stale snapshot over the FakeBot's live builders.
+- **Root cause:** `TelemetryAPI.__init__` bound `bot`/`journal_path` for
+  bare `HTTPServer(_H)` fixtures but left `_H.cache` / `_H.cache_lock` /
+  `_H.on_mutation` untouched, so any prior populated snapshot survived
+  and `_serve_route` short-circuited to it.
+- **Fix:** `__init__` now installs a fresh `self._cache` +
+  `cache_lock` and clears `on_mutation`; the test-file autouse
+  `_isolate_handler` fixture clears `cache`/`extra_cache` before every
+  test (and restores the prior snapshot after) so GET always falls
+  through to live builders.
+- **Class:** B
+- **Guard:** `test: tests/test_telemetry.py::test_cache_cleared_by_isolate_fixture`, `test: tests/test_telemetry.py::test_get_status_disabled_by_default`, `test: tests/test_telemetry.py::test_post_enable`, `test: tests/test_telemetry.py::test_health_reads_policy_state_when_present`, `test: tests/test_telemetry.py::test_verdicts_endpoint_lists_recent`, `test: tests/test_telemetry.py::test_risk_state_subset_keys`
+
+### FIX-2026-09-23-15 — DNN-guard / six-phase tests still encoded fail-open admit-by-default
+- **Symptom:** after the fail-closed DNN contract landed, five tests
+  still asserted `admit is True` for collapsed,
+  dimension-mismatch, cold, corrupt, and exception paths
+  (`test_meta_label_dnn_guard.py` ×3, `test_six_phase_verification.py`
+  ×2), so the suite reported those as failures even though production
+  behavior was correct.
+- **Root cause:** the tests were written for the pre-fix fail-open
+  contract and were not updated when the fail-closed semantics landed.
+- **Fix:** tests updated to assert `admit is False`, `p_win ==
+  DNN_ABSTAIN_P_WIN` (0.5), `scale == 0.0`, and that
+  `MetaLabelModel.gate` also blocks when the DNN is unusable; method
+  renamed `test_cold_model_bypasses` → `test_cold_model_blocks`.
+- **Class:** F
+- **Guard:** `test: tests/test_meta_label_dnn_guard.py::test_load_rejects_collapsed_artifact`, `test: tests/test_meta_label_dnn_guard.py::test_load_rejects_dimension_mismatch`, `test: tests/test_meta_label_dnn_guard.py::test_cold_model_blocks`, `test: tests/test_six_phase_verification.py::test_corrupt_dnn_artifact_degrades_without_crash`, `test: tests/test_six_phase_verification.py::test_dnn_exception_falls_back_to_rule_heuristics`

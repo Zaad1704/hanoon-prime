@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any
 
 from .learning_config import (
     SLEEP_COOLDOWN_SEC,

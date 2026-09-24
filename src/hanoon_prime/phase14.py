@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from .types import F64Array
 from .wfa import FoldResult, fold_windows
 
 ENTRY_FROM = "10:00"  # first allowed entry minute ET
@@ -47,7 +48,7 @@ class _Sess:
     s: int
 
 
-def _rvol_at(volume: np.ndarray, i: int) -> float:
+def _rvol_at(volume: F64Array, i: int) -> float:
     hist = volume[max(0, i - 20) : i]
     if hist.size < 5:
         return 0.0
@@ -55,9 +56,10 @@ def _rvol_at(volume: np.ndarray, i: int) -> float:
     return float(volume[i]) / med if med > 0 else 0.0
 
 
-def _session_stats(
-    data: dict[str, Any], ts: list[str]
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int], np.ndarray]:
+_Stats = tuple[F64Array, F64Array, F64Array, F64Array, list[int], F64Array]
+
+
+def _session_stats(data: dict[str, Any], ts: list[str]) -> _Stats:
     o, h, l, c, starts, last = [], [], [], [], [], ""
     for i, t in enumerate(ts):
         if t[:10] != last:
@@ -136,10 +138,8 @@ def _finalize(
     if ex is None:
         return t
     t.exit = ex
-    if t.side == 1:
-        t.r = (ex - t.entry) / (t.entry - t.stop)
-    else:
-        t.r = (t.entry - ex) / (t.stop - t.entry)
+    # R multiple: signed exit distance over stop distance (side=+1 long/-1 short)
+    t.r = t.side * (ex - t.entry) / abs(t.entry - t.stop)
     trades.append(t)
     return None
 

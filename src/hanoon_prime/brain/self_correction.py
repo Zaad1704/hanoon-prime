@@ -59,6 +59,19 @@ def _records(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _newest_open(records: list[dict[str, Any]], ticker: str) -> dict[str, Any] | None:
+    """Newest open prediction for ticker with no resolution yet."""
+    closed = {r.get("id") for r in records if r.get("type") == "resolve"}
+    for r in reversed(records):
+        if (
+            r.get("type") == "open"
+            and r.get("id") not in closed
+            and r.get("ticker", "") in ("", ticker)
+        ):
+            return r
+    return None
+
+
 class PredictionLedger:
     """Append-only log of gate decisions and their resolutions."""
 
@@ -81,9 +94,8 @@ class PredictionLedger:
         """Append one gate decision; returns the prediction id."""
         pred_id = uuid.uuid4().hex[:16]
         feats = [round(float(v), 4) for v in features]
-        digest = hashlib.sha256(
-            ",".join(f"{v:.4f}" for v in feats).encode()
-        ).hexdigest()[:16]
+        raw = ",".join(f"{v:.4f}" for v in feats)
+        digest = hashlib.sha256(raw.encode()).hexdigest()[:16]
         _append(
             self._file,
             {
@@ -113,20 +125,9 @@ class PredictionLedger:
         hold_minutes: float | None = None,
     ) -> str | None:
         """Resolve the newest still-open prediction for a ticker."""
-        from .self_correction_policy import CorrectionJournal
+        from .self_correction_journal import CorrectionJournal
 
-        records = _records(self._file)
-        closed = {r.get("id") for r in records if r.get("type") == "resolve"}
-        rec = next(
-            (
-                r
-                for r in reversed(records)
-                if r.get("type") == "open"
-                and r.get("id") not in closed
-                and r.get("ticker", "") in ("", ticker)
-            ),
-            None,
-        )
+        rec = _newest_open(_records(self._file), ticker)
         if rec is None:
             return None
         _append(
@@ -159,13 +160,16 @@ class PredictionLedger:
         pairs: list[tuple[float, bool]] = []
         total = 0
         for r in _records(self._file):
-            if r.get("type") == "open":
+            rtype = r.get("type")
+            if rtype == "open":
                 opens[str(r.get("id"))] = float(r.get("p_win", 0.5))
-            elif r.get("type") == "resolve":
-                total += 1
-                p = opens.pop(str(r.get("id")), None)
-                if p is not None:
-                    pairs.append((p, bool(r.get("won"))))
+                continue
+            if rtype != "resolve":
+                continue
+            total += 1
+            p = opens.pop(str(r.get("id")), None)
+            if p is not None:
+                pairs.append((p, bool(r.get("won"))))
         return list(reversed(pairs[-n:])), total
 
 

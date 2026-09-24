@@ -10,6 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+import numpy.typing as npt
+
+# Shared numpy array aliases — import these instead of spelling out
+# ``npt.NDArray[np.float64]`` to keep modules under the R3 200-line limit.
+F64Array = npt.NDArray[np.float64]
+F64Mask = npt.NDArray[np.bool_]
+I64Array = npt.NDArray[np.int64]
+
 
 @dataclass
 class Position:

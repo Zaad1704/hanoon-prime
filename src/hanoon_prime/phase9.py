@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+import numpy.typing as npt
 
 from .eyes import load_ohlcv
 from .hands import EvalContext, SimHooks, simulate_ticker
@@ -110,11 +111,8 @@ def earnings_session_dates(
     for iso in earnings_et:
         t = _dt(iso) if "T" in iso else datetime.fromisoformat(iso)
         base = t.date().isoformat()
-        candidate = (
-            base
-            if t.hour < EARN_HOUR_AMC
-            else next((d for d in ordered if d > base), None)
-        )
+        later: str | None = next((d for d in ordered if d > base), None)
+        candidate = base if t.hour < EARN_HOUR_AMC else later
         if candidate and candidate in rth_set:
             out.add(candidate)
     return out
@@ -132,7 +130,7 @@ def load_earnings(ticker: str, earnings_dir: str | Path) -> list[str]:
     return list(rows) if rows else []
 
 
-def _catalyst_mask(times: list[str], allowed_dates: set[str]) -> np.ndarray:
+def _catalyst_mask(times: list[str], allowed_dates: set[str]) -> npt.NDArray[np.bool_]:
     """Per-bar mask: True when the bar's session date is allowed."""
     n = len(times)
     mask = np.zeros(n, dtype=bool)
@@ -143,8 +141,8 @@ def _catalyst_mask(times: list[str], allowed_dates: set[str]) -> np.ndarray:
 
 def _catalyst_gate(
     i: int,
-    is_ok: np.ndarray,
-    c_ok: np.ndarray,
+    is_ok: npt.NDArray[np.bool_],
+    c_ok: npt.NDArray[np.bool_],
     use_gate: bool,
     bars: BarSeries,
 ) -> bool:
@@ -162,7 +160,7 @@ def make_catalyst_hooks(
     window: tuple[str, str] = (SESSION_START, SESSION_END),
     use_gate: bool = True,
     use_rs: bool = True,
-    catalyst_ok: Optional[np.ndarray] = None,
+    catalyst_ok: Optional[npt.NDArray[np.bool_]] = None,
 ) -> SimHooks:
     """Phase-7 lean hooks whose gate ALSO requires a catalyst session bar.
 
@@ -223,7 +221,7 @@ def _scored_fold_catalyst(
     cfg: LeanCfg,
     window: tuple[int, int, int],
     brain: Any,
-    full_mask: np.ndarray,
+    full_mask: npt.NDArray[np.bool_],
 ) -> FoldResult:
     """One OOS fold through the catalyst-gated lean stack."""
     j, start, end = window

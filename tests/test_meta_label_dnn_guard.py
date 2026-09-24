@@ -1,4 +1,8 @@
-"""Tests for brain.meta_label_dnn_guard — ironclad anti-degeneration guard."""
+"""Tests for brain.meta_label_dnn_guard — ironclad anti-degeneration guard.
+
+Regression: FIX-2026-09-23-13
+Regression: FIX-2026-09-23-15
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from hanoon_prime.brain.learning_config import META_WIN_THRESHOLD
-from hanoon_prime.brain.meta_label_dnn import MetaDNN
+from hanoon_prime.brain.meta_label_dnn import DNN_ABSTAIN_P_WIN, MetaDNN
 from hanoon_prime.brain.meta_label_dnn_guard import (
     MIN_OUTPUT_SPREAD,
     MIN_WEIGHT_STD,
@@ -119,7 +122,11 @@ class TestGovern:
 
 class TestGuardEnforcement:
     def test_load_rejects_collapsed_artifact(self, tmp_path: Path):
-        """Constant-output artifact on disk → rejected, gatekeeper bypassed."""
+        """Collapsed artifact → defective; FAIL-CLOSED blocks until retrain.
+
+        Regression: FIX-2026-09-23-13
+        Regression: FIX-2026-09-23-15
+        """
         p = tmp_path / "collapsed.json"
         rng = np.random.default_rng(4)
         layers = [
@@ -140,9 +147,9 @@ class TestGuardEnforcement:
         assert model._defective
         assert not model._built
         admit, pwin, scale = model.infer([0.5] * 9)
-        assert admit is True
-        assert pwin == META_WIN_THRESHOLD
-        assert scale == 0.0  # de Prado: collapsed -> minimal allocation
+        assert admit is False
+        assert pwin == DNN_ABSTAIN_P_WIN
+        assert scale == 0.0
 
     def test_load_accepts_healthy_artifact(self, tmp_path: Path):
         """Healthy artifact on disk → loaded and active, not bypassed."""
@@ -167,7 +174,11 @@ class TestGuardEnforcement:
         assert model._built
 
     def test_load_rejects_dimension_mismatch(self, tmp_path: Path):
-        """Artifact trained for a different input_dim fails open (no crash wall)."""
+        """Artifact trained for a different input_dim → FAIL-CLOSED block.
+
+        Regression: FIX-2026-09-23-13
+        Regression: FIX-2026-09-23-15
+        """
         p = tmp_path / "mismatch.json"
         rng = np.random.default_rng(5)
         layers = [
@@ -188,17 +199,21 @@ class TestGuardEnforcement:
         assert model._defective
         assert not model._built
         admit, pwin, scale = model.infer([0.9] * 9)
-        assert admit is True
-        assert pwin == META_WIN_THRESHOLD
-        assert scale == 0.0  # de Prado: defective -> minimal allocation
+        assert admit is False
+        assert pwin == DNN_ABSTAIN_P_WIN
+        assert scale == 0.0
 
-    def test_cold_model_bypasses(self, tmp_path: Path):
-        """No artifact -> infer admits instead of random-vetoing."""
+    def test_cold_model_blocks(self, tmp_path: Path):
+        """No artifact → FAIL-CLOSED block (never random-admits).
+
+        Regression: FIX-2026-09-23-13
+        Regression: FIX-2026-09-23-15
+        """
         model = MetaDNN(path=tmp_path / "absent.json")
         admit, pwin, scale = model.infer([0.9] * 9)
-        assert admit is True
-        assert pwin == META_WIN_THRESHOLD
-        assert scale == 0.0  # de Prado: cold model -> minimal allocation
+        assert admit is False
+        assert pwin == DNN_ABSTAIN_P_WIN
+        assert scale == 0.0
 
     def test_train_refuses_to_save_collapsed(self, tmp_path: Path):
         """Training that stays collapsed must NOT write the artifact."""
