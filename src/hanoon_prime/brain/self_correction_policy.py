@@ -141,3 +141,27 @@ def apply_derating(
     bar = threshold + (BAR_RAISE if weight < 1.0 else 0.0)
     ok = weight > 0.0 and admit and p_win >= bar
     return bool(ok), p_win, round(max(0.0, min(size_scale, size_scale * weight)), 4)
+
+
+from .self_correction_journal import (
+    REVIEW_MAX_DRAIN,
+    REVIEW_P_HIGH,
+    REVIEW_P_LOW,
+    REVIEW_PNL_LOSS,
+    REVIEW_PNL_WIN,
+    CorrectionJournal,
+)
+
+__all__ = [
+    "BAR_RAISE",
+    "CorrectionJournal",
+    "DeratingPolicy",
+    "REVIEW_MAX_DRAIN",
+    "REVIEW_P_HIGH",
+    "REVIEW_P_LOW",
+    "REVIEW_PNL_LOSS",
+    "REVIEW_PNL_WIN",
+    "apply_derating",
+    "evaluate_weight",
+    "request_retrain",
+]

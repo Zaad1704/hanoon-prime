@@ -76,3 +76,24 @@ class CorrectionJournal:
         except OSError as exc:
             log.warning("correction journal drain failed: %s", exc)
         return items
+
+
+from .self_correction_policy import (
+    DeratingPolicy,
+    apply_derating,
+    evaluate_weight,
+    request_retrain,
+)
+
+__all__ = [
+    "CorrectionJournal",
+    "DeratingPolicy",
+    "REVIEW_MAX_DRAIN",
+    "REVIEW_P_HIGH",
+    "REVIEW_P_LOW",
+    "REVIEW_PNL_LOSS",
+    "REVIEW_PNL_WIN",
+    "apply_derating",
+    "evaluate_weight",
+    "request_retrain",
+]
