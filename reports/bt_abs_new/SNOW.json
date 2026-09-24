@@ -1,0 +1,16 @@
+{
+  "ticker": "SNOW",
+  "total_trades": 15,
+  "wins": 4,
+  "losses": 11,
+  "win_rate": 0.2667,
+  "expectancy": -0.0719,
+  "ev_per_trade": -0.0719,
+  "total_return_pct": -0.75,
+  "avg_win_pct": 1.7149,
+  "avg_loss_pct": 0.6914,
+  "realized_rr": 2.4804,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -0.0889,
+  "status": "UNPROFITABLE"
+}

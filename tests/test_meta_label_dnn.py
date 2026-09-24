@@ -9,16 +9,39 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hanoon_prime.brain.learning_config import (
-    META_CUT,
-    META_DNN_HIDDEN,
-    META_WIN_THRESHOLD,
-)
+from hanoon_prime.brain.learning_config import META_DNN_HIDDEN, META_WIN_THRESHOLD
 from hanoon_prime.brain.meta_label_dnn import (
+    DNN_ABSTAIN_P_WIN,
     MetaDNN,
     calculate_meta_size_scale,
     expand_features,
 )
+
+
+def _write_trained_artifact(path: Path) -> None:
+    """Write a usable DNN artifact: He-init weights + train report sidecar.
+
+    The readiness gate requires the artifact on disk AND a .report.json
+    carrying a train timestamp; the ironclad guard additionally requires
+    non-degenerate weights whose outputs vary over the probe set.
+    """
+    import time
+
+    rng = np.random.default_rng(7)
+    dims = [9, *META_DNN_HIDDEN, 1]
+    weights = []
+    for fan_in, fan_out in zip(dims, dims[1:]):
+        w = rng.normal(0.0, math.sqrt(2.0 / fan_in), (fan_in, fan_out))
+        weights.append({"w": w.astype(np.float64).tolist(), "b": [0.0] * fan_out})
+    path.write_text(
+        json.dumps(
+            {"hidden": list(META_DNN_HIDDEN), "input_dim": 9, "weights": weights}
+        )
+    )
+    path.with_suffix(".report.json").write_text(
+        json.dumps({"train_ts": time.time(), "verdict": "healthy"})
+    )
+
 
 # ── Feature expansion ────────────────────────────────────────────────
 
@@ -90,10 +113,16 @@ class TestMetaDNN:
         assert isinstance(p, float)
         assert 0.0 <= p <= 1.0
 
-    def test_infer_admit_above_threshold(self):
-        """High-confidence model admits when P(Win) >= threshold."""
-        model = MetaDNN(path=Path("/tmp/_test_dnn_infer.json"))
-        # Force high weights on first layer to get strong output
+    def test_infer_blocks_when_never_trained(self, tmp_path: Path):
+        """FAIL-CLOSED: injected layers without an artifact/report BLOCK.
+
+        Regression: FIX-2026-09-23-13 — a model with no trained artifact
+        used to bypass to admittance; now infer() returns
+        (admit=False, p=0.5, size=0.0) instead of passing the trade.
+        """
+        model = MetaDNN(path=tmp_path / "never_trained.json")
+        # Plausible-looking injected weights, but no artifact on disk and
+        # no train report -> the readiness gate must still block.
         rng = np.random.default_rng(42)
         w0 = rng.normal(5.0, 0.1, (9, META_DNN_HIDDEN[0]))
         b0 = np.zeros(META_DNN_HIDDEN[0])
@@ -108,8 +137,27 @@ class TestMetaDNN:
         ]
         model._built = True
         admit, p, scale = model.infer([0.9] * 9)
+        assert admit is False
+        assert p == pytest.approx(DNN_ABSTAIN_P_WIN)
+        assert scale == 0.0
+        assert model.abstain_reason == "missing_artifact"
+
+    def test_infer_admits_with_trained_artifact(self, tmp_path: Path):
+        """A model with a valid artifact AND train report is usable.
+
+        Regression: FIX-2026-09-23-13 — the admit path still works once
+        the readiness gate passes; only never-trained models block.
+        """
+        path = tmp_path / "dnn_trained.json"
+        _write_trained_artifact(path)
+        model = MetaDNN(path=path)
+        assert model.abstain_reason is None  # readiness gate passes
+        # Simulate a high-confidence trained model deterministically.
+        model.predict = lambda feats: 0.9
+        admit, p, scale = model.infer([0.9] * 9)
         assert admit is True
-        assert p >= META_WIN_THRESHOLD
+        assert p == pytest.approx(0.9)
+        assert scale > 0.0
 
     def test_infer_veto_below_threshold(self):
         """Low-confidence model vetoes when P(Win) < threshold."""
@@ -132,25 +180,28 @@ class TestMetaDNN:
         assert p < META_WIN_THRESHOLD
         assert scale == 0.0  # de Prado: below threshold -> zero allocation
 
-    def test_size_scale_monotonic(self):
-        """size_scale increases as P(Win) approaches threshold."""
-        model = MetaDNN(path=Path("/tmp/_test_dnn_mono.json"))
-        # Cold models bypass to admittance; build so infer() consults predict().
+    def test_infer_blocks_without_artifact_despite_fake_predict(self, tmp_path: Path):
+        """FAIL-CLOSED: no artifact/report -> every infer() blocks, zero scale.
+
+        Regression: FIX-2026-09-23-13 — cold models used to bypass to
+        admittance; now the readiness gate blocks regardless of what
+        predict() would return. The P(Win)->scale monotonicity itself is
+        pinned at the unit level by TestCalculateMetaSizeScale::test_monotonic.
+        """
+        model = MetaDNN(path=tmp_path / "cold.json")
         model._built = True
         model._layers = [(np.ones((9, 1)), np.zeros(1))]
-        # Use fake predict to test scale calculation directly
+        # Even a predict() that would admit cannot move a blocked gate.
         original_predict = model.predict
-        model.predict = lambda feats: 0.3  # below threshold
-        _, _, s1 = model.infer([0.0] * 9)
-        model.predict = lambda feats: 0.45  # still below threshold
-        _, _, s2 = model.infer([0.0] * 9)
-        model.predict = lambda feats: 0.60  # above threshold
-        _, _, s3 = model.infer([0.0] * 9)
-        model.predict = original_predict
-        # Below threshold: both zero; above threshold: positive scale
-        assert s1 == 0.0
-        assert s2 == 0.0
-        assert s3 > 0.0
+        try:
+            for fake_p in (0.3, 0.45, 0.60):
+                model.predict = lambda feats, _p=fake_p: _p
+                admit, p, s = model.infer([0.0] * 9)
+                assert admit is False
+                assert p == pytest.approx(DNN_ABSTAIN_P_WIN)
+                assert s == 0.0
+        finally:
+            model.predict = original_predict
 
     def test_train_reduces_loss(self):
         """Training loop reduces BCE loss over epochs."""

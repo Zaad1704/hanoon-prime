@@ -1,0 +1,16 @@
+{
+  "ticker": "SPY",
+  "total_trades": 25,
+  "wins": 2,
+  "losses": 23,
+  "win_rate": 0.08,
+  "expectancy": -0.8002,
+  "ev_per_trade": -0.8002,
+  "total_return_pct": -2.77,
+  "avg_win_pct": 0.2072,
+  "avg_loss_pct": 0.1384,
+  "realized_rr": 1.497,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -1.1459,
+  "status": "UNPROFITABLE"
+}

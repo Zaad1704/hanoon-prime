@@ -41,6 +41,30 @@ HALIM_URL: str = "http://127.0.0.1:8765"
 CYCLE_INTERVAL: float = 30.0
 
 
+def _epoch_seconds(v: Any) -> float | None:
+    """Best-effort epoch seconds from a float/int/str or datetime-like."""
+    if v is None:
+        return None
+    ts = getattr(v, "timestamp", None)
+    if callable(ts):
+        try:
+            return float(ts())
+        except (TypeError, ValueError, OSError):
+            return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _hold_minutes(entry_t: Any, exit_t: Any) -> float | None:
+    """Minutes between two trade timestamps; None when either is unusable."""
+    start, end = _epoch_seconds(entry_t), _epoch_seconds(exit_t)
+    if start is None or end is None:
+        return None
+    return round((end - start) / 60.0, 1)
+
+
 class ConsolidationEngine:
     """System 2: Background cognitive engine — runs every 10-30s."""
 
@@ -153,6 +177,7 @@ class ConsolidationEngine:
             enabled=self.safety.enabled,
             halted=self.safety.halted,
             latched=self.safety.latched,
+            training_kill_bypass=self.safety.kill_bypass,
             pause_reason=reason if not auth else "",
             consecutive_losses=int(self.state.get("consecutive_losses", 0)),
             daily_pnl=float(feed.get("daily_pnl", 0.0)),
@@ -185,6 +210,7 @@ class ConsolidationEngine:
         self._update_policy()
         self._update_pillar()
         self._maybe_sleep_replay()
+        self._self_correction_cycle()
         self._maybe_research()
         if self._shadow_cycle is not None:
             try:
@@ -476,14 +502,34 @@ class ConsolidationEngine:
     def _on_trade_closed(self, trade: Trade) -> None:
         """Callback from TradeBuffer when a round-trip closes."""
         self.supervisor.on_trade_close(trade)
+        try:
+            from .self_correction import PredictionLedger
+
+            pnl = float(getattr(trade, "pnl", 0.0) or 0.0)
+            PredictionLedger().resolve_latest(
+                ticker=str(getattr(trade, "ticker", "unknown")),
+                realized_pnl=pnl,
+                won=bool(pnl > 0),
+                hold_minutes=_hold_minutes(
+                    getattr(trade, "entry_time", None),
+                    getattr(trade, "exit_time", None),
+                ),
+            )
+        except Exception as exc:
+            log.debug("self-correction resolve failed: %s", exc)
         log.info("Buffer trade closed: %s pnl=%.2f", trade.ticker, trade.pnl)
 
     def run_sleep_replay(
         self,
-        replay_list: list[tuple[dict[str, float], float]] | None = None,
+        replay_list: list[tuple[dict[str, float], float, bool]] | None = None,
         duration_sec: float = 60.0,
     ) -> Optional[SleepResult]:
-        """Run sleep consolidation cycle for offline learning."""
+        """Run sleep consolidation cycle for offline learning.
+
+        replay_list entries are (pattern, drive, won): the explicit polarity
+        is threaded through to the engine so losers are punished, not
+        rewarded (FIX-2026-09-23-08).
+        """
         if self._sleep_engine is None:
             return None
         return self._sleep_engine.run_cycle(
@@ -519,6 +565,32 @@ class ConsolidationEngine:
         result = self.run_sleep_replay(replay_list=weighted, duration_sec=5.0)
         if result is not None:
             log.info("S2 SLEEP: replayed %d patterns", result.patterns_replayed)
+
+    def _self_correction_cycle(self) -> None:
+        """Mark queued DNN mispredictions as reviewed (read-only).
+
+        Drains the CorrectionJournal; drain() appends each item to the
+        persistent reviewed journal before removing it from the queue.
+        This hook only records and logs the review — it never trains,
+        never fits, never replays into parameters, and never changes a
+        parameter. The only path that may change the DNN is a human
+        acting on a PENDING_HUMAN_APPROVAL retrain request.
+        """
+        try:
+            from .self_correction_policy import CorrectionJournal
+
+            items = CorrectionJournal().drain()
+            if not items:
+                return
+            losses = sum(1 for it in items if not it.get("won", True))
+            log.info(
+                "SELF-CORRECTION: marked %d queued mispredictions reviewed "
+                "(%d losses); journaled to reviewed.jsonl, no parameters changed",
+                len(items),
+                losses,
+            )
+        except Exception as exc:
+            log.debug("self-correction cycle failed: %s", exc)
 
     @property
     def sleep_engine(self) -> Optional[SleepReplayEngine]:

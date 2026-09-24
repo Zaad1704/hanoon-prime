@@ -1,0 +1,16 @@
+{
+  "ticker": "F",
+  "total_trades": 17,
+  "wins": 3,
+  "losses": 14,
+  "win_rate": 0.1765,
+  "expectancy": -0.4802,
+  "ev_per_trade": -0.4802,
+  "total_return_pct": -2.49,
+  "avg_win_pct": 0.5933,
+  "avg_loss_pct": 0.305,
+  "realized_rr": 1.9453,
+  "max_drawdown": -7.2753,
+  "sharpe_ratio": -0.3741,
+  "status": "UNPROFITABLE"
+}

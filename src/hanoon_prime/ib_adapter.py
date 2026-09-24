@@ -22,7 +22,14 @@ from .ib_compat import _ib_available, ib
 from .ib_cycle import BotCycleMixin, SafetyNetStopped, try_connect
 from .ib_executor import IBExecutor
 from .ib_streamer import IBStreamer
-from .immune import IB_CLIENT_ID, IB_HOST, IB_LIVE_PORT, IB_PAPER_PORT
+from .immune import (
+    IB_CLIENT_ID,
+    IB_HOST,
+    IB_LIVE_PORT,
+    IB_PAPER_PORT,
+    TRAINING_KILL_BYPASS,
+    assert_paper_only_for_training,
+)
 from .juli import JuliBrain
 from .memory import Journal
 from .monitor.observe import MonitorSuite
@@ -50,6 +57,23 @@ class IBStreamingBot(BotCycleMixin):
         self.ib: Any = ib.IB()
         self.ib.RequestTimeout = IB_REQUEST_TIMEOUT_SECS
         self.account = account
+        # Fail-closed training guard: with the kill switch bypassed, only
+        # the PAPER account may ever be constructed (see immune.py).
+        assert_paper_only_for_training(account=account, port=IB_PAPER_PORT)
+        if TRAINING_KILL_BYPASS:
+            log.critical(
+                "!!! TRAINING_KILL_BYPASS ACTIVE — $500 kill switch BYPASSED "
+                "(paper training only). Set TRAINING_KILL_BYPASS = False in "
+                "immune.py before any live trading. !!!"
+            )
+        self._init_brain_and_safety()
+        self._init_execution_stack()
+        self._init_monitoring_stack()
+        self._init_runtime_state()
+        self._setup_signals()
+
+    def _init_brain_and_safety(self) -> None:
+        """Core brain, safety nets, and journal wiring (init phase 1)."""
         # Safety nets OFF by default; blocks entries when tripped, never stops.
         self.hippocampus = Hippocampus(safety_enabled=False)
         self._halted: bool = False
@@ -61,6 +85,9 @@ class IBStreamingBot(BotCycleMixin):
         if consolidation is not None:
             consolidation.safety.attach_journal(self.journal)
             self._wire_kill_hook(consolidation.safety)
+
+    def _init_execution_stack(self) -> None:
+        """Streaming, execution, and telegram-chat wiring (init phase 2)."""
         self.streamer = IBStreamer(self.ib)
         self.executor = IBExecutor(self.ib, self.hippocampus, self.journal)
         self.executor.on_fill_confirmed = self._confirm_fill
@@ -68,9 +95,16 @@ class IBStreamingBot(BotCycleMixin):
         self.executor._winrate_provider = self.juli.brain._realized.recent_win_rate
         # Telegram chat (read-only queries answered from brain state)
         self._chat = TelegramChat(state_provider=self._chat_state)
+
+    def _init_monitoring_stack(self) -> None:
+        """Pipeline monitor, vitals log, and monitor suite (init phase 3)."""
+        repo_root = Path(__file__).resolve().parents[2]
         self.monitor = PipelineMonitor(self, self.journal)
         self.vitals_log = VitalsLog(repo_root / "runtime" / "vitals")
         self.monitors = MonitorSuite(self, self.brain_state)
+
+    def _init_runtime_state(self) -> None:
+        """Per-run mutable state: beats, close-tracking, gateway supervision."""
         self._running = self._last_beat = False
         self._closing: set[str] = set()
         self._watched: set[str] = set()
@@ -83,7 +117,6 @@ class IBStreamingBot(BotCycleMixin):
         self._gw_was_connected: bool = True
         self._gw_attempts: int = 0
         self._order_placed_ts: dict[int, float] = {}
-        self._setup_signals()
 
     def _init_position_cache(self) -> None:
         self._positions_lock = threading.RLock()
@@ -94,14 +127,26 @@ class IBStreamingBot(BotCycleMixin):
         }
 
     def _wire_kill_hook(self, safety: Any) -> None:
-        def _kill_cancel(reason: str) -> None:
-            log.critical("KILL cancel_all on %s", reason)
-            try:
-                self.executor.cancel_all()
-            except Exception as exc:
-                log.warning("Kill cancel failed: %s", exc)
+        safety.on_kill(self._on_kill)
 
-        safety.on_kill(_kill_cancel)
+    def _on_kill(self, reason: str) -> None:
+        """Kill-switch hook: cancel working orders AND flatten all positions.
+
+        A latched kill means get flat NOW — cancelling orders alone leaves
+        open positions exposed with no entries allowed to manage them.
+        Market orders are used so the flatten fills (FIX-2026-09-08-05).
+        """
+        log.critical("KILL cancel_all on %s", reason)
+        try:
+            self.executor.cancel_all()
+        except Exception as exc:
+            log.warning("Kill cancel failed: %s", exc)
+        try:
+            flattened = self.executor.close_all_positions(self.streamer)
+        except Exception as exc:
+            log.warning("Kill flatten failed: %s", exc)
+        else:
+            log.critical("KILL flattened %d position(s)", flattened)
 
     def _setup_signals(self) -> None:
         """Handle SIGINT/SIGTERM for graceful shutdown."""
@@ -120,6 +165,8 @@ class IBStreamingBot(BotCycleMixin):
         client_id: int = IB_CLIENT_ID,
     ) -> None:
         """Connect to IB Gateway with retry logic."""
+        # Fail-closed: a bypassed kill switch must never touch a live port.
+        assert_paper_only_for_training(account=self.account, port=port)
         self._last_conn = (host, port, client_id)
         for attempt in range(1, MAX_RECONNECT + 1):
             log.info("Connect %s:%s (attempt %d)", host, port, attempt)

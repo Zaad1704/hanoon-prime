@@ -64,9 +64,14 @@ class SleepReplayEngine:
 
     def select_patterns(
         self,
-        replay_list: List[Tuple[Dict[str, float], float]] | None = None,
-    ) -> List[Tuple[Dict[str, float], float]]:
-        """Select patterns for replay (3× loser drive, or an override list)."""
+        replay_list: List[Tuple[Dict[str, float], float, bool]] | None = None,
+    ) -> List[Tuple[Dict[str, float], float, bool]]:
+        """Select patterns for replay (3× loser drive, or an override list).
+
+        Every entry is (pattern, drive, won): the win/loss polarity is
+        explicit so _replay_pattern can punish losers and reward winners
+        without inferring sign from drive magnitude (FIX-2026-09-23-08).
+        """
         if replay_list is not None:
             patterns = list(replay_list)
             if len(patterns) > self.MAX_PATTERNS:
@@ -83,8 +88,9 @@ class SleepReplayEngine:
             if att.trade_count < 2:
                 continue
 
-            weight = self.LOSS_BIAS if att.losses >= att.wins else self.WIN_BIAS
-            patterns.append((self.encode_pattern(att.center), weight))
+            won = att.wins > att.losses
+            weight = self.LOSS_BIAS if not won else self.WIN_BIAS
+            patterns.append((self.encode_pattern(att.center), weight, won))
 
         if len(patterns) > self.MAX_PATTERNS:
             random.shuffle(patterns)
@@ -95,7 +101,7 @@ class SleepReplayEngine:
     def run_cycle(
         self,
         duration_sec: float = 60.0,
-        replay_list: List[Tuple[Dict[str, float], float]] | None = None,
+        replay_list: List[Tuple[Dict[str, float], float, bool]] | None = None,
     ) -> SleepResult:
         """Run one sleep consolidation cycle."""
         start = time.time()
@@ -111,10 +117,10 @@ class SleepReplayEngine:
         total_change = 0.0
         deadline = start + duration_sec
 
-        for pattern, weight in patterns[: self.REPLAY_BATCH]:
+        for pattern, weight, won in patterns[: self.REPLAY_BATCH]:
             if time.time() >= deadline:
                 break
-            count, change, updated = self._replay_pattern(pattern, weight)
+            count, change, updated = self._replay_pattern(pattern, weight, won)
             spikes_generated += count
             total_change += change
             weights_updated += updated
@@ -153,8 +159,16 @@ class SleepReplayEngine:
         self,
         pattern: Dict[str, float],
         weight: float,
+        won: bool,
     ) -> Tuple[int, float, int]:
         """Replay one pattern: drive real inputs, let spikes consolidate.
+
+        ``won`` is the explicit trade-outcome polarity: winners consolidate
+        with positive reward, losers are punished with negative reward.
+        The sign is NEVER inferred from ``weight`` (drive magnitude) —
+        losers replay at 3× drive (SLEEP_LOSS_WEIGHT) precisely so the
+        punishment lands harder, making the scheme punishment-dominant
+        per CONTRACT (FIX-2026-09-23-08).
 
         Returns (spikes fired, total abs synapse change, synapses modified).
         """
@@ -166,7 +180,7 @@ class SleepReplayEngine:
             steps=self.REPLAY_STEPS,
             poisson_rate=self.POISSON_RATE,
         )
-        self._stdp.apply_reward(1.0 if weight >= 1.0 else -1.0)
+        self._stdp.apply_reward(1.0 if won else -1.0)
         updated, change = _replay.synapse_delta_stats(before, self._stdp)
         return spikes, change, updated
 

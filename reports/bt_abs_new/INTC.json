@@ -1,0 +1,16 @@
+{
+  "ticker": "INTC",
+  "total_trades": 23,
+  "wins": 5,
+  "losses": 18,
+  "win_rate": 0.2174,
+  "expectancy": -0.4056,
+  "ev_per_trade": -0.4056,
+  "total_return_pct": -4.68,
+  "avg_win_pct": 0.8691,
+  "avg_loss_pct": 0.5012,
+  "realized_rr": 1.7341,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -0.3256,
+  "status": "UNPROFITABLE"
+}

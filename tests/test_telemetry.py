@@ -2,6 +2,12 @@
 
 Tests the TelemetryAPI endpoints: /health, /safety-net (GET + POST),
 verifying the safety net toggle works via the webapp.
+
+Mutations are fail-closed (FIX-2026-09-23-12): every POST requires a valid
+``Authorization: Bearer <token>`` header, so this file installs a synthetic
+token on the handler and sends it from the ``_post`` helper. Unauthenticated
+POSTs are asserted to 401 — that is the intended security behavior, not a
+regression.
 """
 
 from __future__ import annotations
@@ -19,6 +25,11 @@ import pytest
 
 from hanoon_prime.immune import DAILY_LOSS_LIMIT
 from hanoon_prime.telemetry import _H, TelemetryAPI
+
+# Synthetic bearer token for this file's POST tests. The handler's auth
+# state is class-level, so the _isolate_handler fixture installs these
+# credentials before each test and restores whatever was there after.
+_TEST_TOKEN = "test-telemetry-bearer-token"
 
 
 class _FakeBrain:
@@ -89,13 +100,23 @@ def _get(port: int, path: str) -> tuple[int, dict[str, Any]]:
         return e.code, json.loads(e.read())
 
 
-def _post(port: int, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """Make a POST request, return (status, json_body)."""
+def _post(
+    port: int, path: str, body: dict[str, Any], token: str | None = _TEST_TOKEN
+) -> tuple[int, dict[str, Any]]:
+    """Make a POST request, return (status, json_body).
+
+    Sends ``Authorization: Bearer <token>`` by default because mutations
+    are fail-closed; pass ``token=None`` to exercise the unauthenticated
+    (401) path.
+    """
     data = json.dumps(body).encode()
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -103,6 +124,39 @@ def _post(port: int, path: str, body: dict[str, Any]) -> tuple[int, dict[str, An
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
+
+
+@pytest.fixture(autouse=True)
+def _isolate_handler():
+    """Isolate the shared _H handler class between tests.
+
+    _H carries class-level state (bot, caches, auth, CORS). Snapshot every
+    attribute this file (or any earlier suite file) may touch, install the
+    synthetic auth credentials for this file's POST tests, and restore the
+    snapshot afterwards so no test leaks into another.
+    """
+    saved = {
+        k: getattr(_H, k)
+        for k in (
+            "bot",
+            "journal_path",
+            "extra_cache",
+            "extra_lock",
+            "cache",
+            "cache_lock",
+            "sse_registry",
+            "on_mutation",
+            "inspection_builder",
+            "auth_enabled",
+            "telemetry_token",
+            "cors_origin",
+        )
+    }
+    _H.auth_enabled = True
+    _H.telemetry_token = _TEST_TOKEN
+    yield
+    for k, v in saved.items():
+        setattr(_H, k, v)
 
 
 class TestSafetyNetToggle:
@@ -173,6 +227,17 @@ class TestSafetyNetToggle:
         assert code == 200
         assert body["halted"] is False
         assert bot._halted is False
+
+    def test_post_without_token_rejected_401(self, server):
+        """Regression: FIX-2026-09-23-12 — mutations are fail-closed: no bearer token => 401."""
+        code, body = _post(server, "/safety-net", {"action": "disable"}, token=None)
+        assert code == 401
+        assert body["error"] == "unauthorized"
+
+    def test_post_with_wrong_token_rejected_401(self, server):
+        """Regression: FIX-2026-09-23-12 — a wrong bearer token is rejected the same as a missing one."""
+        code, _ = _post(server, "/safety-net", {"action": "disable"}, token="wrong")
+        assert code == 401
 
     def test_safety_net_status_includes_halted(self, server):
         """GET /safety-net includes halted field."""

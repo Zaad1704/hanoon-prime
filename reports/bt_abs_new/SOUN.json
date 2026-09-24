@@ -1,0 +1,16 @@
+{
+  "ticker": "SOUN",
+  "total_trades": 14,
+  "wins": 2,
+  "losses": 12,
+  "win_rate": 0.1429,
+  "expectancy": -0.2278,
+  "ev_per_trade": -0.2278,
+  "total_return_pct": -1.65,
+  "avg_win_pct": 2.2745,
+  "avg_loss_pct": 0.5163,
+  "realized_rr": 4.4053,
+  "max_drawdown": -2.4175,
+  "sharpe_ratio": -0.1468,
+  "status": "UNPROFITABLE"
+}

@@ -33,7 +33,12 @@ from ._ib_marks import mark_positions
 from .inspection.notify import manifest_notify
 from .config import TRADING_CONFIG
 from .brain.learning_telemetry import consolidation, exploration, learning_state
-from .immune import DAILY_LOSS_LIMIT, TELEMETRY_AUTH_ENABLED, TELEMETRY_PORT
+from .immune import (
+    DAILY_LOSS_LIMIT,
+    KILL_DAILY_LOSS_LIMIT,
+    TELEMETRY_AUTH_ENABLED,
+    TELEMETRY_PORT,
+)
 from .memory import Journal
 
 log = __import__("logging").getLogger(__name__)
@@ -77,7 +82,9 @@ ROUTES_GET = {
     "/metrics": "_metrics",
     "/auth": "_auth",
 }
-POST_ROUTES = {"/safety-net", "/config"}
+# POST_ROUTES is defined below as frozenset(POST_HANDLERS): the single
+# source of truth for the POST-mutation surface. It used to be a
+# hand-maintained subset here that omitted /flatten. FIX-2026-09-23-12.
 
 # Routes computed outside the 1s snapshot (they are served on demand with a
 # time-to-live cache). /account is cheap (a dict read) so it stays uncached.
@@ -98,6 +105,12 @@ POST_HANDLERS = {
     "/config": "_handle_config",
     "/flatten": "_handle_flatten",
 }
+
+# Single source of truth for the auditable POST-mutation surface.
+# POST_ROUTES used to be a hand-maintained subset {"/safety-net", "/config"}
+# that omitted /flatten (real order flattening) while POST_HANDLERS served
+# it — invisible to allow-list audits. FIX-2026-09-23-12.
+POST_ROUTES = frozenset(POST_HANDLERS)
 
 # /ib is served on demand with a short TTL: it walks live IB objects
 # (tickers, accounts, orders) — cheap, but not needed at 1s cadence.
@@ -683,9 +696,20 @@ class _H(BaseHTTPRequestHandler):
         return allowed or None
 
     def _authorized(self) -> bool:
-        """Bearer gate for mutations. Open when auth disabled or token unset."""
+        """Bearer gate for mutations. FAIL-CLOSED (FIX-2026-09-23-12).
+
+        Previously this returned True when auth was disabled or the token
+        was unset ("open when auth disabled") — a single misconfiguration
+        (or a missing/unreadable token file) silently turned every POST
+        mutation (/safety-net, /config, /flatten) into unauthenticated
+        remote control via the public tunnel. Now any misconfiguration
+        denies: auth off, no token, or a bad Authorization header => 401.
+        To mutate, present `Authorization: Bearer <token>` with <token>
+        read from runtime/telemetry.token on the bot host (0600, never
+        served over HTTP — see _auth).
+        """
         if not self.auth_enabled or not self.telemetry_token:
-            return True
+            return False
         auth = self.headers.get("Authorization", "")
         return hmac.compare_digest(auth, f"Bearer {self.telemetry_token}")
 
@@ -694,29 +718,40 @@ class _H(BaseHTTPRequestHandler):
         self._r(401, {"error": "unauthorized"})
 
     def _auth(self) -> None:
-        """GET /auth — hand the bearer token to first-party browser origins.
+        """GET /auth — auth metadata. NEVER serves the bearer token.
 
-        Design: GETs are already open (the tunnel is the perimeter), so the
-        token on its own grants nothing extra. Gating this route on the CORS
-        allow-list keeps random websites from being able to read it via
-        cross-origin fetch, while the first-party webapp auto-provisions
-        with zero manual setup. Auth disabled => auth_disabled, so the UI
-        knows POSTs need no header.
+        The token used to be handed to any CORS-allowed browser origin —
+        and to any client sending no Origin header at all — which, with
+        the API on a public tunnel, let anyone fetch the token and then
+        POST mutations. The token now lives ONLY in
+        runtime/telemetry.token on the bot host (0600).
+
+        Local path for the user (dashboard mutations): copy the token
+        from runtime/telemetry.token on the Mac into the dashboard's
+        bearer-token field (kept in the browser's local storage, sent as
+        `Authorization: Bearer <token>` on POSTs). GETs stay open.
         """
         if not self.auth_enabled or not self.telemetry_token:
-            self._r(200, {"auth": False, "auth_disabled": True})
+            self._r(
+                200,
+                {
+                    "auth": False,
+                    "auth_disabled": True,
+                    "mutations": "disabled (fail-closed)",
+                },
+            )
             return
-        allowed = self._cors_origin()
-        origin = self.headers.get("Origin")
-        ok = isinstance(allowed, str) and (origin is None or origin == allowed)
-        ok = ok or (isinstance(allowed, list) and (origin is None or origin in allowed))
-        if not ok:
-            log.warning("/auth denied for origin %r", origin)
-            self._r(403, {"error": "origin not allowed"})
-            return
+        # The token key is omitted entirely (not null) so no client can
+        # mistake the metadata for a credential. FIX-2026-09-23-12.
         self._r(
             200,
-            {"auth": True, "token": self.telemetry_token, "scheme": "Bearer"},
+            {
+                "auth": True,
+                "scheme": "Bearer",
+                "provisioning": "manual",
+                "hint": "Copy the bearer token from runtime/telemetry.token "
+                "on the bot host into the dashboard token field.",
+            },
             extra_headers={"Cache-Control": "no-store"},
         )
 
@@ -1434,6 +1469,8 @@ class _H(BaseHTTPRequestHandler):
             "pause_reason": policy.get("pause_reason", ""),
             "daily_pnl": policy.get("daily_pnl", getattr(hp, "_daily_pnl", 0.0)),
             "limit": DAILY_LOSS_LIMIT,
+            "kill_limit": KILL_DAILY_LOSS_LIMIT,
+            "training_kill_bypass": policy.get("training_kill_bypass", False),
             "consecutive_losses": policy.get(
                 "consecutive_losses", getattr(hp, "_consecutive_losses", 0)
             ),
@@ -1751,7 +1788,7 @@ class TelemetryAPI:
                 self._token_path(),
             )
         else:
-            log.warning("telemetry bearer auth OFF — POST mutations ungated")
+            log.warning("telemetry bearer auth OFF — POST mutations DISABLED (fail-closed)")
         log.info(
             "TelemetryAPI live on http://127.0.0.1:%s (SSE /stream, /snapshot)",
             TELEMETRY_PORT,

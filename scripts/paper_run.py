@@ -50,6 +50,14 @@ MIN_SESSIONS = 5
 ALLOWED_KILL_SESSIONS = 0
 ALLOWED_DAILY_LOSS_SESSIONS = 1
 
+# Pre-locked Phase-4 WFA thresholds (protocols/evaluation_protocol.md §3, P5
+# and task_plan.md Phase-4 gate: deflated OOS Sharpe > 0.05 AND PBO < 0.05).
+# hanoon_prime.wfa.verdicts() is weaker (deflated > 0, pooled > 0, no PBO
+# gate), so the protocol thresholds get their own explicit, strictly-
+# additive gate: it can flip a WFA PASS to FAIL, never FAIL to PASS.
+P5_DEFLATED_FLOOR: float = 0.05
+P5_PBO_CEILING: float = 0.05
+
 
 @dataclass
 class SessionResult:
@@ -164,7 +172,9 @@ def run_paper(data_dir: Path, tickers: list[str], brain: Hippocampus) -> dict[st
 
     The WFA criterion (P5) reuses hanoon_prime.wfa verdicts so the paper
     and Phase-2 gates share the exact same definition of 'admissible' and
-    'PASS'.
+    'PASS' — then applies the pre-locked protocol thresholds
+    (protocols/evaluation_protocol.md §3–§4: deflated OOS Sharpe > 0.05 AND
+    PBO < 0.05) as a separate, strictly-additive gate.
     """
     from hanoon_prime.wfa import run_wfa_universe, verdicts
 
@@ -211,7 +221,20 @@ def run_paper(data_dir: Path, tickers: list[str], brain: Hippocampus) -> dict[st
         n_daily_loss_sessions=dloss_sessions,
         n_errors=len(errors),
     )
+    # FIX-2026-09-23-11: evaluate() was never called here — the report's
+    # criteria dict held ONLY P5_wfa_pass, so P1–P4/P6 never gated the
+    # verdict despite the docstring claiming P1–P6. Wire it up.
+    v.evaluate()
     v.criteria["P5_wfa_pass"] = wfa_pass
+    # Pre-locked P5 thresholds as a separate explicit gate: wfa.verdicts()
+    # passes on deflated > 0 with no PBO check; the protocol requires
+    # deflated > 0.05 AND PBO < 0.05 (strict). Additive only — can flip
+    # PASS to FAIL, never FAIL to PASS.
+    v.criteria["P5_protocol_thresholds"] = (
+        wfa_pass
+        and wfa_verdict.deflated_edge > P5_DEFLATED_FLOOR
+        and wfa_verdict.pbo < P5_PBO_CEILING
+    )
     v.verdict = "PASS" if all(v.criteria.values()) else "FAIL"
 
     return {
@@ -222,6 +245,8 @@ def run_paper(data_dir: Path, tickers: list[str], brain: Hippocampus) -> dict[st
             "min_sessions": MIN_SESSIONS,
             "allowed_kill_sessions": ALLOWED_KILL_SESSIONS,
             "allowed_daily_loss_sessions": ALLOWED_DAILY_LOSS_SESSIONS,
+            "p5_deflated_floor": P5_DEFLATED_FLOOR,
+            "p5_pbo_ceiling": P5_PBO_CEILING,
         },
         "simulation": {
             "window": EDGE_LOOKBACK,

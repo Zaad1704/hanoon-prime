@@ -1,0 +1,16 @@
+{
+  "ticker": "DDOG",
+  "total_trades": 16,
+  "wins": 8,
+  "losses": 8,
+  "win_rate": 0.5,
+  "expectancy": 0.899,
+  "ev_per_trade": 0.899,
+  "total_return_pct": 9.36,
+  "avg_win_pct": 1.8217,
+  "avg_loss_pct": 0.6511,
+  "realized_rr": 2.798,
+  "max_drawdown": -1.4239,
+  "sharpe_ratio": 0.3694,
+  "status": "PROFITABLE"
+}

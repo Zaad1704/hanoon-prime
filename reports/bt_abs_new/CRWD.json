@@ -1,0 +1,16 @@
+{
+  "ticker": "CRWD",
+  "total_trades": 17,
+  "wins": 1,
+  "losses": 16,
+  "win_rate": 0.0588,
+  "expectancy": -0.8199,
+  "ev_per_trade": -0.8199,
+  "total_return_pct": -6.15,
+  "avg_win_pct": 0.9094,
+  "avg_loss_pct": 0.441,
+  "realized_rr": 2.0623,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -1.007,
+  "status": "UNPROFITABLE"
+}

@@ -1,0 +1,16 @@
+{
+  "ticker": "T",
+  "total_trades": 17,
+  "wins": 5,
+  "losses": 12,
+  "win_rate": 0.2941,
+  "expectancy": -0.2121,
+  "ev_per_trade": -0.2121,
+  "total_return_pct": -0.99,
+  "avg_win_pct": 0.4616,
+  "avg_loss_pct": 0.275,
+  "realized_rr": 1.6787,
+  "max_drawdown": -2.3279,
+  "sharpe_ratio": -0.1795,
+  "status": "UNPROFITABLE"
+}

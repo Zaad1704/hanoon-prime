@@ -1,0 +1,16 @@
+{
+  "ticker": "VALE",
+  "total_trades": 21,
+  "wins": 5,
+  "losses": 16,
+  "win_rate": 0.2381,
+  "expectancy": -0.2145,
+  "ev_per_trade": -0.2145,
+  "total_return_pct": -1.32,
+  "avg_win_pct": 0.6749,
+  "avg_loss_pct": 0.2936,
+  "realized_rr": 2.2991,
+  "max_drawdown": -7.1048,
+  "sharpe_ratio": -0.076,
+  "status": "UNPROFITABLE"
+}

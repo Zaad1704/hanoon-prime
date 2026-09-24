@@ -1,0 +1,16 @@
+{
+  "ticker": "SOFI",
+  "total_trades": 18,
+  "wins": 3,
+  "losses": 15,
+  "win_rate": 0.1667,
+  "expectancy": -0.2709,
+  "ev_per_trade": -0.2709,
+  "total_return_pct": -1.77,
+  "avg_win_pct": 1.2265,
+  "avg_loss_pct": 0.3634,
+  "realized_rr": 3.3748,
+  "max_drawdown": -2.5675,
+  "sharpe_ratio": -0.1616,
+  "status": "UNPROFITABLE"
+}

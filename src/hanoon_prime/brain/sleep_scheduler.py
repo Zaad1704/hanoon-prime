@@ -55,15 +55,16 @@ class SleepScheduler:
         self,
         recent: list[tuple[dict[str, float], bool]],
         historical: list[tuple[dict[str, float], bool]] | None = None,
-    ) -> list[tuple[dict[str, float], float]]:
+    ) -> list[tuple[dict[str, float], float, bool]]:
         """Weighted replay list: losers 3× winners, interleaved with history.
 
         ``recent`` and ``historical`` are ``(pattern, won)`` pairs; each
-        pattern comes out tagged with its replay drive so the sleep engine
-        scales its synaptic input accordingly.
+        pattern comes out tagged with its replay drive AND its explicit
+        win/loss polarity, so the sleep engine never infers reward sign
+        from drive magnitude (FIX-2026-09-23-08).
         """
         picks = [
-            (pattern, SLEEP_LOSS_WEIGHT if not won else SLEEP_WIN_WEIGHT)
+            (pattern, SLEEP_LOSS_WEIGHT if not won else SLEEP_WIN_WEIGHT, won)
             for pattern, won in recent
         ]
         if historical is not None:
@@ -71,7 +72,7 @@ class SleepScheduler:
             random.shuffle(pool)
             for pattern, won in pool[:SLEEP_INTERLEAVE_MAX]:
                 picks.append(
-                    (pattern, SLEEP_LOSS_WEIGHT if not won else SLEEP_WIN_WEIGHT)
+                    (pattern, SLEEP_LOSS_WEIGHT if not won else SLEEP_WIN_WEIGHT, won)
                 )
         return picks
 

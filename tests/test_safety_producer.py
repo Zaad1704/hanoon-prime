@@ -126,6 +126,12 @@ _KILL_HOOKS: list[str] = []
 def make_kill(journal: list | None = None) -> SafetyProducer:
     _KILL_HOOKS.clear()
     s = make(journal=journal)
+    # These tests exercise the hard $500 kill path, which requires the
+    # user-directed training bypass to be OFF (immune.TRAINING_KILL_BYPASS
+    # defaults True for paper training). The bypass's own behavior is
+    # covered by test_bypass_skips_only_kill_other_halts_apply below and
+    # by tests/test_safety_training.py — never by weakening these tests.
+    s.kill_bypass = False
     s.on_kill(lambda reason: _KILL_HOOKS.append(reason))
     return s
 
@@ -183,3 +189,19 @@ def test_kill_beats_soft_halt_even_after_halt_trips():
     s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
     ok, reason = s.authorized()
     assert ok is False and s.latched is True and "kill" in reason
+
+
+def test_bypass_skips_only_kill_other_halts_apply():
+    """The user-directed training bypass skips ONLY the $500 hard kill.
+
+    With kill_bypass on (the paper-training default), breaching the kill
+    level must NOT latch, but the ordinary $200 daily-loss halt below it
+    must still block new entries. See tests/test_safety_training.py.
+    """
+    s = make()
+    assert s.kill_bypass is True
+    s.on_daily_pnl(-(KILL_DAILY_LOSS_LIMIT + 1.0))
+    ok, reason = s.authorized()
+    assert ok is False, "entries must still be blocked"
+    assert s.latched is False, "bypass must skip the kill latch"
+    assert reason == "daily_loss_limit", "the ordinary halt still applies"

@@ -39,6 +39,8 @@ INPUT_DIM: int = (
     9  # conf, |score|, vol_pct, dir, atr_ratio, obi, vpin, price_entropy, vol_entropy
 )
 
+DNN_ABSTAIN_P_WIN: float = 0.5  # neutral P(Win) reported when the DNN abstains
+
 
 def expand_features(
     conf: float,
@@ -138,7 +140,12 @@ class MetaDNN:
         self._p_win_history: list[float] = []
         self._feature_zero_counts: dict[str, int] = {"obi": 0, "vpin": 0}
         self._last_size_scale: float = 0.0
+        self._abstain_reason: str | None = None
+        self._defect_reason: str | None = None
+        self._load_error: str | None = None
+        self._abstain_logged_ts: float = 0.0
         self._load()
+        self._refresh_model_status()
 
     def _build(self) -> None:
         if self._built:
@@ -175,26 +182,84 @@ class MetaDNN:
     def predict(self, features: list[float]) -> float:
         """P(Win) for a single feature vector."""
         if self._defective:
-            return META_WIN_THRESHOLD
+            return DNN_ABSTAIN_P_WIN
         x = np.asarray(features, dtype=np.float64).reshape(1, -1)
         if self._scaler_mean is not None:
             x = (x - self._scaler_mean) / self._scaler_std
         out, _ = self.forward(x)
         return float(out[0, 0])
 
+    @property
+    def abstain_reason(self) -> str | None:
+        """Why infer() abstains (None = the model is usable)."""
+        return self._abstain_reason
+
+    def drift_zscore(self) -> float:
+        """Public read of the live drift signal (OOS mean=0.364, std=0.089)."""
+        return self._drift_zscore()
+
+    def _refresh_model_status(self) -> None:
+        """Recompute why infer() would abstain (None = usable model)."""
+        self._abstain_reason = self._status_reason()
+
+    def _status_reason(self) -> str | None:
+        """First failing readiness check, or None when usable.
+
+        Flat early-return chain (no elif ladder) to respect the R3
+        nesting contract.
+        """
+        if not self._path.exists():
+            return "missing_artifact"
+        if self._load_error is not None:
+            return self._load_error
+        if self._defective:
+            return self._defect_reason or "defective_artifact"
+        if not self._built or not self._layers:
+            return "unbuilt_artifact"
+        if not self._trained_report_ok():
+            return "never_trained"
+        return None
+
+    def _trained_report_ok(self) -> bool:
+        """A parseable .report.json carrying a train timestamp exists."""
+        report_path = self._path.with_suffix(".report.json")
+        if not report_path.exists():
+            return False
+        try:
+            return bool(json.loads(report_path.read_text()).get("train_ts"))
+        except (json.JSONDecodeError, OSError, ValueError):
+            return False
+
     def infer(self, features: list[float]) -> tuple[bool, float, float]:
-        """(admit, p_win, size_scale) — admit=False when P(Win) < threshold."""
+        """(admit, p_win, size_scale) — admit=False when P(Win) < threshold.
+
+        FAIL-CLOSED: a missing, corrupt, defective, or never-trained model
+        BLOCKS — it returns (admit=False, p=0.5, size=0.0) instead of
+        passing the trade on a fabricated score, so DNN-gated entries
+        cannot fire after a restart until a human retrains. The block is
+        logged at CRITICAL (throttled to one line per 5 minutes) so a
+        silent gatekeeper is impossible.
+        """
         import time
 
-        if self._defective or not self._built:
-            scale = calculate_meta_size_scale(META_WIN_THRESHOLD)
+        if self._abstain_reason is not None:
+            # FAIL-CLOSED: missing, corrupt, defective, or never-trained
+            # model -> block. The gatekeeper returns
+            # (admit=False, p=0.5, size=0.0): DNN-gated entries cannot
+            # fire until a human retrains. Blocks are NOT predictions,
+            # so they stay out of the drift history.
+            now = time.time()
+            if now - self._abstain_logged_ts > 300.0:
+                self._abstain_logged_ts = now
+                log.critical(
+                    "DNN BLOCK (%s): no usable model — DNN-gated entries "
+                    "blocked until a human retrains",
+                    self._abstain_reason or "unknown",
+                )
             self._eval_count += 1
-            self._last_p_win = META_WIN_THRESHOLD
-            self._last_eval_ts = time.time()
-            self._last_size_scale = scale
-            self._p_win_history.append(META_WIN_THRESHOLD)
-            if len(self._p_win_history) > 50:
-                self._p_win_history = self._p_win_history[-50:]
+            self._last_p_win = DNN_ABSTAIN_P_WIN
+            self._last_eval_ts = now
+            self._last_size_scale = 0.0
             obi_val = float(features[5]) if len(features) > 5 else 0.0
             vpin_val = float(features[6]) if len(features) > 6 else 0.0
             self._feature_zero_counts["obi"] = (
@@ -206,9 +271,15 @@ class MetaDNN:
             self._veto_window.append(0)
             if len(self._veto_window) > 100:
                 self._veto_window = self._veto_window[-100:]
-            return True, META_WIN_THRESHOLD, scale
+            return False, DNN_ABSTAIN_P_WIN, 0.0
 
-        p = self.predict(features)
+        try:
+            p = self.predict(features)
+        except Exception as exc:
+            # FAIL-CLOSED: a throwing model is not a usable model.
+            log.critical("DNN inference failed (%s) — blocking", exc)
+            self._abstain_reason = "inference_error"
+            return False, DNN_ABSTAIN_P_WIN, 0.0
         admit = p >= META_WIN_THRESHOLD
         scale = calculate_meta_size_scale(p)
         self._eval_count += 1
@@ -293,6 +364,7 @@ class MetaDNN:
                 sum(w.size + b.size for w, b in self._layers) if self._layers else 0
             ),
             "last_p_win": round(self._last_p_win, 4),
+            "abstain_reason": self._abstain_reason,
             "last_eval": self._last_eval_ts,
             "train_entries": report.get("total_entries"),
             "train_tickers": None,
@@ -304,6 +376,25 @@ class MetaDNN:
             "feature_zero_streak": dict(self._feature_zero_counts),
             "last_size_scale": round(self._last_size_scale, 4),
         }
+
+    def _write_training_report(self, n_entries: int) -> None:
+        """Write the .report.json sidecar the readiness gate requires."""
+        import time
+
+        try:
+            self._path.with_suffix(".report.json").write_text(
+                json.dumps(
+                    {
+                        "train_ts": time.time(),
+                        "total_entries": int(n_entries),
+                        "verdict": "healthy",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            log.warning("DNN report write failed: %s", exc)
 
     def train(
         self,
@@ -317,10 +408,12 @@ class MetaDNN:
     ) -> list[float]:
         """Mini-batch Adam training loop. Returns per-epoch BCE losses."""
         # A retrain IS the recovery path from a defective artifact: clear the
-        # flag so the post-train guard probe evaluates real forward passes
+        # flags so the post-train guard probe evaluates real forward passes
         # (predict() short-circuits to a constant while _defective is set,
         # which would brand every freshly-trained model constant_output).
         self._defective = False
+        self._defect_reason = None
+        self._load_error = None
         self._build()
         self._fit_scaler(X)
         Xs = self._transform(X)
@@ -357,12 +450,15 @@ class MetaDNN:
         verdict = _guard.govern(self._layers, self.predict, self._input_dim)
         if verdict["healthy"]:
             self._save()
+            self._write_training_report(n)
         else:
             self._defective = True
+            self._defect_reason = "guard_rejected"
             log.critical(
-                "DNN training collapsed (%s) — good artifact kept, gatekeeper bypassed",
+                "DNN training collapsed (%s) — good artifact kept, gatekeeper abstained",
                 verdict["reasons"],
             )
+        self._refresh_model_status()
         return losses
 
     def _adam_step(
@@ -429,8 +525,9 @@ class MetaDNN:
             stored_dim = int(d.get("input_dim", self._input_dim))
             if stored_dim != self._input_dim:
                 self._defective = True
+                self._defect_reason = "dimension_mismatch"
                 log.critical(
-                    "DNN artifact dimension mismatch (code=%d artifact=%d) — gatekeeper bypassed",
+                    "DNN artifact dimension mismatch (code=%d artifact=%d) — gatekeeper abstained",
                     self._input_dim,
                     stored_dim,
                 )
@@ -450,13 +547,15 @@ class MetaDNN:
                 verdict = _guard.govern(self._layers, self.predict, self._input_dim)
                 if not verdict["healthy"]:
                     self._defective = True
+                    self._defect_reason = "guard_rejected"
                     log.critical(
-                        "DNN artifact rejected by ironclad guard (%s) — gatekeeper bypassed",
+                        "DNN artifact rejected by ironclad guard (%s) — gatekeeper abstained",
                         verdict["reasons"],
                     )
                     self._layers = []
                     self._built = False
                     self._scaler_mean = None
                     self._scaler_std = None
-        except (json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError, OSError) as exc:
+            self._load_error = "corrupt_artifact"
             log.debug("DNN load failed (fresh init): %s", exc)

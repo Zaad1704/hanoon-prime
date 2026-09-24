@@ -40,6 +40,14 @@ def _render_md(verdict: object, universe: dict) -> str:
         "",
         f"Detail: {v['detail']}",
         "",
+        # FIX-2026-09-23-09: scope disclosure travels with the numbers.
+        "## Validation scope (what this report does NOT cover)",
+        "",
+    ]
+    for caveat in v["validation_caveats"]:
+        lines.append(f"- {caveat}")
+    lines += [
+        "",
         "## Per-ticker OOS (admissible only)",
         "",
         "| ticker | oos trades | EV/trade | sharpe | verdict |",

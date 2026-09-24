@@ -1,0 +1,16 @@
+{
+  "ticker": "MRNA",
+  "total_trades": 23,
+  "wins": 9,
+  "losses": 14,
+  "win_rate": 0.3913,
+  "expectancy": 0.1116,
+  "ev_per_trade": 0.1116,
+  "total_return_pct": 1.44,
+  "avg_win_pct": 1.0342,
+  "avg_loss_pct": 0.5618,
+  "realized_rr": 1.8407,
+  "max_drawdown": -2.0029,
+  "sharpe_ratio": 0.0632,
+  "status": "PROFITABLE"
+}

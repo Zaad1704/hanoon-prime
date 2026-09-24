@@ -40,3 +40,16 @@ pytest tests/test_contract.py -v
 ## Development Rules
 
 All rules enforced in CI. See [CONTRACT.md](CONTRACT.md) for full contract.
+
+## Pre-push Verification Gate
+
+Before every push, run the mandatory verification gate from the repo root:
+
+```bash
+bash scripts/verify.sh
+```
+
+It runs the architectural contract, the safety producer/training suites,
+and the validation-honesty, telemetry, fixes-journal, scoring-integrity,
+sleep-scheduler, replay, and WFA suites. **All must pass — no skips, no
+xfails, no weakened assertions.** A failure here means the push waits.

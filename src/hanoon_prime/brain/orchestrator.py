@@ -1317,7 +1317,20 @@ class NeuromorphicBrain:
         nash_op = self._compute_nash_mod(nash_pred)
         neuro_score = self._compute_neuro_score(alpha, ticker)
         cal_adj = self._calibration_nudge(base.score)
-        blended = (1 - NEURO_BLEND) * (base.score + cal_adj) + NEURO_BLEND * neuro_score
+        if NEURO_BLEND_ENABLED:
+            blended = (1 - NEURO_BLEND) * (
+                base.score + cal_adj
+            ) + NEURO_BLEND * neuro_score
+        else:
+            # NEURO_BLEND_ENABLED=False: the neuromorphic term is dead —
+            # _compute_neuro_score() returns 0.0 above — so the legacy
+            # formula was a fixed 0.7x damping of every cortex score for
+            # zero neuro contribution. With the gate off the cortex score
+            # passes through un-damped, restoring the designed meaning of
+            # the dynamics.threshold band [0.45, 0.70] and PENNY_SCORE_BAR.
+            # Re-enabling the gate restores the 0.7/0.3 blend exactly.
+            # (FIX-2026-09-23-06)
+            blended = base.score + cal_adj
         advisor_delta = self._advisor.threshold_delta()
         mods = self._compute_mods(
             halim, episodic, nash_op, ticker, cross, advisor_delta, thinker_mod

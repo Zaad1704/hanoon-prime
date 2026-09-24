@@ -46,6 +46,12 @@ def _hermetic_learning_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         "hanoon_prime.brain.shadow_book.SHADOW_BOOK_FILE",
         tmp_path / "shadow_book.json",
     )
+    # Redirect the SafetyProducer's persisted halt/latch state too — a test
+    # that trips a halt must not write repo runtime/safety_state.json.
+    monkeypatch.setattr(
+        "hanoon_prime.brain.policy.safety._SAFETY_STATE_FILE",
+        tmp_path / "safety_state.json",
+    )
     # Redirect JuliMemory (the brain's persistent learning state) to the
     # per-test directory too — without this, trade-close learning writes
     # SMOKE/test episodes into the production runtime/juli_state.json.

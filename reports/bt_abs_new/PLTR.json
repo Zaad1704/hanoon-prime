@@ -1,0 +1,16 @@
+{
+  "ticker": "PLTR",
+  "total_trades": 17,
+  "wins": 5,
+  "losses": 12,
+  "win_rate": 0.2941,
+  "expectancy": -0.2352,
+  "ev_per_trade": -0.2352,
+  "total_return_pct": -2.27,
+  "avg_win_pct": 0.9102,
+  "avg_loss_pct": 0.5687,
+  "realized_rr": 1.6004,
+  "max_drawdown": -1.9876,
+  "sharpe_ratio": -0.2168,
+  "status": "UNPROFITABLE"
+}

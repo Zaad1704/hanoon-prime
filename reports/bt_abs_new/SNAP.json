@@ -1,0 +1,16 @@
+{
+  "ticker": "SNAP",
+  "total_trades": 20,
+  "wins": 4,
+  "losses": 16,
+  "win_rate": 0.2,
+  "expectancy": -0.2754,
+  "ev_per_trade": -0.2754,
+  "total_return_pct": -3.53,
+  "avg_win_pct": 1.6799,
+  "avg_loss_pct": 0.6404,
+  "realized_rr": 2.6231,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -0.1676,
+  "status": "UNPROFITABLE"
+}

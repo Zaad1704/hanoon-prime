@@ -1,0 +1,16 @@
+{
+  "ticker": "MSFT",
+  "total_trades": 22,
+  "wins": 3,
+  "losses": 19,
+  "win_rate": 0.1364,
+  "expectancy": -0.6082,
+  "ev_per_trade": -0.6082,
+  "total_return_pct": -3.17,
+  "avg_win_pct": 0.4442,
+  "avg_loss_pct": 0.2372,
+  "realized_rr": 1.8729,
+  "max_drawdown": -826.9275,
+  "sharpe_ratio": -0.5885,
+  "status": "UNPROFITABLE"
+}

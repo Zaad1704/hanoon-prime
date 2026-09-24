@@ -38,10 +38,20 @@ MAX_SPREAD_BPS: float = 5.0  # max bid/ask spread in basis points
 
 # ── Sub-dollar confidence bar (raise the bar, no hard block) ──────────
 # Below PENNY_PRICE the brain must be EXTREMELY sure of a quick scalp,
-# so the |score| must clear PENNY_SCORE_BAR (>> ENTRY_THRESHOLD). This
-# dissuades the MOST_ACTIVE scanner from feeding junk micro-caps into
-# scalp sizing while still leaving the door open for a genuinely strong
-# setup. Not a hard price floor — just a much higher confidence bar.
+# so the |score| must clear PENNY_SCORE_BAR. Derivation (2026-09-23,
+# FIX-2026-09-23-07): the gate compares the stabilized score in un-damped
+# cortex units (tanh scale, |score| < 1). atanh(0.85) ~= 1.26, i.e. the
+# weighted indicator z-sum must reach ~1.26 sigma of conviction AND survive
+# the Nash penalty (up to NASH_PENALTY_MAX=0.15, applied in _stabilize
+# before this gate) — in practice only genuinely extreme setups clear it.
+# 0.85 sits deliberately above THRESHOLD_MAX=0.70, the top of the normal
+# admission band, so sub-dollar names always face a bar regular names
+# never see. (The dead 0.3 neuromorphic blend used to damp every score by
+# 0.7x, which made this bar nearly unreachable; with the blend fixed the
+# bar means what it says again. Value unchanged — re-derived, not
+# re-tuned.) This dissuades the MOST_ACTIVE scanner from feeding junk
+# micro-caps into scalp sizing while still leaving the door open for a
+# genuinely strong setup. Not a hard price floor — just a much higher bar.
 PENNY_PRICE: float = 1.00  # price below this is "sub-dollar"
 PENNY_SCORE_BAR: float = 0.85  # required |score| below PENNY_PRICE
 PENNY_PREMIUM_BPS: float = 25.0  # extra spread allowance for micro-caps
@@ -62,6 +72,20 @@ DAILY_LOSS_LIMIT: float = 200.0  # $200 daily loss → halt
 KILL_DAILY_LOSS_LIMIT: float = 500.0  # $500 daily loss → latched kill switch
 CONSECUTIVE_LOSSES_PAUSE: int = 3  # 3 consec losses → pause
 PAUSE_DURATION_MIN: int = 60  # pause duration in minutes
+
+# ── TRAINING OVERRIDE — user-directed, fail-closed ──────────────────────
+# !!! TRAINING_KILL_BYPASS = True DISABLES the $500 kill switch for paper
+# training ONLY. The user explicitly disabled the kill switch for training
+# purposes (2026-09-23); this flag makes that override named, loud, and
+# fail-closed instead of implicit. While True:
+#   * SafetyProducer logs a CRITICAL banner at startup and skips ONLY the
+#     $500 kill (every other halt still applies when safety is enabled);
+#   * GET /safety-net exposes "training_kill_bypass": true;
+#   * assert_paper_only_for_training() REFUSES to start anything but
+#     account="PAPER" on IB_PAPER_PORT (4002) — a live account/port
+#     raises RuntimeError instead of trading without a kill switch.
+# Re-arm for live trading: set False. NEVER run live money with True.
+TRAINING_KILL_BYPASS: bool = True
 
 # ── Win probability mapping (R5: no inversion) ────────────────────────
 SCORE_INVERT: bool = False  # R5: hardcoded False — never changes
@@ -240,6 +264,25 @@ IB_HOST: str = "127.0.0.1"  # IB Gateway / TWS default local host
 IB_PAPER_PORT: int = 4002  # IB Gateway paper port (TWS paper: 7497)
 IB_LIVE_PORT: int = 4001  # IB Gateway live port (TWS live: 7496)
 IB_CLIENT_ID: int = 1  # API client ID
+
+
+def assert_paper_only_for_training(account: str, port: int) -> None:
+    """Fail-closed guard for the training kill-switch bypass.
+
+    While ``TRAINING_KILL_BYPASS`` is on, the $500 kill switch is
+    disarmed — so the bot MUST NOT start on anything but the paper
+    account/port. Any other account or port raises RuntimeError
+    instead of trading live without a kill switch. Called by
+    ``IBStreamingBot.__init__`` (account) and ``connect`` (port).
+    """
+    if TRAINING_KILL_BYPASS and (account != "PAPER" or port != IB_PAPER_PORT):
+        raise RuntimeError(
+            "TRAINING_KILL_BYPASS is ON (immune.py): refusing to start "
+            f"account={account!r} port={port} with the $500 kill switch "
+            "bypassed. Only account='PAPER' on port 4002 may run while "
+            "bypassed; set TRAINING_KILL_BYPASS = False to run live."
+        )
+
 
 # ── Trading universe ───────────────────────────────────────────────────
 FAST_TICKERS: tuple[str, ...] = ("AAPL", "MSFT", "SPY", "TSLA", "NVDA")

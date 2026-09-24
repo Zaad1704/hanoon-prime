@@ -68,11 +68,34 @@ class _FakeBot:
 
 @pytest.fixture(autouse=True)
 def _reset_handler_security() -> Any:
-    """Restore _H auth/CORS class attrs after every test (isolation)."""
+    """Snapshot and restore ALL shared _H class state around each test.
+
+    _H is one class shared by every request the suite serves; an earlier
+    test file (e.g. one that calls TelemetryAPI.start()) may leave
+    auth/cors/bot/cache state behind. Snapshotting first (not just
+    resetting after) keeps this file immune to that pollution and keeps
+    later files immune to this one — order-independent either way.
+    """
+    saved = {
+        k: getattr(_H, k)
+        for k in (
+            "bot",
+            "journal_path",
+            "extra_cache",
+            "extra_lock",
+            "cache",
+            "cache_lock",
+            "sse_registry",
+            "on_mutation",
+            "inspection_builder",
+            "auth_enabled",
+            "telemetry_token",
+            "cors_origin",
+        )
+    }
     yield
-    _H.auth_enabled = False
-    _H.telemetry_token = ""
-    _H.cors_origin = None
+    for k, v in saved.items():
+        setattr(_H, k, v)
 
 
 def _start(bot: Any, jp: Path) -> HTTPServer:
@@ -173,11 +196,12 @@ class TestBearerGate:
             srv.shutdown()
             srv.server_close()
 
-    def test_authorized_open_when_disabled(self) -> None:
+    def test_authorized_closed_when_disabled(self) -> None:
+        """Regression: FIX-2026-09-23-12 — fail-closed, never open."""
         h = _H.__new__(_H)
         h.auth_enabled = False
         h.telemetry_token = ""
-        assert h._authorized() is True
+        assert h._authorized() is False
 
 
 class TestCORS:
@@ -295,9 +319,14 @@ class TestMultiOriginCors:
 
 
 class TestAuthRoute:
-    """GET /auth hands the bearer token to first-party origins only."""
+    """GET /auth serves metadata only — the token NEVER leaves the host.
 
-    def test_token_handed_to_allowed_origin(self, tmp_path) -> None:
+    Regression: FIX-2026-09-23-12. Previously the token was handed to any
+    CORS-allowed origin (and to clients sending no Origin at all), so with
+    the API on a public tunnel anyone could fetch it and POST mutations.
+    """
+
+    def test_token_never_served_to_allowed_origin(self, tmp_path) -> None:
         monkeypatch_H(
             auth_enabled=True,
             telemetry_token=TOKEN,
@@ -312,12 +341,37 @@ class TestAuthRoute:
             req.add_header("Origin", "https://www.hanoonweb.xyz")
             with urllib.request.urlopen(req) as r:
                 body = json.loads(r.read())
-            assert body == {"auth": True, "token": TOKEN, "scheme": "Bearer"}
+            assert body["auth"] is True
+            assert body["scheme"] == "Bearer"
+            assert "token" not in body  # key omitted entirely, not null
+            assert body["provisioning"] == "manual"
+            assert TOKEN not in json.dumps(body)
         finally:
             srv.shutdown()
             srv.server_close()
 
-    def test_token_denied_to_foreign_origin(self, tmp_path) -> None:
+    def test_token_never_served_without_origin(self, tmp_path) -> None:
+        """curl with no Origin header (the old trivial bypass) gets no token."""
+        monkeypatch_H(
+            auth_enabled=True,
+            telemetry_token=TOKEN,
+            cors_origin=["https://www.hanoonweb.xyz"],
+        )
+        jp = tmp_path / "journal_live.jsonl"
+        jp.write_text("")
+        srv = _start(_FakeBot(), jp)
+        port = srv.server_address[1]
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/auth") as r:
+                code, body = r.status, json.loads(r.read())
+            assert code == 200
+            assert "token" not in body  # key omitted entirely, not null
+            assert TOKEN not in json.dumps(body)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_foreign_origin_gets_metadata_not_token(self, tmp_path) -> None:
         monkeypatch_H(
             auth_enabled=True,
             telemetry_token=TOKEN,
@@ -330,18 +384,16 @@ class TestAuthRoute:
         try:
             req = urllib.request.Request(f"http://127.0.0.1:{port}/auth")
             req.add_header("Origin", "https://evil.example.net")
-            try:
-                with urllib.request.urlopen(req) as r:
-                    code, body = r.status, json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                code, body = e.code, json.loads(e.read())
-            assert code == 403
-            assert "token" not in body
+            with urllib.request.urlopen(req) as r:
+                code, body = r.status, json.loads(r.read())
+            assert code == 200  # metadata is public; the token is not
+            assert "token" not in body  # key omitted entirely, not null
+            assert TOKEN not in json.dumps(body)
         finally:
             srv.shutdown()
             srv.server_close()
 
-    def test_auth_disabled_reports_open_mutations(self, tmp_path) -> None:
+    def test_auth_disabled_reports_mutations_disabled(self, tmp_path) -> None:
         monkeypatch_H(auth_enabled=False, telemetry_token="", cors_origin=None)
         jp = tmp_path / "journal_live.jsonl"
         jp.write_text("")
@@ -350,7 +402,11 @@ class TestAuthRoute:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/auth") as r:
                 body = json.loads(r.read())
-            assert body == {"auth": False, "auth_disabled": True}
+            assert body == {
+                "auth": False,
+                "auth_disabled": True,
+                "mutations": "disabled (fail-closed)",
+            }
         finally:
             srv.shutdown()
             srv.server_close()

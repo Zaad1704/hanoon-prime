@@ -1,0 +1,283 @@
+{
+  "old": {
+    "AAPL": {
+      "trades": 17,
+      "ev": -0.5912,
+      "wr": 0.1176,
+      "sharpe": null
+    },
+    "CRWD": {
+      "trades": 17,
+      "ev": -0.8199,
+      "wr": 0.0588,
+      "sharpe": null
+    },
+    "DDOG": {
+      "trades": 16,
+      "ev": 0.899,
+      "wr": 0.5,
+      "sharpe": null
+    },
+    "F": {
+      "trades": 17,
+      "ev": -0.4802,
+      "wr": 0.1765,
+      "sharpe": null
+    },
+    "INTC": {
+      "trades": 23,
+      "ev": -0.4056,
+      "wr": 0.2174,
+      "sharpe": null
+    },
+    "IREN": {
+      "trades": 18,
+      "ev": -0.5928,
+      "wr": 0.1111,
+      "sharpe": null
+    },
+    "MARA": {
+      "trades": 31,
+      "ev": 0.0271,
+      "wr": 0.3226,
+      "sharpe": null
+    },
+    "MRNA": {
+      "trades": 23,
+      "ev": 0.1116,
+      "wr": 0.3913,
+      "sharpe": null
+    },
+    "MSFT": {
+      "trades": 22,
+      "ev": -0.6082,
+      "wr": 0.1364,
+      "sharpe": null
+    },
+    "NET": {
+      "trades": 14,
+      "ev": -1.0,
+      "wr": 0.0,
+      "sharpe": null
+    },
+    "NIO": {
+      "trades": 12,
+      "ev": -1.0,
+      "wr": 0.0,
+      "sharpe": null
+    },
+    "NVDA": {
+      "trades": 7,
+      "ev": 0.424,
+      "wr": 0.4286,
+      "sharpe": null
+    },
+    "PFE": {
+      "trades": 17,
+      "ev": -0.6055,
+      "wr": 0.1176,
+      "sharpe": null
+    },
+    "PLTR": {
+      "trades": 17,
+      "ev": -0.2352,
+      "wr": 0.2941,
+      "sharpe": null
+    },
+    "RDDT": {
+      "trades": 30,
+      "ev": 0.3241,
+      "wr": 0.3,
+      "sharpe": null
+    },
+    "SNAP": {
+      "trades": 20,
+      "ev": -0.2754,
+      "wr": 0.2,
+      "sharpe": null
+    },
+    "SNOW": {
+      "trades": 15,
+      "ev": -0.0719,
+      "wr": 0.2667,
+      "sharpe": null
+    },
+    "SOFI": {
+      "trades": 18,
+      "ev": -0.2709,
+      "wr": 0.1667,
+      "sharpe": null
+    },
+    "SOUN": {
+      "trades": 14,
+      "ev": -0.2278,
+      "wr": 0.1429,
+      "sharpe": null
+    },
+    "SPY": {
+      "trades": 25,
+      "ev": -0.8002,
+      "wr": 0.08,
+      "sharpe": null
+    },
+    "T": {
+      "trades": 17,
+      "ev": -0.2121,
+      "wr": 0.2941,
+      "sharpe": null
+    },
+    "TSLA": {
+      "trades": 21,
+      "ev": 0.0422,
+      "wr": 0.2857,
+      "sharpe": null
+    },
+    "VALE": {
+      "trades": 21,
+      "ev": -0.2145,
+      "wr": 0.2381,
+      "sharpe": null
+    }
+  },
+  "new": {
+    "AAPL": {
+      "trades": 17,
+      "ev": -0.5912,
+      "wr": 0.1176,
+      "sharpe": null
+    },
+    "CRWD": {
+      "trades": 17,
+      "ev": -0.8199,
+      "wr": 0.0588,
+      "sharpe": null
+    },
+    "DDOG": {
+      "trades": 16,
+      "ev": 0.899,
+      "wr": 0.5,
+      "sharpe": null
+    },
+    "F": {
+      "trades": 17,
+      "ev": -0.4802,
+      "wr": 0.1765,
+      "sharpe": null
+    },
+    "INTC": {
+      "trades": 23,
+      "ev": -0.4056,
+      "wr": 0.2174,
+      "sharpe": null
+    },
+    "IREN": {
+      "trades": 18,
+      "ev": -0.5928,
+      "wr": 0.1111,
+      "sharpe": null
+    },
+    "MARA": {
+      "trades": 31,
+      "ev": 0.0271,
+      "wr": 0.3226,
+      "sharpe": null
+    },
+    "MRNA": {
+      "trades": 23,
+      "ev": 0.1116,
+      "wr": 0.3913,
+      "sharpe": null
+    },
+    "MSFT": {
+      "trades": 22,
+      "ev": -0.6082,
+      "wr": 0.1364,
+      "sharpe": null
+    },
+    "NET": {
+      "trades": 14,
+      "ev": -1.0,
+      "wr": 0.0,
+      "sharpe": null
+    },
+    "NIO": {
+      "trades": 12,
+      "ev": -1.0,
+      "wr": 0.0,
+      "sharpe": null
+    },
+    "NVDA": {
+      "trades": 7,
+      "ev": 0.424,
+      "wr": 0.4286,
+      "sharpe": null
+    },
+    "PFE": {
+      "trades": 17,
+      "ev": -0.6055,
+      "wr": 0.1176,
+      "sharpe": null
+    },
+    "PLTR": {
+      "trades": 17,
+      "ev": -0.2352,
+      "wr": 0.2941,
+      "sharpe": null
+    },
+    "RDDT": {
+      "trades": 30,
+      "ev": 0.3241,
+      "wr": 0.3,
+      "sharpe": null
+    },
+    "SNAP": {
+      "trades": 20,
+      "ev": -0.2754,
+      "wr": 0.2,
+      "sharpe": null
+    },
+    "SNOW": {
+      "trades": 15,
+      "ev": -0.0719,
+      "wr": 0.2667,
+      "sharpe": null
+    },
+    "SOFI": {
+      "trades": 18,
+      "ev": -0.2709,
+      "wr": 0.1667,
+      "sharpe": null
+    },
+    "SOUN": {
+      "trades": 14,
+      "ev": -0.2278,
+      "wr": 0.1429,
+      "sharpe": null
+    },
+    "SPY": {
+      "trades": 25,
+      "ev": -0.8002,
+      "wr": 0.08,
+      "sharpe": null
+    },
+    "T": {
+      "trades": 17,
+      "ev": -0.2121,
+      "wr": 0.2941,
+      "sharpe": null
+    },
+    "TSLA": {
+      "trades": 21,
+      "ev": 0.0422,
+      "wr": 0.2857,
+      "sharpe": null
+    },
+    "VALE": {
+      "trades": 21,
+      "ev": -0.2145,
+      "wr": 0.2381,
+      "sharpe": null
+    }
+  },
+  "diffs": []
+}

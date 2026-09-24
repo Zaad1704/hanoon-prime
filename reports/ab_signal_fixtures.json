@@ -1,0 +1,98 @@
+[
+  {
+    "variant": "CALIB",
+    "n": 37400,
+    "mean_abs_score_delta": 0.04306360325752885,
+    "side_flip_rate": 0.03425133689839572,
+    "score_corr": 0.9741261656556947,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "HYST",
+    "n": 37400,
+    "mean_abs_score_delta": 0.0,
+    "side_flip_rate": 0.0,
+    "score_corr": 1.0,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "PROBE",
+    "n": 37400,
+    "mean_abs_score_delta": 0.0,
+    "side_flip_rate": 0.0,
+    "score_corr": 1.0,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "CONTRA",
+    "n": 37400,
+    "mean_abs_score_delta": 0.0,
+    "side_flip_rate": 0.0,
+    "score_corr": 1.0,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "DELIB",
+    "n": 37400,
+    "mean_abs_score_delta": 0.0,
+    "side_flip_rate": 0.0,
+    "score_corr": 1.0,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "HALIM",
+    "n": 37400,
+    "mean_abs_score_delta": 0.0,
+    "side_flip_rate": 0.0,
+    "score_corr": 1.0,
+    "mean_abs_neuro": 0.0
+  },
+  {
+    "variant": "BLEND",
+    "n": 37400,
+    "mean_abs_score_delta": 0.30345138975935826,
+    "side_flip_rate": 0.4509893048128342,
+    "score_corr": 0.9736598274962095,
+    "mean_abs_neuro": 0.9978286497326203
+  },
+  {
+    "variant": "BLEND+LEARN",
+    "n": 37400,
+    "mean_abs_score_delta": 0.30939401580213904,
+    "side_flip_rate": 0.4501871657754011,
+    "score_corr": 0.8396409405718039,
+    "mean_abs_neuro": 0.997848192513369
+  },
+  {
+    "variant": "BLEND+THRESH",
+    "n": 37400,
+    "mean_abs_score_delta": 0.3093881528074866,
+    "side_flip_rate": 0.4501871657754011,
+    "score_corr": 0.8396383516707727,
+    "mean_abs_neuro": 0.9978286497326203
+  },
+  {
+    "variant": "BLEND+MOE",
+    "n": 37400,
+    "mean_abs_score_delta": 0.3093881528074866,
+    "side_flip_rate": 0.4501871657754011,
+    "score_corr": 0.8396383516707727,
+    "mean_abs_neuro": 0.9978286497326203
+  },
+  {
+    "variant": "BLEND+SLEEP",
+    "n": 37400,
+    "mean_abs_score_delta": 0.3103279035561497,
+    "side_flip_rate": 0.4476470588235294,
+    "score_corr": 0.8208313615418453,
+    "mean_abs_neuro": 0.997848192513369
+  },
+  {
+    "variant": "ALL-ON",
+    "n": 37400,
+    "mean_abs_score_delta": 0.31146144560646144,
+    "side_flip_rate": 0.4920855614973262,
+    "score_corr": 0.8005639565198922,
+    "mean_abs_neuro": 0.997848192513369
+  }
+]

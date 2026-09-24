@@ -1,0 +1,16 @@
+{
+  "ticker": "PFE",
+  "total_trades": 17,
+  "wins": 2,
+  "losses": 15,
+  "win_rate": 0.1176,
+  "expectancy": -0.6055,
+  "ev_per_trade": -0.6055,
+  "total_return_pct": -2.82,
+  "avg_win_pct": 0.6444,
+  "avg_loss_pct": 0.2738,
+  "realized_rr": 2.3535,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -0.4042,
+  "status": "UNPROFITABLE"
+}

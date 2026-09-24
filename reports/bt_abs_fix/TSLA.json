@@ -1,0 +1,16 @@
+{
+  "ticker": "TSLA",
+  "total_trades": 21,
+  "wins": 6,
+  "losses": 15,
+  "win_rate": 0.2857,
+  "expectancy": 0.0422,
+  "ev_per_trade": 0.0422,
+  "total_return_pct": 0.37,
+  "avg_win_pct": 1.1183,
+  "avg_loss_pct": 0.4224,
+  "realized_rr": 2.6477,
+  "max_drawdown": -2.8301,
+  "sharpe_ratio": 0.057,
+  "status": "PROFITABLE"
+}

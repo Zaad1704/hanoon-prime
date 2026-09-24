@@ -7,7 +7,10 @@ Pre-fix proof points (all now reversed):
   while ``_build_network`` created ``bull_<name>_bull``/``bear_<name>_bear``
   → the live SNN never fired (score always 0.0).
 - The restored SNN blend is gated behind ``NEURO_BLEND_ENABLED`` (default
-  False) so the live 0.7·cortex+0.3·neuro path stays byte-identical.
+  False) so the neuro term stays 0.0 in the live path; with the gate off
+  the cortex score passes through UN-DAMPED — the 0.7·cortex+0.3·neuro
+  blend applies only when the gate is on (FIX-2026-09-23-06). The old
+  code damped every score by 0.7× for zero neuro contribution.
 """
 
 from __future__ import annotations
@@ -64,7 +67,7 @@ def test_winning_replay_reports_real_plasticity():
     pattern = engine.encode_pattern([0.9] * 11)
     assert pattern, "a strong bull pattern must map onto real input neurons"
 
-    result = engine.run_cycle(duration_sec=1.0, replay_list=[(pattern, 1.0)])
+    result = engine.run_cycle(duration_sec=1.0, replay_list=[(pattern, 1.0, True)])
 
     assert result.patterns_replayed == 1
     assert result.spikes_generated > 0
@@ -76,7 +79,7 @@ def test_winner_reinforces_decision_edge():
     bridge, engine = _full_engine()
     before = engine._stdp.get_strength("hidden_trend", "decision_long")
     pattern = engine.encode_pattern([0.9] * 11)
-    engine.run_cycle(duration_sec=1.0, replay_list=[(pattern, 1.0)])
+    engine.run_cycle(duration_sec=1.0, replay_list=[(pattern, 1.0, True)])
     after = engine._stdp.get_strength("hidden_trend", "decision_long")
     assert after > before
 
@@ -102,7 +105,7 @@ def test_poisson_noise_injects_on_quiet_neurons():
     assert network.get_neuron(quiet) is not None
 
 
-# ── Blend gate (byte-identical live path) ────────────────────────────
+# ── Blend gate (neuro gated; cortex un-damped when off) ───────────────
 def test_neuro_blend_gated_off_by_default(monkeypatch):
     from hanoon_prime.brain.orchestrator import NeuromorphicBrain
 
@@ -120,6 +123,8 @@ def test_engine_with_empty_stdp_errors_gracefully():
     engine = SleepReplayEngine(
         network=LIFNetwork(), stdp=STDPLearner(), memory=AttractorMemory()
     )
-    result = engine.run_cycle(duration_sec=1.0, replay_list=[({"alpha_0": 0.5}, 1.0)])
+    result = engine.run_cycle(
+        duration_sec=1.0, replay_list=[({"alpha_0": 0.5}, 1.0, True)]
+    )
     assert isinstance(result, SleepResult)
     assert result.weights_updated == 0

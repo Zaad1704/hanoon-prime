@@ -1,0 +1,16 @@
+{
+  "ticker": "MARA",
+  "total_trades": 31,
+  "wins": 10,
+  "losses": 21,
+  "win_rate": 0.3226,
+  "expectancy": 0.0271,
+  "ev_per_trade": 0.0271,
+  "total_return_pct": 0.54,
+  "avg_win_pct": 1.3951,
+  "avg_loss_pct": 0.6388,
+  "realized_rr": 2.1841,
+  "max_drawdown": -2.3272,
+  "sharpe_ratio": 0.055,
+  "status": "PROFITABLE"
+}

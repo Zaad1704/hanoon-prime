@@ -1,0 +1,16 @@
+{
+  "ticker": "AAPL",
+  "total_trades": 17,
+  "wins": 2,
+  "losses": 15,
+  "win_rate": 0.1176,
+  "expectancy": -0.5912,
+  "ev_per_trade": -0.5912,
+  "total_return_pct": -2.51,
+  "avg_win_pct": 0.617,
+  "avg_loss_pct": 0.2493,
+  "realized_rr": 2.4752,
+  "max_drawdown": -2.0032,
+  "sharpe_ratio": -0.2754,
+  "status": "UNPROFITABLE"
+}

@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,8 @@ from .learning_config import (
     META_WEIGHT_MAX,
     META_WIN_THRESHOLD,
 )
+from .self_correction import ABSTAIN_P_WIN, CalibrationMonitor, PredictionLedger
+from .self_correction_policy import apply_derating, evaluate_weight
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +45,62 @@ def _get_dnn() -> Any:
 
         _DNN_INSTANCE = MetaDNN()
     return _DNN_INSTANCE
+
+
+WEIGHT_EVAL_TTL_S: float = 60.0  # seconds between derating re-evaluations
+_WEIGHT_CACHE: tuple[float, float, str] | None = None  # (ts, weight, reason)
+
+
+def dnn_influence_weight(drift_z: float) -> tuple[float, str]:
+    """Current DNN influence weight. TTL-cached; fail-safe; never raises."""
+    global _WEIGHT_CACHE
+    now = time.time()
+    if _WEIGHT_CACHE is not None and now - _WEIGHT_CACHE[0] < WEIGHT_EVAL_TTL_S:
+        return _WEIGHT_CACHE[1], _WEIGHT_CACHE[2]
+    ledger = PredictionLedger()
+    pairs, total = ledger.calibration_data()
+    snapshot = CalibrationMonitor.summarize(pairs)
+    try:
+        weight, reason = evaluate_weight(snapshot, drift_z, total)
+    except Exception as exc:  # derating must never break the gate
+        log.warning("derating evaluation failed: %s", exc)
+        weight, reason = 0.5, "evaluation failed"
+    _WEIGHT_CACHE = (now, weight, reason)
+    return weight, reason
+
+
+def gate_with_derating(
+    dnn: Any, features: list[float], admit: bool, p_win: float, size_scale: float
+) -> tuple[bool, float, float]:
+    """Fail-closed DNN gate: unusable DNN or zero weight -> block; else derate; always log."""
+    abstain_reason = getattr(dnn, "abstain_reason", None)
+    try:
+        drift_z = float(dnn.drift_zscore())
+    except (AttributeError, TypeError, ValueError):
+        drift_z = 0.0
+    weight, w_reason = dnn_influence_weight(drift_z)
+    stepped_aside = abstain_reason is not None or weight <= 0.0
+    if stepped_aside:
+        out = (False, ABSTAIN_P_WIN, 0.0)
+    else:
+        out = apply_derating(
+            admit, p_win, size_scale, weight, threshold=META_WIN_THRESHOLD
+        )
+    try:
+        PredictionLedger().log_decision(
+            p_win=out[1],
+            features=features,
+            size_scale=out[2],
+            admitted=out[0],
+            abstained=stepped_aside,
+            weight=weight,
+            drift_z=drift_z,
+        )
+    except Exception as exc:  # the ledger must never break the gate
+        log.debug("ledger log failed: %s", exc)
+    if stepped_aside:
+        log.info("DNN blocked (%s)", abstain_reason or w_reason)
+    return out
 
 
 REGIMES: tuple[str, ...] = ("trend_up", "trend_down", "range", "vol", "unknown")
@@ -136,7 +195,8 @@ class MetaLabelModel:
         price_entropy: float = 1.0,
         vol_entropy: float = 1.0,
     ) -> tuple[bool, float, float]:
-        """DNN gatekeeper: (admit, p_win, size_scale). Fallback: always admits."""
+        """DNN gatekeeper: (admit, p_win, size_scale). Shallow fallback runs
+        only when the DNN is disabled; DNN failures block."""
         if META_DNN_ENABLED:
             result = self._dnn_gate(
                 conf,
@@ -164,7 +224,7 @@ class MetaLabelModel:
         vpin: float,
         price_entropy: float = 1.0,
         vol_entropy: float = 1.0,
-    ) -> tuple[bool, float, float] | None:
+    ) -> tuple[bool, float, float]:
         try:
             from .meta_label_dnn import expand_features
 
@@ -183,10 +243,12 @@ class MetaLabelModel:
             p: float
             scale: float
             admit, p, scale = _get_dnn().infer(feats)
-            return admit, p, scale
+            return gate_with_derating(_get_dnn(), feats, admit, p, scale)
         except Exception as exc:
-            log.warning("DNN gatekeeper failed (falling back): %s", exc)
-            return None
+            # Fail-closed: never fall through to the always-admitting
+            # shallow fallback while the DNN is enabled. Block instead.
+            log.warning("DNN gatekeeper failed — blocking: %s", exc)
+            return False, ABSTAIN_P_WIN, 0.0
 
     def _fallback_gate(
         self, conf: float, score: float, vol_pct: float, regime: str, horizon: str

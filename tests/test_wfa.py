@@ -130,13 +130,27 @@ def test_deflated_sharpe_zero_with_no_trials() -> None:
     assert deflated_sharpe({}) == 0.0
 
 
-def test_count_trials_counts_ticker_folds_with_trades() -> None:
+def test_count_trials_counts_admissible_ticker_folds_with_trades() -> None:
+    # Regression: FIX-2026-09-23-10
+    # FIX-2026-09-23-10: trial cells count only for tickers that clear the
+    # MIN_TRADES admission floor — the same set that feeds the pooled Sharpe.
     results = {
-        # A: 1 fold with 5 trades (>=2) → counts; B: 0 trades → not counted.
-        "A": [_fold([0.01] * 5, 0, 0, 1)],
+        # A: admissible (30 OOS trades), 1 fold with ≥2 trades → counts;
+        # B: 0 trades → not counted.
+        "A": [_fold([0.01] * 30, 0, 0, 1)],
         "B": [_fold([], 0, 0, 1)],
     }
     assert _count_trials(results) == 1
+
+
+def test_count_trials_skips_inadmissible_tickers() -> None:
+    # Regression: FIX-2026-09-23-10
+    # FIX-2026-09-23-10: a ticker below the floor contributes zero trial
+    # cells even when its fold cells individually qualify (≥2 trades).
+    results = {
+        "A": [_fold([0.01] * 5, 0, 0, 1)],  # 5 OOS trades → inadmissible
+    }
+    assert _count_trials(results) == 0
 
 
 def test_run_wfa_universe_reads_committed_fixtures() -> None:

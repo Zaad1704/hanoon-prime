@@ -1,0 +1,5074 @@
+[
+  {
+    "variant": "ALL-ON",
+    "total_trades": 99,
+    "profitable_tickers": 17,
+    "with_trades": 47,
+    "ev_per_trade": -1.328955827807628,
+    "pooled_sr": -0.10727117808627656,
+    "deflated_sr": -0.27855362387267857,
+    "sr_expected_max": 0.17231759457122175,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 2,
+        "ev_per_trade": -4.681642239610942,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -7.8144545454546295,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 1,
+        "ev_per_trade": 29.135087121211715,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 2,
+        "ev_per_trade": 3.230000000000415,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 2,
+        "ev_per_trade": -9.697189094908527,
+        "win_rate": 0.5,
+        "realized_rr": 0.30611762092844885,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 2,
+        "ev_per_trade": -13.69353196122298,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MARA": {
+        "trades": 2,
+        "ev_per_trade": -1.9191480406385586,
+        "win_rate": 0.5,
+        "realized_rr": 0.5134378412907861,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 11.280251366120511,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 2,
+        "ev_per_trade": -3.1512910180634273,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 1,
+        "ev_per_trade": -1.5440075329565912,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 1,
+        "ev_per_trade": 2.69024000000011,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 2,
+        "ev_per_trade": 7.125278997834843,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 2,
+        "ev_per_trade": 16.58670588235401,
+        "win_rate": 0.5,
+        "realized_rr": 4.254979596783913,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 2,
+        "ev_per_trade": -8.27198569651724,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -0.5434210526313583,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 2,
+        "ev_per_trade": 14.461250000000401,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 1,
+        "ev_per_trade": -5.702828422876838,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 2,
+        "ev_per_trade": 2.424641578947387,
+        "win_rate": 0.5,
+        "realized_rr": 1.638127651322311,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 2,
+        "ev_per_trade": 3.702099759615562,
+        "win_rate": 0.5,
+        "realized_rr": 3.5890898606667005,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 2,
+        "ev_per_trade": -0.31522014347199034,
+        "win_rate": 0.5,
+        "realized_rr": 0.9007769034099903,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 2,
+        "ev_per_trade": 5.884919999999901,
+        "win_rate": 0.5,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 2,
+        "ev_per_trade": -20.923659090908572,
+        "win_rate": 0.5,
+        "realized_rr": 0.1646658313092202,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 13,
+        "ev_per_trade": -4.955947141375797,
+        "win_rate": 0.23076923076923078,
+        "realized_rr": 0.9053562339249247,
+        "sharpe": -0.5085021496507167,
+        "deflated": -0.9306106556418466
+      },
+      "ib5_CRWD": {
+        "trades": 13,
+        "ev_per_trade": 2.4655406954800276,
+        "win_rate": 0.6923076923076923,
+        "realized_rr": 0.90253105666071,
+        "sharpe": 0.44941417796277616,
+        "deflated": -0.08788693625732392
+      },
+      "ib5_F": {
+        "trades": 14,
+        "ev_per_trade": -0.8001098792204784,
+        "win_rate": 0.42857142857142855,
+        "realized_rr": 0.8512186753919165,
+        "sharpe": -0.16742442318933395,
+        "deflated": -0.6233835530006326
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 14.145230814134534,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -31.57150562187309,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -10.568517163752306,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -16.173617187342444,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -0.42468305254870664,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -10.264447567830878,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -12.138430971430427,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 1.3752146219330876,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": -1.8697500561417322,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 1.3757633589280027,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -0.48968331186032676,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -3.8557405902100528,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.3141242951265957,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 9.098655160652667,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -29.157443723623665,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -5.14786826517137,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.24315189079609748,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -6.115634087489207,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -6.228221902375629,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 34.01409120894896,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -18.134359224325678,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "BLEND",
+    "total_trades": 173,
+    "profitable_tickers": 17,
+    "with_trades": 47,
+    "ev_per_trade": -4.4082213062510895,
+    "pooled_sr": -0.16749023576133493,
+    "deflated_sr": -0.4691915082586717,
+    "sr_expected_max": 0.06633605231355241,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -4.22447505623188,
+        "win_rate": 0.25,
+        "realized_rr": 0.4262614664296903,
+        "sharpe": -0.7315113669125669,
+        "deflated": -2.0672226669764746
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": -13.069337810055982,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": -7.021407252071857,
+        "win_rate": 0.5,
+        "realized_rr": 0.34202132745407327,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": 0.0917842809365137,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.5143502052818222,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -0.05897357038525467,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 1.8915698466372584,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": -7.391214165814425,
+        "win_rate": 0.25,
+        "realized_rr": 0.8181784622445195,
+        "sharpe": -0.49919426411891377,
+        "deflated": -1.4938552183811766
+      },
+      "a180_MARA": {
+        "trades": 3,
+        "ev_per_trade": -0.1871294064074034,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.48476665502411237,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 6.464197787784901,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 3,
+        "ev_per_trade": -0.9911488280206185,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 1.4301501031887356,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": 0.9541237411372461,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": -7.8013384615386485,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": 3.3871982553738404,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": 5.049004783720939,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.343548562132214,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": 5.220622699870056,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.2092055893712461,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": -4.2579767922791465,
+        "win_rate": 0.5,
+        "realized_rr": 0.2136740331491872,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": -4.214551282050739,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.30838400257405424,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": -8.7934597640432,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -3.104228836550488,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.7007340488679489,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": -7.59770215053739,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.14509765177267242,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 3,
+        "ev_per_trade": 0.25294518828105755,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 2.366302604983272,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": 1.8733352380953356,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": 16.78939402932373,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 30,
+        "ev_per_trade": -4.432663488900718,
+        "win_rate": 0.4666666666666667,
+        "realized_rr": 0.4087800020570648,
+        "sharpe": -0.2784387324743371,
+        "deflated": -0.679337644827172
+      },
+      "ib5_CRWD": {
+        "trades": 28,
+        "ev_per_trade": -1.3522807269214001,
+        "win_rate": 0.5,
+        "realized_rr": 0.6060472290563051,
+        "sharpe": -0.1273660100780401,
+        "deflated": -0.455171154931974
+      },
+      "ib5_F": {
+        "trades": 30,
+        "ev_per_trade": -11.883181775407316,
+        "win_rate": 0.4,
+        "realized_rr": 0.2750315830425451,
+        "sharpe": -0.2187798583270204,
+        "deflated": -0.8178101324540358
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 14.145230814134534,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -32.221426142350616,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -1.574074974753751,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -9.086267391003872,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": 0.027384847683164622,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -22.81574366985431,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -12.526312953175484,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 1.8073712091322183,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": -1.8697500561417322,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 1.3757633589280027,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -8.92400558972984,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -58.836520749239604,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": 0.24305445669832043,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 19.828652861849633,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -29.157443723623665,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -5.14786826517137,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4867869912963758,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -9.91250303211108,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -8.349617634371201,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 34.01409120894896,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -18.134359224325678,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "BLEND+LEARN",
+    "total_trades": 173,
+    "profitable_tickers": 16,
+    "with_trades": 47,
+    "ev_per_trade": -2.3623105216215863,
+    "pooled_sr": -0.19127914484840658,
+    "deflated_sr": -0.33371328130584693,
+    "sr_expected_max": 0.12334380656995082,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": 11.062664577298404,
+        "win_rate": 0.75,
+        "realized_rr": 6.644945153512004,
+        "sharpe": 0.8356554910319821,
+        "deflated": 0.6755009146787522
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": -4.845296226575818,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": 14.360595681997463,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": 2.4533489681053817,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 3.5810267615217164,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -8.586121498612325,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.2109465251250538,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 0.8932271062142876,
+        "win_rate": 0.75,
+        "realized_rr": 0.3943825140303163,
+        "sharpe": 0.0708306495463382,
+        "deflated": -0.7836151453313065
+      },
+      "a180_MARA": {
+        "trades": 3,
+        "ev_per_trade": 2.842641029863875,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.480162153115238,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 4.283728718339628,
+        "win_rate": 0.5,
+        "realized_rr": 8.022067094501734,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 3,
+        "ev_per_trade": 0.7632375442428009,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.6146352381972829,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": -2.106367111481795,
+        "win_rate": 0.5,
+        "realized_rr": 0.06058671836500007,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": -6.025997863247857,
+        "win_rate": 0.0,
+        "realized_rr": 0.0006127086186126469,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": 4.332881013146001,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": -5.151937054843228,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.35108016588033464,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": -0.4298206296962815,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.4493498127976195,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": -3.741486207883504,
+        "win_rate": 0.5,
+        "realized_rr": 0.14091173057747572,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": -6.692035897435894,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.35771233250817963,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": -21.11471269224073,
+        "win_rate": 0.0,
+        "realized_rr": 0.0007520785111033503,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -7.096541666666627,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": -5.833912091503041,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.2274874613925496,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 3,
+        "ev_per_trade": -6.459068612095266,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": -1.1151766666666285,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.2682589270252573,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": 7.885347537057964,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.8093979362762364,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 29,
+        "ev_per_trade": -5.391431462852492,
+        "win_rate": 0.2413793103448276,
+        "realized_rr": 0.6806355543012816,
+        "sharpe": -0.395710256362404,
+        "deflated": -0.7944300829069905
+      },
+      "ib5_CRWD": {
+        "trades": 28,
+        "ev_per_trade": 0.3047491889173031,
+        "win_rate": 0.4642857142857143,
+        "realized_rr": 1.269652292866776,
+        "sharpe": 0.03450204044277496,
+        "deflated": -0.28750198808392546
+      },
+      "ib5_F": {
+        "trades": 31,
+        "ev_per_trade": -1.5609855030239363,
+        "win_rate": 0.41935483870967744,
+        "realized_rr": 0.5464668145176841,
+        "sharpe": -0.26657632519054403,
+        "deflated": -0.6198313906845422
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 8.021659730867956,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -32.221426142350616,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -1.574074974753751,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -6.727934546385767,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": 0.027384847683164622,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -19.797075536106565,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -13.424971813272432,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 1.3752146219330876,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": -1.8697500561417322,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 1.3757633589280027,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -6.962637703147374,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -3.8557405902100528,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.3141242951265957,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -12.52715724228442,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -29.157443723623665,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -2.826813280224235,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4867869912963758,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -7.846085699975536,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -6.228221902375629,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 20.187094745984624,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -8.022883960460424,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "BLEND+MOE",
+    "total_trades": 172,
+    "profitable_tickers": 15,
+    "with_trades": 47,
+    "ev_per_trade": -2.2027961114999353,
+    "pooled_sr": -0.1533905423784841,
+    "deflated_sr": -0.29016281894603896,
+    "sr_expected_max": 0.12572473965588715,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": 0.7991473309628752,
+        "win_rate": 0.25,
+        "realized_rr": 1.846581593727764,
+        "sharpe": 0.2191024407635204,
+        "deflated": -0.6160401338138345
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": -15.711336497535155,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.25494738572004727,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": 10.886027036719877,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": 3.1471663461541346,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 3.583643294291876,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -13.541093309813263,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.1023789831385181,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 8.42360236524013,
+        "win_rate": 0.75,
+        "realized_rr": 1.9834368708769377,
+        "sharpe": 0.6337022306321406,
+        "deflated": -0.1470445594125336
+      },
+      "a180_MARA": {
+        "trades": 3,
+        "ev_per_trade": 2.2085651204603294,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.012412250307874,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 8.948765557799298,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 3,
+        "ev_per_trade": -2.8882772156998455,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.6140976887845337,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": -5.317212442297712,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": -5.1528312499997835,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": -4.129090946062324,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.25548208360766156,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": 26.034772325103475,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": 1.4308762245419642,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.8737339570655164,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": 0.42294910690972176,
+        "win_rate": 0.5,
+        "realized_rr": 1.605984834039827,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": -8.89120256410252,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.28169698062878823,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": -23.682005173570218,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -16.368769265232913,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": -3.2222544550819756,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.49788518434691414,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 3,
+        "ev_per_trade": -1.6744377991881974,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 1.1362004072712473,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": 10.150944414044899,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.3939152853257584,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": 2.223707843137658,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.8736737951141107,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 29,
+        "ev_per_trade": -3.746263036338795,
+        "win_rate": 0.3103448275862069,
+        "realized_rr": 1.0526273024387234,
+        "sharpe": -0.2652027586280279,
+        "deflated": -0.5962263983786777
+      },
+      "ib5_CRWD": {
+        "trades": 28,
+        "ev_per_trade": -0.3950738079083009,
+        "win_rate": 0.42857142857142855,
+        "realized_rr": 1.2126908349352044,
+        "sharpe": -0.03298929926277358,
+        "deflated": -0.35562703050196914
+      },
+      "ib5_F": {
+        "trades": 30,
+        "ev_per_trade": -0.8983761755988681,
+        "win_rate": 0.43333333333333335,
+        "realized_rr": 1.011097858057395,
+        "sharpe": -0.08025512149923796,
+        "deflated": -0.39314507159472434
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 8.021659730867956,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -32.221426142350616,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -1.574074974753751,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -15.420780314919998,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -2.7261794358897244,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -23.417949745758346,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -17.808419306410425,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": -0.3686580123686468,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": -6.2887008122741,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 0.6257159233032141,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -7.711043527920205,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -3.8557405902100528,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.057448279459693,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -12.52715724228442,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -29.157443723623665,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -1.1571836113829879,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4867869912963758,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -7.691786887132012,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -8.349617634371201,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 20.187094745984624,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -8.131478647902393,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "BLEND+SLEEP",
+    "total_trades": 173,
+    "profitable_tickers": 15,
+    "with_trades": 47,
+    "ev_per_trade": -0.6538094249497273,
+    "pooled_sr": -0.041702260532422326,
+    "deflated_sr": -0.17003806467656293,
+    "sr_expected_max": 0.13345713591671182,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": 10.728930420974574,
+        "win_rate": 0.75,
+        "realized_rr": 6.454538906343182,
+        "sharpe": 0.7753720204791978,
+        "deflated": 0.49798995420850556
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": 2.8201965913844105,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.993791911790127,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": 10.214843189575545,
+        "win_rate": 0.5,
+        "realized_rr": 3.7282657218311845,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": -0.6650609567897412,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.25364282741727756,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -4.890299145072075,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.3353671140934217,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 1.1428034348758145,
+        "win_rate": 0.75,
+        "realized_rr": 0.5328392158246748,
+        "sharpe": 0.19771490061194796,
+        "deflated": -0.6682187900929812
+      },
+      "a180_MARA": {
+        "trades": 3,
+        "ev_per_trade": -0.8420125272330444,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.36543628244528764,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 33.6755029650442,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 3,
+        "ev_per_trade": 38.1555786803842,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": -3.8072622334907944,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": -1.6306111111109762,
+        "win_rate": 0.0,
+        "realized_rr": 0.002260559190995218,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": 3.878959158044676,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": 4.023645325669555,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 2.8990568066499818,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": -0.7593043543196369,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.7066414026728375,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": -12.33087187643702,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": -5.888560541310452,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.39683650359400185,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": -20.269065822459556,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.08082220645297652,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -2.0122730878553146,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 1.0611915391340576,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": -4.495900900900847,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.486738168663456,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 3,
+        "ev_per_trade": 8.875552053645825,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 3.539078482095677,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": -5.647552924594656,
+        "win_rate": 0.0,
+        "realized_rr": 0.026327041963817684,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": -11.271842803029976,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.07175750318365258,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 29,
+        "ev_per_trade": -4.408151679575697,
+        "win_rate": 0.4482758620689655,
+        "realized_rr": 0.27667812072152065,
+        "sharpe": -0.41592013388048493,
+        "deflated": -1.0370314866162103
+      },
+      "ib5_CRWD": {
+        "trades": 28,
+        "ev_per_trade": 3.6139401392797335,
+        "win_rate": 0.39285714285714285,
+        "realized_rr": 3.3070601896629683,
+        "sharpe": 0.2918548026353589,
+        "deflated": 0.02934823232749903
+      },
+      "ib5_F": {
+        "trades": 31,
+        "ev_per_trade": -1.6104611928057595,
+        "win_rate": 0.45161290322580644,
+        "realized_rr": 0.8422483358577219,
+        "sharpe": -0.14503718750435624,
+        "deflated": -0.45608582203653253
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 14.145230814134534,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -38.77410712665927,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -1.574074974753751,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -16.173617187342444,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -0.42468305254870664,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -18.854506082329564,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -13.424971813272432,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 1.3752146219330876,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": -1.8697500561417322,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 1.3757633589280027,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -7.914321262369513,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -3.8557405902100528,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.3141242951265957,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -12.52715724228442,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -29.157443723623665,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -5.14786826517137,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4867869912963758,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -7.691786887132012,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -6.228221902375629,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 20.187094745984624,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -8.131478647902393,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "BLEND+THRESH",
+    "total_trades": 172,
+    "profitable_tickers": 21,
+    "with_trades": 47,
+    "ev_per_trade": -0.9023860755035706,
+    "pooled_sr": -0.04907123697022166,
+    "deflated_sr": -0.17658057770632915,
+    "sr_expected_max": 0.13674585654181728,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": 2.866216707479314,
+        "win_rate": 0.75,
+        "realized_rr": 1.9686036720221944,
+        "sharpe": 0.7052779321199345,
+        "deflated": -0.19979856248142672
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": 2.9465661846890128,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.3902708764810527,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": 19.505758687516884,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": 15.69599761051302,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.120533240428069,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -27.118652814680463,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": -7.296693550704397,
+        "win_rate": 0.25,
+        "realized_rr": 0.2642556624552229,
+        "sharpe": -1.24857706085107,
+        "deflated": -1.8391309418204518
+      },
+      "a180_MARA": {
+        "trades": 3,
+        "ev_per_trade": -6.505714092140896,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.1943758157331293,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 18.87802958598735,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 3,
+        "ev_per_trade": 29.261960043698764,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 11.0355257688901,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": 5.3499249414520325,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": 2.475954545454502,
+        "win_rate": 0.5,
+        "realized_rr": 1.6944111572881981,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": -7.419180119578395,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.0948138377414363,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": -1.7067770155823088,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.9418204866264038,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": 5.233078937560202,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 8.34236082788513,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": -12.476481343882252,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": 4.158147435897562,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": 7.0509782404206485,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.510443682768265,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -5.109218961778271,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": 4.006419632925582,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 14.224937315506692,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 3,
+        "ev_per_trade": -6.204417685459429,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": 10.06507410322026,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": -9.27566339869258,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 29,
+        "ev_per_trade": -3.893695086853748,
+        "win_rate": 0.3103448275862069,
+        "realized_rr": 0.9550244171200198,
+        "sharpe": -0.3272374040154197,
+        "deflated": -0.6169754449634561
+      },
+      "ib5_CRWD": {
+        "trades": 28,
+        "ev_per_trade": -2.6311327269327323,
+        "win_rate": 0.42857142857142855,
+        "realized_rr": 0.8539377215051495,
+        "sharpe": -0.11620926879932753,
+        "deflated": -0.4319233303477839
+      },
+      "ib5_F": {
+        "trades": 30,
+        "ev_per_trade": 0.9727199274233242,
+        "win_rate": 0.5,
+        "realized_rr": 1.3617769138183553,
+        "sharpe": 0.10168071306285349,
+        "deflated": -0.20206491189047468
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 19.870391255289103,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -32.221426142350616,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -6.028866523485148,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -9.086267391003872,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -4.434430261683791,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -22.70170080752733,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -14.653404985174147,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 1.8073712091322183,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 1,
+        "ev_per_trade": 1.891108632642749,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 0.6257159233032141,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -7.914321262369513,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -3.2226488070110486,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.057448279459693,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 19.828652861849633,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -25.729614609120006,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -4.847192441289192,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4867869912963758,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -16.091370903696465,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.811209681748231,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -8.349617634371201,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 34.01409120894896,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -11.157987051805488,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "CALIB",
+    "total_trades": 157,
+    "profitable_tickers": 16,
+    "with_trades": 40,
+    "ev_per_trade": -1.4419005970478558,
+    "pooled_sr": -0.07092772432224208,
+    "deflated_sr": -0.20155050377806957,
+    "sr_expected_max": 0.14744408863285996,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 4,
+        "ev_per_trade": -22.279013647194468,
+        "win_rate": 0.25,
+        "realized_rr": 0.41890839458130735,
+        "sharpe": -0.8557075783439645,
+        "deflated": -1.905260796205637
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": 5.273678735632431,
+        "win_rate": 0.6,
+        "realized_rr": 1.458651534183561,
+        "sharpe": 0.3323377416956544,
+        "deflated": -0.4295013700857497
+      },
+      "a180_INTC": {
+        "trades": 4,
+        "ev_per_trade": -3.9390098448107453,
+        "win_rate": 0.25,
+        "realized_rr": 0.2679954924477049,
+        "sharpe": -1.0215382826082051,
+        "deflated": -2.1386404725530257
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 5.90225794543764,
+        "win_rate": 0.75,
+        "realized_rr": 1.160525722220093,
+        "sharpe": 0.6618800274898154,
+        "deflated": -0.39501678896182507
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": -6.280190936149455,
+        "win_rate": 0.2,
+        "realized_rr": 0.9668534351863054,
+        "sharpe": -0.6222632544465958,
+        "deflated": -1.4403630649381158
+      },
+      "a180_MRNA": {
+        "trades": 4,
+        "ev_per_trade": -28.141714837470143,
+        "win_rate": 0.25,
+        "realized_rr": 0.02004577164683595,
+        "sharpe": -1.2915353513941905,
+        "deflated": -3.2771779110288204
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": 17.96712289914357,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": 0.6180656862746624,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.9047139711501062,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 5,
+        "ev_per_trade": 2.314816608595999,
+        "win_rate": 0.6,
+        "realized_rr": 1.5792738528852248,
+        "sharpe": 0.3382545196436236,
+        "deflated": -0.39824908349432325
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -4.359776477847063,
+        "win_rate": 0.25,
+        "realized_rr": 0.8913891833005839,
+        "sharpe": -0.609256303209137,
+        "deflated": -1.4217111606673214
+      },
+      "a180_PLTR": {
+        "trades": 5,
+        "ev_per_trade": 6.483002461798509,
+        "win_rate": 0.8,
+        "realized_rr": 1.471373015058528,
+        "sharpe": 0.9222104197662694,
+        "deflated": -0.17359111938240132
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": -30.419619330003105,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 4,
+        "ev_per_trade": -0.8887778846154077,
+        "win_rate": 0.5,
+        "realized_rr": 0.8978810908295054,
+        "sharpe": -0.04065717680077607,
+        "deflated": -0.8929018673224155
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": 10.925018683762955,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.6383389901797196,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 5,
+        "ev_per_trade": 0.45432680435039857,
+        "win_rate": 0.6,
+        "realized_rr": 0.7075165656613361,
+        "sharpe": 0.02889156936804005,
+        "deflated": -0.7332077698333171
+      },
+      "a180_SOUN": {
+        "trades": 4,
+        "ev_per_trade": -2.081932855430617,
+        "win_rate": 0.5,
+        "realized_rr": 0.8725161094175827,
+        "sharpe": -0.06335465917840416,
+        "deflated": -0.916006928380724
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_VALE": {
+        "trades": 2,
+        "ev_per_trade": -1.971148148147991,
+        "win_rate": 0.5,
+        "realized_rr": 0.32444799857834405,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 23,
+        "ev_per_trade": -0.6391181767440699,
+        "win_rate": 0.30434782608695654,
+        "realized_rr": 1.9706012417578853,
+        "sharpe": -0.03985653265332081,
+        "deflated": -0.39260361679598044
+      },
+      "ib5_CRWD": {
+        "trades": 22,
+        "ev_per_trade": -2.2787329159217715,
+        "win_rate": 0.3181818181818182,
+        "realized_rr": 1.3814100628732795,
+        "sharpe": -0.15119083642602563,
+        "deflated": -0.5196731979216566
+      },
+      "ib5_F": {
+        "trades": 22,
+        "ev_per_trade": 6.463207856683867,
+        "win_rate": 0.5,
+        "realized_rr": 3.83885676429759,
+        "sharpe": 0.21764446467330986,
+        "deflated": 0.008787650000228023
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": -0.03027651740039741,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -9.499241111263897,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": 2.643204268849003,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -6.025169846544345,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -0.6941953029284131,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -9.284036870506394,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -1.007246265150745,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 2.1270291453243617,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": -13.260978824916767,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": 3.102366722603211,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -12.541773441597881,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -0.6681576250309301,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -1.26358960620388,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": 1.860423271917309,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": 9.49444381479416,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 7.219821884651709,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": 14.40051541669142,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -22.60800772317828,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "CONTRA",
+    "total_trades": 146,
+    "profitable_tickers": 21,
+    "with_trades": 43,
+    "ev_per_trade": 0.2598151775792232,
+    "pooled_sr": 0.013327321260100704,
+    "deflated_sr": -0.12772744923677296,
+    "sr_expected_max": 0.14182318415590836,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 4,
+        "ev_per_trade": -22.279013647194468,
+        "win_rate": 0.25,
+        "realized_rr": 0.41890839458130735,
+        "sharpe": -0.8557075783439645,
+        "deflated": -1.905260796205637
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": 13.400867551971192,
+        "win_rate": 0.8,
+        "realized_rr": 6.316791145258366,
+        "sharpe": 1.0175138378891795,
+        "deflated": 0.4590280491355389
+      },
+      "a180_INTC": {
+        "trades": 4,
+        "ev_per_trade": 0.9282803481417075,
+        "win_rate": 0.5,
+        "realized_rr": 1.8939609924464453,
+        "sharpe": 0.27749206809289634,
+        "deflated": -0.5953765697974438
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": -12.906932219147453,
+        "win_rate": 0.25,
+        "realized_rr": 0.1262419313499562,
+        "sharpe": -1.0537485631840975,
+        "deflated": -3.0197890200829836
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": 5.511572894073158,
+        "win_rate": 0.8,
+        "realized_rr": 2.707904534822809,
+        "sharpe": 0.7051709384481594,
+        "deflated": 0.24502457288805451
+      },
+      "a180_MRNA": {
+        "trades": 3,
+        "ev_per_trade": 4.342874910853575,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.9415821834322232,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": 22.81675848150427,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": -1.9988344988343545,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.29092025224628454,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": -14.165882947407715,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.113072378256567,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -16.144216666664803,
+        "win_rate": 0.5,
+        "realized_rr": 0.2522125627360215,
+        "sharpe": -0.5679508259335886,
+        "deflated": -1.6071766270674617
+      },
+      "a180_PLTR": {
+        "trades": 5,
+        "ev_per_trade": 0.9570495157259229,
+        "win_rate": 0.4,
+        "realized_rr": 2.3671487171559162,
+        "sharpe": 0.20664098876446452,
+        "deflated": -0.551369667094757
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": 2.21941312205074,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.5804418334244815,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": 32.587607843137825,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 5.082413340538879,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": 5.3265614439581865,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 9.251359125786465,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 4,
+        "ev_per_trade": 16.210542304189687,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 3.7097258847866876,
+        "deflated": 2468327.8420544076
+      },
+      "a180_SOUN": {
+        "trades": 4,
+        "ev_per_trade": -2.942835737179341,
+        "win_rate": 0.5,
+        "realized_rr": 0.4093004651085149,
+        "sharpe": -0.35260033372549315,
+        "deflated": -1.3002204841422607
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 2,
+        "ev_per_trade": 5.773859388477757,
+        "win_rate": 0.5,
+        "realized_rr": 7.932013489635803,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_VALE": {
+        "trades": 2,
+        "ev_per_trade": 5.830223076923326,
+        "win_rate": 0.5,
+        "realized_rr": 2.2591730544951667,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 13,
+        "ev_per_trade": -8.223116551124257,
+        "win_rate": 0.38461538461538464,
+        "realized_rr": 0.3850268269716998,
+        "sharpe": -0.2655737934676919,
+        "deflated": -0.8804363923817842
+      },
+      "ib5_CRWD": {
+        "trades": 15,
+        "ev_per_trade": -5.732818624480747,
+        "win_rate": 0.26666666666666666,
+        "realized_rr": 0.8933468096343883,
+        "sharpe": -0.42465684443859697,
+        "deflated": -0.8502400745141276
+      },
+      "ib5_F": {
+        "trades": 29,
+        "ev_per_trade": 3.3692766420104956,
+        "win_rate": 0.4482758620689655,
+        "realized_rr": 3.375931963154174,
+        "sharpe": 0.27101345851679676,
+        "deflated": 0.06939541341281659
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": -1.7143989356727143,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": 24.16774419216032,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": -5.276941673869668,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": 13.743783169644534,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": 1.481132273562759,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -7.814428073797479,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -9.719360340890363,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": -6.702666149369056,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 39.57974347283109,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -13.62383037245637,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": 14.356266253736116,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -0.40899341977650017,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -1.26358960620388,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": 1.860423271917309,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": 0.4054965115527696,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 53.4566340480986,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -4.251266168803927,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -3.638392805193322,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": -3.8668416777914194,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -1.1004766383222462,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "DELIB",
+    "total_trades": 169,
+    "profitable_tickers": 18,
+    "with_trades": 43,
+    "ev_per_trade": -3.2876560665466195,
+    "pooled_sr": -0.16348494151953463,
+    "deflated_sr": -0.29297244382667736,
+    "sr_expected_max": 0.13382580707068115,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 4,
+        "ev_per_trade": -18.84151233059243,
+        "win_rate": 0.5,
+        "realized_rr": 0.10484221929775264,
+        "sharpe": -0.7542800851322746,
+        "deflated": -2.105147433608902
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": 13.271373906486144,
+        "win_rate": 0.6,
+        "realized_rr": 5.666054109779434,
+        "sharpe": 0.5542061382010334,
+        "deflated": 0.07809232400848158
+      },
+      "a180_INTC": {
+        "trades": 5,
+        "ev_per_trade": -6.771821802001059,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -2.9418798500655847,
+        "deflated": -3885164.551022982
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 10.91053408043189,
+        "win_rate": 0.75,
+        "realized_rr": 22.938197977363927,
+        "sharpe": 1.4350289762262882,
+        "deflated": 0.22463109271040285
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": -28.55620242624109,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -2.3058711548623623,
+        "deflated": -3246208.6678469814
+      },
+      "a180_MRNA": {
+        "trades": 4,
+        "ev_per_trade": -43.32182060641528,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.1817312585488111,
+        "deflated": -1664303.4853676488
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 1,
+        "ev_per_trade": 0.2355557851240421,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": -7.8246565656564,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": 0.00938454208603264,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 2.0114028235325705,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -3.782163260135759,
+        "win_rate": 0.25,
+        "realized_rr": 2.308343466959162,
+        "sharpe": -0.10344821380989135,
+        "deflated": -0.9562568950181807
+      },
+      "a180_PLTR": {
+        "trades": 5,
+        "ev_per_trade": -0.6367206635670523,
+        "win_rate": 0.6,
+        "realized_rr": 0.5693624224145142,
+        "sharpe": -0.06917047558306363,
+        "deflated": -0.8315961491025159
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": 25.76531302200614,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 4,
+        "ev_per_trade": -22.60902083333314,
+        "win_rate": 0.25,
+        "realized_rr": 0.0391458200896567,
+        "sharpe": -0.7971451261878008,
+        "deflated": -3.8094807547337557
+      },
+      "a180_SNOW": {
+        "trades": 2,
+        "ev_per_trade": 2.6663819930072927,
+        "win_rate": 0.5,
+        "realized_rr": 5.547724900857382,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 5,
+        "ev_per_trade": -0.681585358581159,
+        "win_rate": 0.4,
+        "realized_rr": 0.48107669194030056,
+        "sharpe": -0.13242321962108333,
+        "deflated": -0.9037272426352451
+      },
+      "a180_SOUN": {
+        "trades": 5,
+        "ev_per_trade": -2.6966434294871227,
+        "win_rate": 0.4,
+        "realized_rr": 0.8621544787283612,
+        "sharpe": -0.21844939591559576,
+        "deflated": -0.9876484130343205
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_T": {
+        "trades": 1,
+        "ev_per_trade": -11.555021739130163,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": 2.665074451411107,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.8807031338818911,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 25,
+        "ev_per_trade": -2.7379803319818707,
+        "win_rate": 0.2,
+        "realized_rr": 2.333896438502718,
+        "sharpe": -0.1983632090081505,
+        "deflated": -0.5181363404173512
+      },
+      "ib5_CRWD": {
+        "trades": 23,
+        "ev_per_trade": -1.8676413657659354,
+        "win_rate": 0.5217391304347826,
+        "realized_rr": 0.6895026931691104,
+        "sharpe": -0.09895655365513463,
+        "deflated": -0.4543521227523656
+      },
+      "ib5_F": {
+        "trades": 29,
+        "ev_per_trade": 0.42702354902315764,
+        "win_rate": 0.3448275862068966,
+        "realized_rr": 2.070891105782625,
+        "sharpe": 0.02098635537725757,
+        "deflated": -0.2946199055147272
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": -2.960537353515269,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -7.073094671487437,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": 4.103033203603201,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -13.347096028583225,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -1.3596959558334172,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -0.9435748412206362,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -30.847775300456597,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 4.66877732998771,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 4.954638669521696,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": 3.102366722603211,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -4.4668651829006505,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -3.14493317571477,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 26.017688897354137,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": 4.914128193767656,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -3.7725446613584985,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 0.4264908488071084,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 4.49849427475849,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": 2.8875080213266715,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 6.978022196832732,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -5.011145014006687,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "HALIM",
+    "total_trades": 156,
+    "profitable_tickers": 22,
+    "with_trades": 44,
+    "ev_per_trade": 0.3979861931472985,
+    "pooled_sr": 0.020142307372316426,
+    "deflated_sr": -0.11601976345388713,
+    "sr_expected_max": 0.13486403167482172,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 3,
+        "ev_per_trade": 0.983881957968839,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.2591199979389476,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_CRWD": {
+        "trades": 3,
+        "ev_per_trade": -4.022771513537247,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.7095325774850689,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 2,
+        "ev_per_trade": -10.87390453549332,
+        "win_rate": 0.5,
+        "realized_rr": 0.6030875896074905,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 3,
+        "ev_per_trade": -12.464918617613607,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.08500885301936423,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_INTC": {
+        "trades": 3,
+        "ev_per_trade": -14.440888840515084,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.08448381300380492,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 2.375960241316127,
+        "win_rate": 0.5,
+        "realized_rr": 1.7888384450627373,
+        "sharpe": 0.2687813889553732,
+        "deflated": -0.5856738300215824
+      },
+      "a180_MARA": {
+        "trades": 2,
+        "ev_per_trade": -3.4196349529779715,
+        "win_rate": 0.5,
+        "realized_rr": 0.03905293736423827,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MRNA": {
+        "trades": 2,
+        "ev_per_trade": 1.842354785227652,
+        "win_rate": 0.5,
+        "realized_rr": 1.4851147777974412,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": -3.2912147812119628,
+        "win_rate": 0.5,
+        "realized_rr": 0.6099024237238115,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 2,
+        "ev_per_trade": -8.034541666666106,
+        "win_rate": 0.5,
+        "realized_rr": 0.4309764309764537,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 3,
+        "ev_per_trade": 28.802350149857773,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PFE": {
+        "trades": 3,
+        "ev_per_trade": 13.38056818181955,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 5.532777351630096,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": -14.807369682099129,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 2,
+        "ev_per_trade": 34.57275871449515,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": -20.053773504273234,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.13552034154041384,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 2,
+        "ev_per_trade": -6.291173925243539,
+        "win_rate": 0.5,
+        "realized_rr": 0.23028982578031112,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 3,
+        "ev_per_trade": -2.7855118223070856,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.8160373531728053,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": -4.856053179824509,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.5623297700678188,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 2,
+        "ev_per_trade": 7.4178411869888805,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_T": {
+        "trades": 3,
+        "ev_per_trade": 0.9185946557975928,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.733405133525952,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": -8.046015432098438,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 27,
+        "ev_per_trade": 3.0259909806768936,
+        "win_rate": 0.4444444444444444,
+        "realized_rr": 1.516550992428585,
+        "sharpe": 0.14965360400747088,
+        "deflated": -0.12830755916637054
+      },
+      "ib5_CRWD": {
+        "trades": 26,
+        "ev_per_trade": -7.386523087368203,
+        "win_rate": 0.23076923076923078,
+        "realized_rr": 0.6006935700694647,
+        "sharpe": -0.43961145925585393,
+        "deflated": -1.112158310461364
+      },
+      "ib5_F": {
+        "trades": 26,
+        "ev_per_trade": 1.8629370118694717,
+        "win_rate": 0.5384615384615384,
+        "realized_rr": 2.0028086009772728,
+        "sharpe": 0.2890549670904903,
+        "deflated": 0.009147887622701089
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": -7.477588423242497,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": 15.143362861604967,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -3.621041239183177,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": 58.02693401176574,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": 1.5252730623889863,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -18.378148166210224,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 12.025833814403228,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 2.244425924307454,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -1.358473673495393,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 2,
+        "ev_per_trade": 40.228523099334055,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": 1.396406498766112,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": -0.9633840135978382,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": 24.39173004924824,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -1.0327745057323414,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 5.402432276167057,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 14.835522511896063,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.1672023966661484,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -8.243570960753244,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 8.322617307668194,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": 22.294838802637813,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "HYST",
+    "total_trades": 152,
+    "profitable_tickers": 18,
+    "with_trades": 41,
+    "ev_per_trade": -3.348737107484933,
+    "pooled_sr": -0.23438494825352213,
+    "deflated_sr": -0.41279845245150365,
+    "sr_expected_max": 0.12118912864725481,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 3,
+        "ev_per_trade": -21.509515437111578,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.07473317164991125,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": -4.055558974358624,
+        "win_rate": 0.4,
+        "realized_rr": 0.6724353715300269,
+        "sharpe": -0.32660513698208793,
+        "deflated": -1.108716006755434
+      },
+      "a180_INTC": {
+        "trades": 5,
+        "ev_per_trade": -7.974161831991981,
+        "win_rate": 0.4,
+        "realized_rr": 0.2984942216961326,
+        "sharpe": -0.43576614770641836,
+        "deflated": -1.5235749792980033
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 0.5566841314377062,
+        "win_rate": 0.5,
+        "realized_rr": 1.2024737333902034,
+        "sharpe": 0.0784571014832787,
+        "deflated": -0.7742632299509985
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": 1.3199394233253334,
+        "win_rate": 0.6,
+        "realized_rr": 0.9043757595928412,
+        "sharpe": 0.14520885703832404,
+        "deflated": -0.6222947478301836
+      },
+      "a180_MRNA": {
+        "trades": 4,
+        "ev_per_trade": -8.685004102050897,
+        "win_rate": 0.25,
+        "realized_rr": 0.38789156934819635,
+        "sharpe": -0.9572447987102769,
+        "deflated": -1.9128558741754313
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 2,
+        "ev_per_trade": -11.590950790173345,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": 8.399841176470675,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 3.683767975920656,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 4,
+        "ev_per_trade": -0.3241148829764431,
+        "win_rate": 0.25,
+        "realized_rr": 2.5251469349328457,
+        "sharpe": -0.073412634172979,
+        "deflated": -0.9242115808574035
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -27.20459621433663,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.6270011155209734,
+        "deflated": -2416767.0174430073
+      },
+      "a180_PLTR": {
+        "trades": 4,
+        "ev_per_trade": -10.270864576070831,
+        "win_rate": 0.25,
+        "realized_rr": 0.6061925968567821,
+        "sharpe": -0.5288943229449601,
+        "deflated": -1.6862992459576205
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": -15.223291534566298,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.14860145737850025,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 3,
+        "ev_per_trade": 0.6799415204680139,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 0.579372664455785,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 3,
+        "ev_per_trade": -3.3688228424167477,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 0.6061126373055692,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 5,
+        "ev_per_trade": -11.713531047881155,
+        "win_rate": 0.4,
+        "realized_rr": 0.03558598040313211,
+        "sharpe": -0.9950308841195742,
+        "deflated": -2.9050782630377574
+      },
+      "a180_SOUN": {
+        "trades": 3,
+        "ev_per_trade": 2.8796408397702327,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 3.6802286518892418,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_VALE": {
+        "trades": 1,
+        "ev_per_trade": 7.0308000000008075,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 20,
+        "ev_per_trade": 0.20555340952822904,
+        "win_rate": 0.4,
+        "realized_rr": 1.3016519719743187,
+        "sharpe": 0.024303009876414636,
+        "deflated": -0.3564088242245673
+      },
+      "ib5_CRWD": {
+        "trades": 22,
+        "ev_per_trade": -3.67476945112633,
+        "win_rate": 0.5,
+        "realized_rr": 0.5999490661451433,
+        "sharpe": -0.18721435527323985,
+        "deflated": -0.5723063764551162
+      },
+      "ib5_F": {
+        "trades": 24,
+        "ev_per_trade": 0.9690977730477762,
+        "win_rate": 0.5,
+        "realized_rr": 1.4463331500736745,
+        "sharpe": 0.11911006143606481,
+        "deflated": -0.21567903175736775
+      },
+      "yf_AAPL": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -7.769321843694336,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": 4.277511964197434,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -13.347096028583225,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -1.3596959558334172,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -1.1341250970879964,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": 11.519332194024642,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 4.66877732998771,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": -6.897020375647963,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -0.4896833118602977,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": 1.2398593391059936,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": 1.396406498766112,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 9.927741782008848,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -7.488556609796036,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -15.279296453317247,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 7.155198486452523,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": -0.9466652115776061,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": 0.45497329226919914,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 7.730765156594357,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": 8.355131174158954,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "OFF",
+    "total_trades": 163,
+    "profitable_tickers": 19,
+    "with_trades": 43,
+    "ev_per_trade": -1.655756224932276,
+    "pooled_sr": -0.08348705917714058,
+    "deflated_sr": -0.21660731575926948,
+    "sr_expected_max": 0.13448965949932007,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 4,
+        "ev_per_trade": -21.58416280467023,
+        "win_rate": 0.25,
+        "realized_rr": 0.43045913219002896,
+        "sharpe": -0.8404915235172156,
+        "deflated": -1.902460162316774
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": -14.302380139860096,
+        "win_rate": 0.4,
+        "realized_rr": 0.2572233237040623,
+        "sharpe": -0.6385071886832626,
+        "deflated": -1.65161278712877
+      },
+      "a180_INTC": {
+        "trades": 5,
+        "ev_per_trade": -2.9922820205615093,
+        "win_rate": 0.4,
+        "realized_rr": 0.09084705398721073,
+        "sharpe": -0.7343854623954004,
+        "deflated": -2.092786646797449
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 8.177898582236914,
+        "win_rate": 0.25,
+        "realized_rr": 9.199826349319736,
+        "sharpe": 0.34633690054296085,
+        "deflated": -0.44922302928341296
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": -3.2561933795483298,
+        "win_rate": 0.4,
+        "realized_rr": 0.8737427362510757,
+        "sharpe": -0.22482182670805234,
+        "deflated": -0.995795815759229
+      },
+      "a180_MRNA": {
+        "trades": 4,
+        "ev_per_trade": 2.0872192939215584,
+        "win_rate": 0.5,
+        "realized_rr": 1.365690442862171,
+        "sharpe": 0.12898982963915243,
+        "deflated": -0.7198736924054759
+      },
+      "a180_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_NET": {
+        "trades": 1,
+        "ev_per_trade": 1.78105243790256,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": -45.59460370370448,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 4,
+        "ev_per_trade": -12.809515433909771,
+        "win_rate": 0.25,
+        "realized_rr": 0.04649887657161422,
+        "sharpe": -0.6572197836444411,
+        "deflated": -2.718857184548669
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -11.843285526315485,
+        "win_rate": 0.5,
+        "realized_rr": 0.2234574217692051,
+        "sharpe": -0.4849026895939597,
+        "deflated": -1.6200148805385568
+      },
+      "a180_PLTR": {
+        "trades": 5,
+        "ev_per_trade": -4.637165689238218,
+        "win_rate": 0.4,
+        "realized_rr": 0.763090554309324,
+        "sharpe": -0.30864618877324,
+        "deflated": -1.1026466467440077
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": 8.266923337867945,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 1.7501579432190628,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 4,
+        "ev_per_trade": -6.786130033891557,
+        "win_rate": 0.5,
+        "realized_rr": 0.5339999876583849,
+        "sharpe": -0.2839083797018713,
+        "deflated": -1.1489126273562078
+      },
+      "a180_SNOW": {
+        "trades": 4,
+        "ev_per_trade": -7.357074953253011,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.2778848910805327,
+        "deflated": -1898787.3513375104
+      },
+      "a180_SOFI": {
+        "trades": 5,
+        "ev_per_trade": 5.31084940356088,
+        "win_rate": 0.6,
+        "realized_rr": 1.1837847917877904,
+        "sharpe": 0.28792141505159285,
+        "deflated": -0.49953176158129137
+      },
+      "a180_SOUN": {
+        "trades": 4,
+        "ev_per_trade": -2.1694203124996587,
+        "win_rate": 0.5,
+        "realized_rr": 0.7906095376238457,
+        "sharpe": -0.10854440646713723,
+        "deflated": -0.96418887179633
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": 12.647358806769377,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 2.0914324865990177,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 25,
+        "ev_per_trade": -2.7029464368582574,
+        "win_rate": 0.36,
+        "realized_rr": 0.6772665341500671,
+        "sharpe": -0.2474363168184508,
+        "deflated": -0.6659248108631172
+      },
+      "ib5_CRWD": {
+        "trades": 20,
+        "ev_per_trade": 3.3154553831674916,
+        "win_rate": 0.6,
+        "realized_rr": 0.9848939125896803,
+        "sharpe": 0.14597314627350919,
+        "deflated": -0.20152386592914115
+      },
+      "ib5_F": {
+        "trades": 24,
+        "ev_per_trade": 2.8637061472467913,
+        "win_rate": 0.4583333333333333,
+        "realized_rr": 2.766586314478141,
+        "sharpe": 0.2669034060366401,
+        "deflated": -0.023594108615924377
+      },
+      "yf_AAPL": {
+        "trades": 1,
+        "ev_per_trade": 6.361896774643233,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 1,
+        "ev_per_trade": -10.470006258995667,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 1,
+        "ev_per_trade": 2.643204268849003,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -2.9461902483462246,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": -0.5111830145089753,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": 1.4267823612374317,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": 11.542581179013554,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": -3.1816423196628008,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 14.810735104012513,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": -0.4761942685374737,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": 73.39727915468616,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -23.419630925507388,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 21.757714474263206,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -6.4602196412264075,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -15.279296453317247,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 4.337378442210893,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 5.443784320214565,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -2.1672023966661484,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -8.5956184231759,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 9.219290403769595,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": 27.13843299211278,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  },
+  {
+    "variant": "PROBE",
+    "total_trades": 153,
+    "profitable_tickers": 19,
+    "with_trades": 41,
+    "ev_per_trade": -1.7540976589672266,
+    "pooled_sr": -0.09283134418435264,
+    "deflated_sr": -0.23175949197131698,
+    "sr_expected_max": 0.1366549711948233,
+    "tickers": {
+      "a180_AAPL": {
+        "trades": 4,
+        "ev_per_trade": -11.452413519571099,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": -1.3947102558787836,
+        "deflated": -10.331764756857648
+      },
+      "a180_CRWD": {
+        "trades": 2,
+        "ev_per_trade": -7.6656221327507765,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_DDOG": {
+        "trades": 4,
+        "ev_per_trade": -18.908293933583355,
+        "win_rate": 0.5,
+        "realized_rr": 0.10451062951885651,
+        "sharpe": -0.7540496968068878,
+        "deflated": -2.108075798190385
+      },
+      "a180_F": {
+        "trades": 5,
+        "ev_per_trade": -2.213790718954649,
+        "win_rate": 0.6,
+        "realized_rr": 0.4622344040222321,
+        "sharpe": -0.1292396888887389,
+        "deflated": -0.9011964956804914
+      },
+      "a180_INTC": {
+        "trades": 5,
+        "ev_per_trade": 0.9515739370770853,
+        "win_rate": 0.4,
+        "realized_rr": 1.7676206730116748,
+        "sharpe": 0.06310629441679642,
+        "deflated": -0.6971726157321313
+      },
+      "a180_IREN": {
+        "trades": 4,
+        "ev_per_trade": 8.07235230451941,
+        "win_rate": 0.75,
+        "realized_rr": 0.8622423823393244,
+        "sharpe": 0.4143974446137273,
+        "deflated": -0.4846486545065043
+      },
+      "a180_MARA": {
+        "trades": 5,
+        "ev_per_trade": -2.3549697615209526,
+        "win_rate": 0.6,
+        "realized_rr": 0.2270975790875471,
+        "sharpe": -0.433936960345938,
+        "deflated": -1.3036983997867355
+      },
+      "a180_MRNA": {
+        "trades": 4,
+        "ev_per_trade": -1.1049447669705197,
+        "win_rate": 0.25,
+        "realized_rr": 2.6675695467827234,
+        "sharpe": -0.05198798661049983,
+        "deflated": -0.902771715227677
+      },
+      "a180_MSFT": {
+        "trades": 1,
+        "ev_per_trade": 2.320514442916226,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NET": {
+        "trades": 3,
+        "ev_per_trade": -4.9647532408667985,
+        "win_rate": 0.3333333333333333,
+        "realized_rr": 1.4447602955077936,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NIO": {
+        "trades": 3,
+        "ev_per_trade": 6.752764705882533,
+        "win_rate": 0.6666666666666666,
+        "realized_rr": 2.00648276948119,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_NVDA": {
+        "trades": 4,
+        "ev_per_trade": 1.550348883561456,
+        "win_rate": 0.5,
+        "realized_rr": 1.8224350244442507,
+        "sharpe": 0.2617544480410025,
+        "deflated": -0.5888701586135258
+      },
+      "a180_PFE": {
+        "trades": 4,
+        "ev_per_trade": -20.251588014183305,
+        "win_rate": 0.25,
+        "realized_rr": 0.392077173497913,
+        "sharpe": -0.8727336090805304,
+        "deflated": -1.9555744244282742
+      },
+      "a180_PLTR": {
+        "trades": 3,
+        "ev_per_trade": 31.670383110642494,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_RDDT": {
+        "trades": 3,
+        "ev_per_trade": -33.6946099207654,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNAP": {
+        "trades": 2,
+        "ev_per_trade": -1.326341628959086,
+        "win_rate": 0.5,
+        "realized_rr": 0.7097571287966328,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SNOW": {
+        "trades": 2,
+        "ev_per_trade": 1.8595991326697585,
+        "win_rate": 0.5,
+        "realized_rr": 1.6171676716469707,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOFI": {
+        "trades": 2,
+        "ev_per_trade": 14.784498792271098,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -16.82391666666651,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "a180_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_TSLA": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_T": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "a180_VALE": {
+        "trades": 3,
+        "ev_per_trade": -10.08420202020155,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "ib5_AAPL": {
+        "trades": 23,
+        "ev_per_trade": 0.6507865440639607,
+        "win_rate": 0.2608695652173913,
+        "realized_rr": 3.224863918698635,
+        "sharpe": 0.03847035456089723,
+        "deflated": -0.3156546630253772
+      },
+      "ib5_CRWD": {
+        "trades": 22,
+        "ev_per_trade": 0.7867521365709947,
+        "win_rate": 0.4090909090909091,
+        "realized_rr": 1.6432901122142631,
+        "sharpe": 0.046111972843273244,
+        "deflated": -0.31587157060316023
+      },
+      "ib5_F": {
+        "trades": 26,
+        "ev_per_trade": 1.7799563300221246,
+        "win_rate": 0.6153846153846154,
+        "realized_rr": 1.1629148954695505,
+        "sharpe": 0.22215409780219228,
+        "deflated": -0.0871920101635995
+      },
+      "yf_AAPL": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_CRWD": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_DDOG": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_F": {
+        "trades": 1,
+        "ev_per_trade": -33.48330164287311,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_INTC": {
+        "trades": 1,
+        "ev_per_trade": 0.16689359281310184,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_IREN": {
+        "trades": 1,
+        "ev_per_trade": -1.1341250970879964,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MARA": {
+        "trades": 1,
+        "ev_per_trade": -40.13625171888229,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MRNA": {
+        "trades": 1,
+        "ev_per_trade": 2.1270291453243617,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_MSFT": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_NET": {
+        "trades": 1,
+        "ev_per_trade": 5.819991238410664,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NIO": {
+        "trades": 1,
+        "ev_per_trade": 0.2260484379388607,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_NVDA": {
+        "trades": 1,
+        "ev_per_trade": -2.2554616992580794,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PFE": {
+        "trades": 1,
+        "ev_per_trade": -2.3413945539216905,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_PLTR": {
+        "trades": 1,
+        "ev_per_trade": 5.946831677916051,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_RDDT": {
+        "trades": 1,
+        "ev_per_trade": -5.91978468839085,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNAP": {
+        "trades": 1,
+        "ev_per_trade": -13.580662685607164,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SNOW": {
+        "trades": 1,
+        "ev_per_trade": 4.337378442210893,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOFI": {
+        "trades": 1,
+        "ev_per_trade": 4.49849427475849,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SOUN": {
+        "trades": 1,
+        "ev_per_trade": -0.3245224585156531,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_SPY": {
+        "trades": 0,
+        "ev_per_trade": 0.0,
+        "win_rate": 0.0
+      },
+      "yf_TSLA": {
+        "trades": 1,
+        "ev_per_trade": -55.75566566606883,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_T": {
+        "trades": 1,
+        "ev_per_trade": 6.511679389762805,
+        "win_rate": 1.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      },
+      "yf_VALE": {
+        "trades": 1,
+        "ev_per_trade": -5.011145014006687,
+        "win_rate": 0.0,
+        "realized_rr": 0.0,
+        "sharpe": 0.0,
+        "deflated": 0.0
+      }
+    }
+  }
+]

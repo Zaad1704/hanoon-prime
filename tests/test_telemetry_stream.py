@@ -72,12 +72,36 @@ def api(tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _reset_handler_state():
-    """Reset the _H class-level cache/builder so per-request overrides in one
-    test never leak into later tests (order-independent)."""
-    yield
+    """Reset the _H class-level state so per-test overrides in one test
+    never leak into later tests (order-independent).
+
+    The api fixture calls TelemetryAPI.start(), which applies the real
+    security posture (bearer auth on, token bound, CORS reset) onto the
+    shared _H class — snapshot it first and restore it after, otherwise
+    later test files inherit a live-looking auth posture.
+    """
     from hanoon_prime.telemetry import _H
 
-    _H.inspection_builder = None
+    saved = {
+        k: getattr(_H, k)
+        for k in (
+            "bot",
+            "journal_path",
+            "extra_cache",
+            "extra_lock",
+            "cache",
+            "cache_lock",
+            "sse_registry",
+            "on_mutation",
+            "inspection_builder",
+            "auth_enabled",
+            "telemetry_token",
+            "cors_origin",
+        )
+    }
+    yield
+    for k, v in saved.items():
+        setattr(_H, k, v)
     _H.extra_cache.clear()
 
 

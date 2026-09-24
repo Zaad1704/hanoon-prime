@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import numpy as np
+
 from .cerebellum import compute_alpha
 from .cortex import Cortex, Thought
 from .edge import score_to_win_prob
@@ -422,19 +424,50 @@ def _process_bar(
     return position, state.last_z, trade
 
 
+def _coerce_bars(bars: BarSeries | dict) -> BarSeries:
+    """Coerce a raw OHLCV dict into a BarSeries (test fixtures hand these).
+
+    Accepts the same dict shape eyes.load_csv_dict returns; arrays are
+    normalized to float64 so downstream numpy math never sees raw lists.
+    """
+    if isinstance(bars, BarSeries):
+        return bars
+    try:
+        close = np.asarray(bars["close"], dtype=float)
+        high = np.asarray(bars["high"], dtype=float)
+        low = np.asarray(bars["low"], dtype=float)
+        volume = np.asarray(bars["volume"], dtype=float)
+    except (KeyError, TypeError) as exc:
+        raise TypeError(
+            "bars must be a BarSeries or a dict with "
+            "close/high/low/volume keys"
+        ) from exc
+    return BarSeries(
+        close=close,
+        high=high,
+        low=low,
+        volume=volume,
+        buy_volume=bars.get("buy_volume"),
+    )
+
+
 def simulate_ticker(
     ticker: str,
-    bars: BarSeries,
+    bars: BarSeries | dict,
     window: int = EDGE_LOOKBACK,
     brain: Optional[Hippocampus] = None,
     hooks: Optional[SimHooks] = None,
 ) -> tuple[list[Trade], list[float]]:
     """Run the JULI pipeline bar-by-bar. Returns (trades, equity_curve).
 
+    ``bars`` is a BarSeries; a raw OHLCV dict is coerced so harness and
+    test fixtures can hand over synthetic data directly.
+
     ``hooks`` (Phase-7 opt-in) can add a per-bar regime gate and extra alpha
     factors without changing the shipped decision path: see ``SimHooks``.
     Default None = shipped behavior unchanged.
     """
+    bars = _coerce_bars(bars)
     buy_vol = compute_buy_volume(bars.close, bars.high, bars.low, bars.volume)
     bars = BarSeries(
         bars.close,

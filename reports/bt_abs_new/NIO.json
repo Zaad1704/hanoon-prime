@@ -1,0 +1,16 @@
+{
+  "ticker": "NIO",
+  "total_trades": 12,
+  "wins": 0,
+  "losses": 12,
+  "win_rate": 0.0,
+  "expectancy": -1.0,
+  "ev_per_trade": -1.0,
+  "total_return_pct": -7.94,
+  "avg_win_pct": 0.0,
+  "avg_loss_pct": 0.6617,
+  "realized_rr": 0.0,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -4.3867,
+  "status": "UNPROFITABLE"
+}

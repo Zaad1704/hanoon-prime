@@ -1,0 +1,16 @@
+{
+  "ticker": "NET",
+  "total_trades": 14,
+  "wins": 0,
+  "losses": 14,
+  "win_rate": 0.0,
+  "expectancy": -1.0,
+  "ev_per_trade": -1.0,
+  "total_return_pct": -4.51,
+  "avg_win_pct": 0.0,
+  "avg_loss_pct": 0.3223,
+  "realized_rr": 0.0,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": -1.6939,
+  "status": "UNPROFITABLE"
+}

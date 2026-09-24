@@ -46,6 +46,26 @@ BOOTSTRAP_ITERS: int = 2000
 RNG = np.random.default_rng(0)  # deterministic deflation/re-sampling
 
 
+# ── Validation-scope disclosure (FIX-2026-09-23-09) ──
+# What this harness does and does NOT validate. Rendered into every report
+# via serialize() so the caveat travels with the numbers.
+VALIDATION_CAVEATS: list[str] = [
+    "Sim scores via the standalone cortex path (hands.simulate_ticker -> "
+    "Cortex.evaluate) with static production weights; the production "
+    "brain's MetaDNN gatekeeper (META_DNN_ENABLED=True, "
+    "brain/orchestrator.py::_dnn_gate_veto) is NOT exercised, so this "
+    "verdict does not cover DNN veto/sizing behavior.",
+    "The MetaDNN artifact (runtime/juli_meta_dnn.json) was trained "
+    "2026-09-22 on the same fixture panel (scripts/train_meta_dnn.py, "
+    "purged CV); the WFA's deflation penalty does not count the DNN's "
+    "own fitting trials.",
+    "Purge/embargo (AFML ch. 7) are intentionally NOT applied to the "
+    "walk-forward run: nothing is fitted inside a run, so there is no "
+    "training set to leak into. They protect the research DNN training "
+    "path (scripts/train_meta_dnn.py), not this harness.",
+]
+
+
 @dataclass
 class FoldResult:
     """One contiguous OOS fold for one ticker."""
@@ -223,6 +243,35 @@ def _fold_sharpe(pnl: list[float]) -> float:
     return float(np.mean(r) / (sd + 1e-12)) if sd > 0 else 0.0
 
 
+def _score_fold(
+    ticker: str,
+    data: dict[str, Any],
+    k: int,
+    start: int,
+    end: int,
+) -> FoldResult:
+    """Simulate one fold; score only trades closing inside [start, end)."""
+    fold_bars = _bars_for_fold(data, start, end)
+    trades, equity = simulate_ticker(ticker, fold_bars, EDGE_LOOKBACK)
+    # Only score trades whose exit bar is strictly inside [start, end).
+    # simulate_ticker's idx is relative to the folded slice; offset by warmup:
+    # warm = start - EDGE_LOOKBACK  → absolute_exit = relative + warm.
+    warm = start - EDGE_LOOKBACK
+    scored = [
+        t for t in trades if warm + t.exit_idx < end and warm + t.entry_idx >= start
+    ]
+    pnl = [t.pnl_pct for t in scored]
+    return FoldResult(
+        fold=k,
+        start=start,
+        end=end,
+        trades=scored,
+        ev_per_trade=float(np.mean(pnl)) if pnl else 0.0,
+        sharpe=_fold_sharpe(pnl),
+        pnl=pnl,
+    )
+
+
 def run_walk_forward(
     ticker: str,
     data: dict[str, Any],
@@ -233,32 +282,19 @@ def run_walk_forward(
     Static weights (production backtest path — learning is off). Trades are
     counted only when they complete inside the fold; a trade may open at the
     fold boundary but must CLOSE before ``end`` to be scored.
+
+    Honesty note (FIX-2026-09-23-09): purge/embargo are deliberately NOT
+    applied here. AFML purge/embargo exist to stop information leaking from
+    a test window into a TRAINING set — this run never fits anything (no
+    training set exists), so there is nothing to purge; wiring them would
+    be theater, not leakage control. See ``VALIDATION_CAVEATS`` for what
+    this harness does not validate (notably the live MetaDNN gatekeeper).
     """
     close = np.asarray(data["close"], dtype=float)
     total = len(close)
     out: list[FoldResult] = []
     for k, (start, end) in enumerate(fold_windows(total, folds)):
-        fold_bars = _bars_for_fold(data, start, end)
-        trades, equity = simulate_ticker(ticker, fold_bars, EDGE_LOOKBACK)
-        # Only score trades whose exit bar is strictly inside [start, end).
-        # simulate_ticker's idx is relative to the folded slice; offset by warmup:
-        # warm = start - EDGE_LOOKBACK  → absolute_exit = relative + warm.
-        warm = start - EDGE_LOOKBACK
-        scored = [
-            t for t in trades if warm + t.exit_idx < end and warm + t.entry_idx >= start
-        ]
-        pnl = [t.pnl_pct for t in scored]
-        out.append(
-            FoldResult(
-                fold=k,
-                start=start,
-                end=end,
-                trades=scored,
-                ev_per_trade=float(np.mean(pnl)) if pnl else 0.0,
-                sharpe=_fold_sharpe(pnl),
-                pnl=pnl,
-            )
-        )
+        out.append(_score_fold(ticker, data, k, start, end))
     return out
 
 
@@ -297,9 +333,10 @@ def deflated_sharpe(results: dict[str, list[FoldResult]]) -> float:
     """Monte-Carlo deflated Sharpe.
 
     Builds the null distribution of the BEST Sharpe obtainable by chance
-    over ``n_trials`` independent trials (tickers × folds with trades),
-    then returns the percentile rank of the observed pooled Sharpe against
-    that null. A rank below 0.05 = no evidence of edge after deflation.
+    over ``n_trials`` independent trials (admissible-ticker × fold cells
+    with ≥2 trades; see ``_count_trials``), then returns the percentile
+    rank of the observed pooled Sharpe against that null. A rank below
+    0.05 = no evidence of edge after deflation.
     """
     r = _pooled_returns(results)
     if r.size < 2:
@@ -325,9 +362,19 @@ def deflated_sharpe(results: dict[str, list[FoldResult]]) -> float:
 
 
 def _count_trials(results: dict[str, list[FoldResult]]) -> int:
-    """Number of independent trials (ticker×fold with ≥2 trades)."""
+    """Trial cells for deflation: admissible ticker×fold with ≥2 trades.
+
+    FIX-2026-09-23-10: the deflation penalty must be calibrated to the SAME
+    ticker set that feeds the pooled Sharpe (``_pooled_returns`` admits
+    only tickers with ≥ MIN_TRADES OOS trades). Counting cells over tickers
+    whose trades never reach the pooled array over-penalizes thin
+    universes. Direction of effect: fewer trials → a lower 95th-percentile
+    best-by-chance Sharpe → the deflated edge moves UP (less conservative).
+    """
     n = 0
     for folds in results.values():
+        if total_oos_trades(folds) < MIN_TRADES:
+            continue
         n += sum(1 for w in folds if w.total_trades >= 2)
     return n
 
@@ -497,6 +544,8 @@ def serialize(verdict: UniverseVerdict) -> dict[str, Any]:
         "pbo": round(verdict.pbo, 4),
         "verdict": verdict.verdict,
         "detail": verdict.detail,
+        # FIX-2026-09-23-09: the scope disclosure travels with the numbers.
+        "validation_caveats": list(VALIDATION_CAVEATS),
     }
 
 

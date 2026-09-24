@@ -92,11 +92,13 @@ class TestReplayWeights:
         s = _fresh()
         weighted = s.replay_weights([(_pat(), False)])
         assert weighted[0][1] == SLEEP_LOSS_WEIGHT
+        assert weighted[0][2] is False  # explicit loser polarity survives
 
     def test_winners_weighted_once(self):
         s = _fresh()
         weighted = s.replay_weights([(_pat(), True)])
         assert weighted[0][1] == SLEEP_WIN_WEIGHT
+        assert weighted[0][2] is True  # explicit winner polarity survives
 
     def test_interleaved_historical_capped(self):
         s = _fresh()
@@ -141,8 +143,9 @@ class TestEngineReplayList:
         e = self._engine(mem)
         patterns = e.select_patterns()
         assert len(patterns) == 1
-        _, weight = patterns[0]
+        _, weight, won = patterns[0]
         assert weight == SLEEP_LOSS_WEIGHT
+        assert won is False
 
     def test_default_weight_uses_win_bias_for_winning_pattern(self):
         mem = AttractorMemory()
@@ -152,18 +155,19 @@ class TestEngineReplayList:
         e = self._engine(mem)
         patterns = e.select_patterns()
         assert len(patterns) == 1
-        _, weight = patterns[0]
+        _, weight, won = patterns[0]
         assert weight == SLEEP_WIN_WEIGHT
+        assert won is True
 
     def test_replay_list_overrides_attractors(self):
-        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT, False)]
         e = self._engine()
         patterns = e.select_patterns(replay_list=override)
         assert len(patterns) == 1
         assert patterns[0][1] == SLEEP_LOSS_WEIGHT
 
     def test_run_cycle_uses_replay_list(self):
-        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT, False)]
         e = self._engine()
         result = e.run_cycle(duration_sec=0.1, replay_list=override)
         assert isinstance(result, SleepResult)
@@ -174,14 +178,14 @@ class TestEngineReplayList:
         assert result.patterns_replayed == 0
 
     def test_run_cycle_records_last_replay(self):
-        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT, False)]
         e = self._engine()
         result = e.run_cycle(duration_sec=0.1, replay_list=override)
         assert e.last_replay is result
         assert e.last_replay is not None and e.last_replay.patterns_replayed == 1
 
     def test_snapshot_includes_last_replay(self):
-        override = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        override = [(_pat(0), SLEEP_LOSS_WEIGHT, False)]
         e = self._engine()
         e.run_cycle(duration_sec=0.1, replay_list=override)
         snap = e.snapshot()
@@ -196,7 +200,7 @@ class TestEngineReplayList:
         assert snap["last_replay"] is None
 
     def test_truncates_large_replay_list(self):
-        big = [(_pat(i % 3), SLEEP_WIN_WEIGHT) for i in range(150)]
+        big = [(_pat(i % 3), SLEEP_WIN_WEIGHT, True) for i in range(150)]
         e = self._engine()
         patterns = e.select_patterns(replay_list=big)
         assert len(patterns) == e.MAX_PATTERNS
@@ -233,7 +237,7 @@ class TestConsolidationWiring:
                 memory=mem,
             ),
         )
-        weighted = [(_pat(0), SLEEP_LOSS_WEIGHT)]
+        weighted = [(_pat(0), SLEEP_LOSS_WEIGHT, False)]
         result = eng.run_sleep_replay(replay_list=weighted, duration_sec=0.1)
         assert isinstance(result, SleepResult)
         assert result.patterns_replayed == 1
